@@ -1,0 +1,16 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Data Files (Don't upload heavy data!)
+data/
+
+# Experiment Results & Plots
+results/
+plots/
+*.png
+*.jpg
+
+# Logs
+*.log

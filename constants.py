@@ -1,0 +1,23 @@
+DEBUG = True # Set to True for quick test
+
+DATA_DIR = 'data/'
+MIBI_GUT_DIR_PATH = DATA_DIR + 'MIBIGutCsv/'
+
+RESULTS_BASE_DIR = 'results/'
+if DEBUG:
+    RESULTS_DIR = RESULTS_BASE_DIR + 'debug_run/'
+else:
+    RESULTS_DIR = RESULTS_BASE_DIR + 'full_run/'
+
+RESULTS_DATA_DIR = RESULTS_DIR + 'data/'
+RESULTS_PLOTS_DIR = RESULTS_DIR + 'plots/'
+RESULTS_ML_DIR = RESULTS_DIR + 'ml_refined_robust_benchmarks/'
+RESULTS_ML_DATA_DIR = RESULTS_ML_DIR + 'data/'
+RESULTS_ML_PLOTS_DIR = RESULTS_ML_DIR + 'plots/'
+
+RESULTS_SIMPLE_STATS_DIR = RESULTS_DIR + 'simple_stats_benchmarks/'
+RESULTS_SIMPLE_STATS_DATA_DIR = RESULTS_SIMPLE_STATS_DIR + 'data/'
+RESULTS_SIMPLE_STATS_PLOTS_DIR = RESULTS_SIMPLE_STATS_DIR + 'plots/'
+
+
+DEBUG_FOVS_PER_GROUP = 10

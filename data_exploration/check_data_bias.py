@@ -4,13 +4,13 @@ import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from constants import MIBI_GUT_DIR_PATH
+from constants import MIBI_GUT_DIR_PATH, RESULTS_DIR
 
 # Configuration
 # We need to load the BIOPSY metadata, as that's the "Unit of Analysis".
 # The cell table is too granular.
 DATA_PATH = MIBI_GUT_DIR_PATH + "biopsy_metadata.csv"
-OUTPUT_DIR = "experiment_results/data_bias_report"
+OUTPUT_DIR = RESULTS_DIR + "data_bias_report/"
 
 TARGETS = [
     "Pathological stage", 

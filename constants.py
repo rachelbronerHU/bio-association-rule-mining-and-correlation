@@ -1,4 +1,4 @@
-DEBUG = True # Set to True for quick test
+DEBUG = False # Set to True for quick test
 
 DATA_DIR = 'data/'
 MIBI_GUT_DIR_PATH = DATA_DIR + 'MIBIGutCsv/'

@@ -5,6 +5,7 @@ import logging
 import os
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import fpgrowth, association_rules
+from statsmodels.stats.multitest import multipletests
 import transactions as tx
 
 # Setup Worker Logger
@@ -19,14 +20,14 @@ def select_top_rules(rules, n=2000):
     return pd.concat([top_pos, top_neg]).drop_duplicates()
 
 def mine_rules_fpgrowth(transactions, config, method="BAG"):
-    if not transactions: return pd.DataFrame()
+    if not transactions: return pd.DataFrame(), 0
     
     te = TransactionEncoder()
     te_ary = te.fit(transactions).transform(transactions)
     df_trans = pd.DataFrame(te_ary, columns=te.columns_)
     
     frequent_itemsets = fpgrowth(df_trans, min_support=config["MIN_SUPPORT"], use_colnames=True)
-    if frequent_itemsets.empty: return pd.DataFrame()
+    if frequent_itemsets.empty: return pd.DataFrame(), 0
         
     rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=config["MIN_CONFIDENCE"])
     
@@ -53,15 +54,19 @@ def mine_rules_fpgrowth(transactions, config, method="BAG"):
             rules["has_center_ant"] = rules["antecedents"].apply(lambda x: any("_CENTER" in item for item in x))
             rules = rules[rules["has_center_ant"]].drop(columns=["has_center_ant"])
 
-        if rules.empty: return pd.DataFrame()
+        if rules.empty: return pd.DataFrame(), 0
 
         rules["antecedents"] = rules["antecedents"].apply(lambda x: tuple(sorted(list(x))))
         rules["consequents"] = rules["consequents"].apply(lambda x: tuple(sorted(list(x))))
         # rules["rule_str"] = rules.apply(lambda x: f"{' + '.join(x['antecedents'])} -> {' + '.join(x['consequents'])}", axis=1)
         
-        rules = select_top_rules(rules, n=2000)
+        # --- Redundancy Filter ---
+        rules, n_removed = _filter_redundant_rules(rules, config)
         
-    return rules
+        rules = select_top_rules(rules, n=2000)
+        return rules, n_removed
+        
+    return rules, 0
 
 def check_rule_in_transactions(rule_row, transactions, config):
     """
@@ -151,6 +156,7 @@ def validate_rules_exact(neighborhoods, cell_types, rules_df, config, method):
                 
     p_values = (better_counts + 1) / (n_perms + 1)
     rules_df["p_value"] = p_values
+    rules_df["p_value_adj"] = _apply_fdr_correction(p_values)
     return rules_df
 
 def process_single_sample(sample_id, group_val, df_sample, method, config):
@@ -172,9 +178,12 @@ def process_single_sample(sample_id, group_val, df_sample, method, config):
     
     # 3. Mine
     t0 = time.time()
-    rules = mine_rules_fpgrowth(trans, config, method=method)
+    rules, n_removed = mine_rules_fpgrowth(trans, config, method=method)
     t_mine = time.time() - t0
     n_raw = len(rules)
+    
+    if stats is None: stats = {}
+    stats["redundant_removed"] = n_removed
     
     # 4. Validate (Exact Re-check)
     n_val = 0
@@ -203,3 +212,58 @@ def _filter_rule_by_scores_mask(config, lift, leverage, conviction):
     is_positive = (lift >= config["MIN_LIFT"]) & (leverage >= config["MIN_LEVERAGE"]) & (conviction >= min_conv)
     is_negative = (lift <= config["MAX_NEGATIVE_LIFT"])
     return is_positive | is_negative
+
+def _apply_fdr_correction(p_values):
+    """
+    Applies Benjamini-Hochberg correction to p-values.
+    Returns adjusted p-values.
+    """
+    if len(p_values) == 0: return []
+    reject, pvals_corrected, _, _ = multipletests(p_values, method='fdr_bh')
+    return pvals_corrected
+
+def _filter_redundant_rules(rules, config):
+    """
+    Filters redundant rules based on Occam's Razor.
+    A rule is redundant if a simpler rule (subset antecedent) exists with similar or better lift.
+    Reference: https://www.bayardo.org/ps/icde99.pdf
+    """
+    if rules.empty: return rules, 0
+    
+    threshold_factor = config.get("MIN_REDUNDANCY_LIFT_IMPROVEMENT", 1.1)
+    indices_to_drop = set()
+    
+    # Pre-process: Create frozensets for antecedents once
+    rules['ant_frozen'] = rules['antecedents'].apply(frozenset)
+    
+    # Group by Consequent (we only compare rules predicting the same thing)
+    grouped = rules.groupby('consequents')
+    
+    for _, group in grouped:
+        # Sort by antecedent length (shortest first)
+        sorted_group = group.sort_values(by="len_ant", ascending=True)
+        rows = list(sorted_group.itertuples())
+        
+        # Iterate through potential COMPLEX rules
+        for i in range(len(rows)):
+            r_complex = rows[i]
+            
+            # Optimization: If complex rule is already dropped, skip
+            if r_complex.Index in indices_to_drop: continue
+
+            # Check against all simpler rules
+            for j in range(i):
+                r_simple = rows[j]
+                
+                # Check subset: Is Simple a subset of Complex?
+                if r_simple.ant_frozen < r_complex.ant_frozen:
+                     # Check Lift: Keep complex ONLY if it improves lift significantly
+                     if r_complex.lift <= (r_simple.lift * threshold_factor):
+                        indices_to_drop.add(r_complex.Index)
+                        break # Found one simpler rule that makes this redundant
+                        
+    count_removed = len(indices_to_drop)
+    filtered_rules = rules.drop(index=list(indices_to_drop)).drop(columns=['ant_frozen'])
+    
+    return filtered_rules, count_removed
+

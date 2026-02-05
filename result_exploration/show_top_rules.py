@@ -1,19 +1,15 @@
 import pandas as pd
 import os
-import glob
 
-from constants import RESULTS_DATA_DIR
-
-
-RESULTS_DIR = RESULTS_DATA_DIR
+DATA_DIR = "results/full_run/data"
 METHODS = ["BAG", "CN", "KNN_R", "WINDOW", "GRID"]
 
-def analyze_results():
+def show_top_rules():
     print(f"{'METHOD':<10} | {'RULE':<60} | {'LIFT':<8} | {'CONF':<8} | {'CONV':<8} | {'SUP':<8} | {'FDR':<8}")
     print("-" * 130)
     
     for method in METHODS:
-        file_path = os.path.join(RESULTS_DIR, f"results_{method}.csv")
+        file_path = os.path.join(DATA_DIR, f"results_{method}.csv")
         if not os.path.exists(file_path):
             print(f"{method:<10} | File not found")
             continue
@@ -24,18 +20,24 @@ def analyze_results():
                 print(f"{method:<10} | No rules found")
                 continue
                 
-            # Check if Conviction exists (it should)
+            # Check if Conviction exists
             if "Conviction" not in df.columns:
                 print(f"{method:<10} | 'Conviction' column missing")
                 continue
 
+            # Create Rule ID for deduplication
+            df["Rule_Str"] = df["Antecedents"].astype(str) + " -> " + df["Consequents"].astype(str)
+
             # Sort by Lift descending
-            top_rules = df.sort_values(by="Lift", ascending=False).head(3)
+            df_sorted = df.sort_values(by="Lift", ascending=False)
             
-            for _, row in top_rules.iterrows():
+            # Keep top entry for each unique rule string
+            unique_rules = df_sorted.drop_duplicates(subset=["Rule_Str"], keep="first").head(5)
+            
+            for _, row in unique_rules.iterrows():
                 # Format Rule String
-                ant = row['Antecedents'].replace("'", "").replace("[", "").replace("]", "")
-                con = row['Consequents'].replace("'", "").replace("[", "").replace("]", "")
+                ant = str(row['Antecedents']).replace("'", "").replace("[", "").replace("]", "")
+                con = str(row['Consequents']).replace("'", "").replace("[", "").replace("]", "")
                 rule_str = f"{ant} -> {con}"
                 
                 # Truncate rule string if too long
@@ -53,4 +55,4 @@ def analyze_results():
             print(f"Error reading {method}: {e}")
 
 if __name__ == "__main__":
-    analyze_results()
+    show_top_rules()

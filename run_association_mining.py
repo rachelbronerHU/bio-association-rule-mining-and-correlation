@@ -22,19 +22,19 @@ BIOPSY_COL = "Biopsy_ID"
 CONFIG = {
     "RADIUS": 30.0,
     "K_NEIGHBORS": 30,
-    "WINDOW_SIZE": 30.0,
-    "WINDOW_STEP": 15.0,
-    "MIN_CELLS_PER_PATCH": 2,
+    "GRID_WINDOW_SIZE": 30.0,
+    "WINDOW_STEP_FRACTION": 0.5,
     "MIN_SUPPORT": 0.01,
     "MIN_CONFIDENCE": 0.7,
     "MIN_LIFT": 1.2,
     "MIN_LEVERAGE": 0.005,
     "MIN_CONVICTION": 1.0,
+    "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
     "MAX_NEGATIVE_LIFT": 0.8,
     "MAX_RULE_LENGTH": 4,
     "TARGET_CELLS": 30,
-    "STEP_FRACTION": 0.5,
-    "N_PERMUTATIONS": 5 if DEBUG else 100
+    "MIN_CELLS_PER_PATCH": 2,
+    "N_PERMUTATIONS": 5 if DEBUG else 1000
 }
 
 # --- 1. DATA LOADING ---
@@ -85,7 +85,8 @@ def save_results(results, df_biopsy, df_fovs, suffix):
                 "Confidence": row["confidence"],
                 "Conviction": row["conviction"],
                 "Support": row["support"],
-                "P_Value": row["p_value"]
+                "P_Value": row["p_value"],
+                "FDR": row["p_value_adj"]
             })
             
     df_flat = pd.DataFrame(flat_data)
@@ -139,7 +140,7 @@ def run_pipeline():
             tasks.append((sample_id, group_val, df_sample, method, CONFIG))
             
         results_collection = []
-        stats_collection = {"sizes": [], "orig_counts": [], "kept_counts": []}
+        stats_collection = {"sizes": [], "orig_counts": [], "kept_counts": [], "redundant_removed": []}
         
         with ProcessPoolExecutor() as executor:
             # Map returns iterator in order
@@ -155,6 +156,7 @@ def run_pipeline():
                             stats_collection["sizes"].extend(res["Stats"].get("sizes", []))
                             stats_collection["orig_counts"].append(res["Stats"].get("orig", 0))
                             stats_collection["kept_counts"].append(res["Stats"].get("kept", 0))
+                            stats_collection["redundant_removed"].append(res["Stats"].get("redundant_removed", 0))
                 except Exception as e:
                     logger.error(f"Task Failed: {e}")
 
@@ -162,7 +164,7 @@ def run_pipeline():
         save_results(results_collection, df_biopsy, df_fovs, suffix=method)
         
         # Save Stats
-        out_dir = "experiment_results/debug_run/data" if DEBUG else "experiment_results/full_run/data"
+        out_dir = RESULTS_DATA_DIR
         with open(f"{out_dir}/stats_{method}.json", "w") as f:
             json.dump(stats_collection, f)
             

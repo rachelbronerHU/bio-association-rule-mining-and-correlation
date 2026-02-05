@@ -53,7 +53,7 @@ def get_neighborhoods(coords, method, config):
     elif method == "WINDOW":
         # Dynamic Logic
         target_cells = config.get("TARGET_CELLS", 30)
-        step_fraction = config.get("STEP_FRACTION", 0.5)
+        step_fraction = config.get("WINDOW_STEP_FRACTION", 0.5)
         
         x_min, x_max = coords[:, 0].min(), coords[:, 0].max()
         y_min, y_max = coords[:, 1].min(), coords[:, 1].max()
@@ -85,7 +85,7 @@ def get_neighborhoods(coords, method, config):
                     neighborhoods.append(indices)
 
     elif method == "GRID":
-        size = config["WINDOW_SIZE"]
+        size = config["GRID_WINDOW_SIZE"]
         step = size # Non-overlapping
         
         x_max, y_max = coords[:,0].max(), coords[:,1].max()
@@ -160,6 +160,6 @@ def get_window(coords, cell_types, target_cells, step_fraction):
     return build_transactions_from_neighborhoods(nb, cell_types, "WINDOW")
 
 def get_grid(coords, cell_types, size):
-    config = {"WINDOW_SIZE": size}
+    config = {"GRID_WINDOW_SIZE": size}
     nb = get_neighborhoods(coords, "GRID", config)
     return build_transactions_from_neighborhoods(nb, cell_types, "GRID")

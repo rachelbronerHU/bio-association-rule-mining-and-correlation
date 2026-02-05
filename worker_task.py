@@ -19,7 +19,7 @@ def select_top_rules(rules, n=2000):
     top_neg = rules.sort_values("lift", ascending=True).head(half)
     return pd.concat([top_pos, top_neg]).drop_duplicates()
 
-def mine_rules_fpgrowth(transactions, config, method="BAG"):
+def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id: str = None):
     if not transactions: return pd.DataFrame(), 0
     
     te = TransactionEncoder()
@@ -45,6 +45,9 @@ def mine_rules_fpgrowth(transactions, config, method="BAG"):
     
     rules = rules[is_valid]
     
+    # Snapshot of Raw Rules (valid scores, before structural/redundancy filters)
+    raw_rules = rules.copy() if not rules.empty else pd.DataFrame()
+    
     if not rules.empty:
         rules["len_ant"] = rules["antecedents"].apply(len)
         rules["len_con"] = rules["consequents"].apply(len)
@@ -54,7 +57,7 @@ def mine_rules_fpgrowth(transactions, config, method="BAG"):
             rules["has_center_ant"] = rules["antecedents"].apply(lambda x: any("_CENTER" in item for item in x))
             rules = rules[rules["has_center_ant"]].drop(columns=["has_center_ant"])
 
-        if rules.empty: return pd.DataFrame(), 0
+        if rules.empty: return pd.DataFrame(), 0, raw_rules
 
         rules["antecedents"] = rules["antecedents"].apply(lambda x: tuple(sorted(list(x))))
         rules["consequents"] = rules["consequents"].apply(lambda x: tuple(sorted(list(x))))
@@ -64,9 +67,9 @@ def mine_rules_fpgrowth(transactions, config, method="BAG"):
         rules, n_removed = _filter_redundant_rules(rules, config)
         
         rules = select_top_rules(rules, n=2000)
-        return rules, n_removed
+        return rules, n_removed, raw_rules
         
-    return rules, 0
+    return rules, 0, raw_rules
 
 def check_rule_in_transactions(rule_row, transactions, config):
     """
@@ -178,7 +181,7 @@ def process_single_sample(sample_id, group_val, df_sample, method, config):
     
     # 3. Mine
     t0 = time.time()
-    rules, n_removed = mine_rules_fpgrowth(trans, config, method=method)
+    rules, n_removed, raw_rules = mine_rules_fpgrowth(trans, config, method=method, sample_id=sample_id)
     t_mine = time.time() - t0
     n_raw = len(rules)
     
@@ -204,6 +207,7 @@ def process_single_sample(sample_id, group_val, df_sample, method, config):
         "Sample": sample_id,
         "Group": group_val,
         "Rules": rules_v,
+        "RawRules": raw_rules,
         "Stats": stats
     }
 

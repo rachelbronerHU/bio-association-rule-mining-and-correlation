@@ -6,7 +6,7 @@ import logging
 import os
 import json
 from concurrent.futures import ProcessPoolExecutor
-from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR
+from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES
 import worker_task
 
 # Setup Logging
@@ -70,13 +70,16 @@ def get_samples_to_process(df):
     return selected_samples
 
 # --- 2. OUTPUT UTILS ---
-def save_results(results, df_biopsy, df_fovs, suffix):
+def save_results(results, df_biopsy, df_fovs, suffix, data_key="Rules"):
     logger.info(f"Saving Results ({suffix})...")
     flat_data = []
     for res in results:
-        if res["Rules"].empty: continue
-        for _, row in res["Rules"].iterrows():
-            flat_data.append({
+        # Check if key exists and isn't empty
+        if data_key not in res or res[data_key].empty: continue
+        
+        for _, row in res[data_key].iterrows():
+            # Basic dict
+            entry = {
                 "Group": res["Group"],
                 "FOV": res["Sample"],
                 "Antecedents": str(list(row["antecedents"])),
@@ -85,9 +88,12 @@ def save_results(results, df_biopsy, df_fovs, suffix):
                 "Confidence": row["confidence"],
                 "Conviction": row["conviction"],
                 "Support": row["support"],
-                "P_Value": row["p_value"],
-                "FDR": row["p_value_adj"]
-            })
+            }
+            # Optional fields
+            if "p_value" in row: entry["P_Value"] = row["p_value"]
+            if "p_value_adj" in row: entry["FDR"] = row["p_value_adj"]
+            
+            flat_data.append(entry)
             
     df_flat = pd.DataFrame(flat_data)
     if df_flat.empty: return
@@ -132,6 +138,10 @@ def run_pipeline():
     for method in methods:
         logger.info(f"=== STARTING METHOD: {method} ===")
         
+        # Ensure Raw Rules Dir exists
+        if SAVE_RAW_RULES:
+            os.makedirs(os.path.join(RESULTS_DATA_DIR, "raw_rules", method), exist_ok=True)
+        
         # Prepare Inputs
         tasks = []
         for sample_id in samples:
@@ -160,8 +170,12 @@ def run_pipeline():
                 except Exception as e:
                     logger.error(f"Task Failed: {e}")
 
-        # Save Batch
-        save_results(results_collection, df_biopsy, df_fovs, suffix=method)
+        # Save Batch (Final Rules)
+        save_results(results_collection, df_biopsy, df_fovs, suffix=method, data_key="Rules")
+        
+        # Save Batch (Raw Rules)
+        if SAVE_RAW_RULES:
+            save_results(results_collection, df_biopsy, df_fovs, suffix=f"{method}_RAW", data_key="RawRules")
         
         # Save Stats
         out_dir = RESULTS_DATA_DIR

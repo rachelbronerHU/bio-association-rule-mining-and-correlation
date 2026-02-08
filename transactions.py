@@ -1,6 +1,9 @@
+import logging
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 from collections import Counter
+
+logger = logging.getLogger("transactions")
 
 # Defaults
 MIN_CELLS = 2
@@ -52,11 +55,12 @@ def get_neighborhoods(coords, method, config):
             
     elif method == "WINDOW":
         # Dynamic Logic
-        target_cells = config.get("TARGET_CELLS", 30)
+        target_cells = config.get("TARGET_CELLS", 25)
         step_fraction = config.get("WINDOW_STEP_FRACTION", 0.5)
         
         x_min, x_max = coords[:, 0].min(), coords[:, 0].max()
         y_min, y_max = coords[:, 1].min(), coords[:, 1].max()
+
         num_cells = len(coords)
 
         area = (x_max - x_min) * (y_max - y_min)
@@ -75,6 +79,7 @@ def get_neighborhoods(coords, method, config):
         else:
              y_starts = np.arange(y_min, y_max - window_size + step_size, step_size)
         
+        logger.info(f"WINDOW Config: target_cells={target_cells}, density={density:.2f}, window_size={window_size:.1f}, step_size={step_size:.1f}, x_steps={len(x_starts)}, y_steps={len(y_starts)}")
         for x_s in x_starts:
             for y_s in y_starts:
                 x_e, y_e = x_s + window_size, y_s + window_size

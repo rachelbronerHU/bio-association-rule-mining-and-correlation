@@ -115,7 +115,7 @@ def plot_fov_rule_highlight(ax, df_fov, antecedents, consequents, color_map):
     ax.invert_yaxis()
     # No legend on this side as requested
 
-def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=False):
+def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=False, exclude_containing_self_rules=False):
     results_path = os.path.join(RESULTS_DIR, f"results_{method_name}.csv")
     if not os.path.exists(results_path):
         print(f"Skipping {method_name}: File not found.")
@@ -131,9 +131,19 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
     # Create a unique rule identifier for deduplication
     rules_df['Rule_Str'] = rules_df['Antecedents'] + "->" + rules_df['Consequents']
 
-    # Filter out self-rules (same cell type to same cell type) if requested
-    if exclude_self_rules:
-        # We need to parse to check equality of content, not just string equality
+    # 1. Filter: Exclude Containing Self (Stricter)
+    if exclude_containing_self_rules:
+        # Check intersection: if any item is in both antecedent and consequent
+        def has_overlap(row):
+            ants = parse_rule_list(row['Antecedents'])
+            cons = parse_rule_list(row['Consequents'])
+            return not set(ants).isdisjoint(set(cons))
+        
+        rules_df = rules_df[~rules_df.apply(has_overlap, axis=1)]
+        
+    # 2. Filter: Exclude Exact Self Rules (Simpler)
+    # Only run if strict filter wasn't applied (since strict covers simple)
+    elif exclude_self_rules:
         def is_self_rule(row):
             ants = parse_rule_list(row['Antecedents'])
             cons = parse_rule_list(row['Consequents'])
@@ -215,7 +225,6 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
         center_x = (box_full.x0 + box_rule.x1) / 2
         
         # Calculate dynamic offset to keep title specific distance (in inches) above plot
-        # regardless of how many rows there are.
         TITLE_OFFSET_INCHES = 0.25
         offset_frac = TITLE_OFFSET_INCHES / total_fig_height
         
@@ -224,7 +233,14 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
         fig.text(center_x, top_y, title_str, ha='center', va='bottom', 
                  fontsize=12, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='lightgray'))
 
-    out_path = os.path.join(OUTPUT_DIR, f"{method_name}_top_rules.png")
+    # Determine Output Filename
+    suffix = ""
+    if exclude_containing_self_rules:
+        suffix = "_no_containing_self"
+    elif exclude_self_rules:
+        suffix = "_no_self"
+
+    out_path = os.path.join(OUTPUT_DIR, f"{method_name}_top_rules{suffix}.png")
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved visualization to {out_path}")
@@ -232,7 +248,8 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
 def main():
     parser = argparse.ArgumentParser(description="Visualize Top Spatial Rules")
     parser.add_argument("--top_n", type=int, default=3, help="Number of top rules to visualize per method")
-    parser.add_argument("--exclude_self_rules", action="store_true", help="If set, rules where antecedents == consequents are ignored.")
+    parser.add_argument("--exclude_self_rules", action="store_true", help="Filter out rules where antecedent set EQUALS consequent set.")
+    parser.add_argument("--exclude_containing_self_rules", action="store_true", help="Filter out rules where ANY cell type appears in both antecedent and consequent.")
     args = parser.parse_args()
 
     if not os.path.exists(OUTPUT_DIR):
@@ -247,7 +264,10 @@ def main():
     color_map = get_color_map(all_cell_types)
 
     for method in METHODS:
-        visualize_method(method, cell_df, color_map, top_n=args.top_n, exclude_self_rules=args.exclude_self_rules)
+        visualize_method(method, cell_df, color_map, 
+                         top_n=args.top_n, 
+                         exclude_self_rules=args.exclude_self_rules,
+                         exclude_containing_self_rules=args.exclude_containing_self_rules)
 
 if __name__ == "__main__":
     main()

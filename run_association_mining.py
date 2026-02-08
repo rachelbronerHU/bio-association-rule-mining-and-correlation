@@ -34,7 +34,8 @@ CONFIG = {
     "MAX_RULE_LENGTH": 4,
     "TARGET_CELLS": 30,
     "MIN_CELLS_PER_PATCH": 2,
-    "N_PERMUTATIONS": 5 if DEBUG else 1000
+    "N_PERMUTATIONS": 5 if DEBUG else 1000,
+    "N_TOP_RULES": 100 if DEBUG else 3000
 }
 
 # --- 1. DATA LOADING ---
@@ -127,7 +128,7 @@ def run_pipeline():
     df, df_biopsy, df_fovs = load_data()
     samples = get_samples_to_process(df)
     
-    methods = ["BAG", "CN", "KNN_R", "WINDOW", "GRID"]
+    methods = ["BAG", "CN", "KNN_R"]
     
     # Prepare Tasks
     # We group by Method loop to save intermediate results.

@@ -14,20 +14,46 @@ logger = logging.getLogger("worker")
 
 def select_top_rules(rules, n=2000):
     if len(rules) <= n: return rules
+    
+    # Split by Lift
+    pos = rules[rules["lift"] >= 1].sort_values("lift", ascending=False)
+    neg = rules[rules["lift"] < 1].sort_values("lift", ascending=True)
+    
+    n_pos = len(pos)
+    n_neg = len(neg)
+    
+    if n_pos + n_neg <= n: return rules
+    
     half = n // 2
-    top_pos = rules.sort_values("lift", ascending=False).head(half)
-    top_neg = rules.sort_values("lift", ascending=True).head(half)
+    
+    # Dynamic allocation to fill 'n'
+    if n_pos < half:
+        # Take all pos, rest from neg
+        take_pos = n_pos
+        take_neg = min(n_neg, n - n_pos)
+    elif n_neg < half:
+        # Take all neg, rest from pos
+        take_neg = n_neg
+        take_pos = min(n_pos, n - n_neg)
+    else:
+        # Both have enough, take half
+        take_pos = half
+        take_neg = n - half # Handle odd n
+        
+    top_pos = pos.head(take_pos)
+    top_neg = neg.head(take_neg)
+    
     return pd.concat([top_pos, top_neg]).drop_duplicates()
 
-def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id: str = None):
-    if not transactions: return pd.DataFrame(), 0
+def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id=None):
+    if not transactions: return pd.DataFrame()
     
     te = TransactionEncoder()
     te_ary = te.fit(transactions).transform(transactions)
     df_trans = pd.DataFrame(te_ary, columns=te.columns_)
     
     frequent_itemsets = fpgrowth(df_trans, min_support=config["MIN_SUPPORT"], use_colnames=True)
-    if frequent_itemsets.empty: return pd.DataFrame(), 0
+    if frequent_itemsets.empty: return pd.DataFrame()
         
     rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=config["MIN_CONFIDENCE"])
     
@@ -45,9 +71,6 @@ def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id: str = Non
     
     rules = rules[is_valid]
     
-    # Snapshot of Raw Rules (valid scores, before structural/redundancy filters)
-    raw_rules = rules.copy() if not rules.empty else pd.DataFrame()
-    
     if not rules.empty:
         rules["len_ant"] = rules["antecedents"].apply(len)
         rules["len_con"] = rules["consequents"].apply(len)
@@ -57,39 +80,89 @@ def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id: str = Non
             rules["has_center_ant"] = rules["antecedents"].apply(lambda x: any("_CENTER" in item for item in x))
             rules = rules[rules["has_center_ant"]].drop(columns=["has_center_ant"])
 
-        if rules.empty: return pd.DataFrame(), 0, raw_rules
+        if rules.empty: return pd.DataFrame()
 
         rules["antecedents"] = rules["antecedents"].apply(lambda x: tuple(sorted(list(x))))
         rules["consequents"] = rules["consequents"].apply(lambda x: tuple(sorted(list(x))))
         # rules["rule_str"] = rules.apply(lambda x: f"{' + '.join(x['antecedents'])} -> {' + '.join(x['consequents'])}", axis=1)
         
-        # --- Redundancy Filter ---
-        rules, n_removed = _filter_redundant_rules(rules, config)
+        return rules
         
-        rules = select_top_rules(rules, n=2000)
-        return rules, n_removed, raw_rules
-        
-    return rules, 0, raw_rules
+    return rules
 
-def check_rule_in_transactions(rule_row, transactions, config):
+def _process_with_raw_rules(mined_rules, neighborhoods, cell_types, config, method):
+    """
+    Scenario: SAVE_RAW_RULES = True
+    1. Select Top N from mined rules.
+    2. Validate ALL of them (to get p-values for raw rules).
+    3. Filter redundancy from this validated set.
+    """
+    n_removed = 0
+    raw_rules_v = pd.DataFrame()
+    rules_v = pd.DataFrame()
+    
+    if mined_rules.empty:
+        return rules_v, raw_rules_v, n_removed
+        
+    # 1. Select Candidates
+    n_top_rules = config["N_TOP_RULES"]
+    candidates = select_top_rules(mined_rules, n=n_top_rules)
+    
+    # 2. Validate ALL Candidates (Get P-values for raw set)
+    # This gives us our "Raw Rules" with P-values
+    raw_rules_v = validate_rules_exact(neighborhoods, cell_types, candidates, config, method=method)
+    
+    # 3. Filter Redundancy from the Validated Set
+    # We filter ONLY the ones that passed validation
+    # (Though logic-wise, filtering structure doesn't depend on p-value, doing it after preserves p-values)
+    rules_v, n_removed = _filter_redundant_rules(raw_rules_v, config)
+        
+    return rules_v, raw_rules_v, n_removed
+
+def _process_optimized(mined_rules, neighborhoods, cell_types, config, method):
+    """
+    Scenario: SAVE_RAW_RULES = False
+    1. Filter Redundancy FIRST (on unvalidated rules).
+    2. Validate ONLY the survivors.
+    """
+    n_removed = 0
+    raw_rules_v = pd.DataFrame() # Empty, we don't save raw
+    rules_v = pd.DataFrame()
+    
+    if mined_rules.empty:
+        return rules_v, raw_rules_v, n_removed
+        
+    # 1. Filter Redundancy
+    filtered_rules, n_removed = _filter_redundant_rules(mined_rules, config)
+    
+    # 2. Select Top N
+    n_top_rules = config["N_TOP_RULES"]
+
+    if len(filtered_rules) > n_top_rules:
+        filtered_rules = select_top_rules(filtered_rules, n=n_top_rules)
+        
+    # 3. Validate Survivors
+    rules_v = validate_rules_exact(neighborhoods, cell_types, filtered_rules, config, method=method)
+    
+    return rules_v, raw_rules_v, n_removed
+
+def check_rule_in_transactions(rule_row, transactions_sets, config):
     """
     Checks if a specific rule passes thresholds in a given transaction set.
-    Instead of running FP-Growth, we compute support/confidence/lift manually.
+    Optimized: Expects transactions_sets (list of sets), not list of lists.
     """
-    if not transactions: return False
+    if not transactions_sets: return False
     
-    N = len(transactions)
+    N = len(transactions_sets)
     antecedents = set(rule_row["antecedents"])
     consequents = set(rule_row["consequents"])
-    both = antecedents | consequents
     
     count_ant = 0
     count_both = 0
-    count_cons = 0 # needed for lift
+    count_cons = 0
     
-    # Single pass
-    for t in transactions:
-        t_set = set(t)
+    # Optimized loop (using pre-computed sets)
+    for t_set in transactions_sets:
         has_ant = antecedents.issubset(t_set)
         has_cons = consequents.issubset(t_set)
         
@@ -142,6 +215,12 @@ def validate_rules_exact(neighborhoods, cell_types, rules_df, config, method):
     # We need to perform n_perms
     # To optimize: we can batch verify all rules against one permutation
     
+    # Optimize: If 0 perms (debug), return immediately
+    if n_perms <= 0:
+        rules_df["p_value"] = 1.0
+        rules_df["p_value_adj"] = 1.0
+        return rules_df
+
     better_counts = np.zeros(len(rules_df))
     
     for _ in range(n_perms):
@@ -152,9 +231,12 @@ def validate_rules_exact(neighborhoods, cell_types, rules_df, config, method):
         # Uses the PRE-CALCULATED neighborhoods structure
         perm_trans, _ = tx.build_transactions_from_neighborhoods(neighborhoods, shuffled_types, method)
         
+        # OPTIMIZATION: Convert to sets ONCE per permutation
+        perm_trans_sets = [set(t) for t in perm_trans]
+        
         # 3. Check each rule
         for idx, (i, row) in enumerate(rules_df.iterrows()):
-            if check_rule_in_transactions(row, perm_trans, config):
+            if check_rule_in_transactions(row, perm_trans_sets, config):
                 better_counts[idx] += 1
                 
     p_values = (better_counts + 1) / (n_perms + 1)
@@ -181,33 +263,35 @@ def process_single_sample(sample_id, group_val, df_sample, method, config):
     
     # 3. Mine
     t0 = time.time()
-    rules, n_removed, raw_rules = mine_rules_fpgrowth(trans, config, method=method, sample_id=sample_id)
+    mined_rules = mine_rules_fpgrowth(trans, config, method=method, sample_id=sample_id)
     t_mine = time.time() - t0
-    n_raw = len(rules)
+    n_mined = len(mined_rules)
+    logger.info(f"{prefix} Mined {n_mined} rules in {t_mine:.2f}s")
+    
+    # 4. Filter & Validate (Branching Logic)
+    t0 = time.time()
+    
+    # Check if we should save raw rules (default to True if not specified)
+    save_raw = config.get("SAVE_RAW_RULES", True)
+    
+    if save_raw:
+        rules_v, raw_rules_v, n_removed = _process_with_raw_rules(mined_rules, neighborhoods, cell_types, config, method)
+    else:
+        rules_v, raw_rules_v, n_removed = _process_optimized(mined_rules, neighborhoods, cell_types, config, method)
+        
+    t_val = time.time() - t0
+    n_val = len(rules_v)
     
     if stats is None: stats = {}
     stats["redundant_removed"] = n_removed
     
-    # 4. Validate (Exact Re-check)
-    n_val = 0
-    rules_v = pd.DataFrame()
-    t_val = 0.0
-    
-    if not rules.empty:
-        if len(rules) > 2000: rules = select_top_rules(rules, n=2000)
-        
-        t0 = time.time()
-        rules_v = validate_rules_exact(neighborhoods, cell_types, rules, config, method=method)
-        t_val = time.time() - t0
-        n_val = len(rules_v)
-        
-    logger.info(f"{prefix} {method}: {len(trans)} Trans | {n_raw} Rules Found | {n_val} Validated (S:{t_struct:.2f}s T:{t_trans:.2f}s V:{t_val:.2f}s)")
+    logger.info(f"{prefix} {method}: {len(trans)} Trans | {n_mined} Mined | {n_val} Validated (S:{t_struct:.2f}s T:{t_trans:.2f}s V:{t_val:.2f}s)")
     
     return {
         "Sample": sample_id,
         "Group": group_val,
         "Rules": rules_v,
-        "RawRules": raw_rules,
+        "RawRules": raw_rules_v,
         "Stats": stats
     }
 
@@ -270,4 +354,3 @@ def _filter_redundant_rules(rules, config):
     filtered_rules = rules.drop(index=list(indices_to_drop)).drop(columns=['ant_frozen'])
     
     return filtered_rules, count_removed
-

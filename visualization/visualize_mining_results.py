@@ -274,79 +274,6 @@ def plot_rules_per_fov_per_method(dfs, output_dir):
         plt.savefig(f"{output_dir}/rules_per_fov_{m}.png")
         plt.close()
 
-def load_raw_data():
-    """Loads RAW results CSVs."""
-    raw_dfs = {}
-    print(f"Loading RAW data from: {RESULTS_DATA_DIR}")
-    
-    for m in METHODS:
-        # Load Raw CSV
-        csv_path = os.path.join(RESULTS_DATA_DIR, f"results_{m}_RAW.csv")
-        if os.path.exists(csv_path):
-            try:
-                df = pd.read_csv(csv_path)
-                raw_dfs[m] = df
-            except Exception as e:
-                print(f"Error loading {m} RAW CSV: {e}")
-        else:
-            print(f"Warning: {csv_path} not found.")
-            
-    return raw_dfs
-
-def plot_raw_rules_scatter(dfs, output_dir):
-    """Scatter plots for Raw Rules (Lift vs Conf, Lift vs Supp)."""
-    print("Generating Raw Rules Scatter Plots...")
-    
-    if not dfs: return
-
-    # Setup Grid
-    n_plots = len(dfs)
-    cols = 3
-    rows = (n_plots // cols) + (1 if n_plots % cols > 0 else 0)
-    
-    # 1. Lift vs Confidence
-    fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows), constrained_layout=True)
-    if n_plots == 1: axes = [axes]
-    axes = np.array(axes).flatten()
-    
-    for i, m in enumerate(dfs.keys()):
-        ax = axes[i]
-        df = dfs[m]
-        
-        hue_col = "Pathological stage" if "Pathological stage" in df.columns else None
-        
-        # Sample if too large for performance
-        if len(df) > 10000:
-            plot_df = df.sample(10000, random_state=42)
-            title_suffix = " (Sampled 10k)"
-        else:
-            plot_df = df
-            title_suffix = ""
-
-        sns.scatterplot(
-            data=plot_df, 
-            x="Confidence", 
-            y="Lift", 
-            hue=hue_col, 
-            palette="viridis" if hue_col else None, 
-            alpha=0.5,
-            s=15,
-            ax=ax,
-            legend=(i==0) # Only legend on first
-        )
-        
-        ax.set_title(f"{m} Raw Rules{title_suffix}")
-        ax.set_xlabel("Confidence")
-        ax.set_ylabel("Lift")
-
-    # Hide empty axes
-    for j in range(i + 1, len(axes)):
-        axes[j].axis('off')
-
-    plt.suptitle("Raw Rules: Lift vs Confidence")
-    plt.savefig(f"{output_dir}/raw_scatter_lift_conf.png")
-    plt.close()
-
 def main():
     # Setup Output Dir
     out_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
@@ -354,7 +281,6 @@ def main():
     print(f"Saving plots to: {out_dir}")
     
     dfs, stats = load_data()
-    raw_dfs = load_raw_data()
     
     if not dfs:
         print("No data found. Exiting.")
@@ -366,9 +292,6 @@ def main():
     plot_complexity(dfs, out_dir)
     plot_overlap(dfs, out_dir)
     plot_rules_per_fov_per_method(dfs, out_dir)
-    
-    if raw_dfs:
-        plot_raw_rules_scatter(raw_dfs, out_dir)
     
     print("Visualization Complete.")
 

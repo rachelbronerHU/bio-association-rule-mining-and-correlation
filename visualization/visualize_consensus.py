@@ -57,7 +57,7 @@ def clean_rule_name(ant, con):
         ant_str = ", ".join(ant_clean)
         con_str = ", ".join(con_clean)
         
-        return f"{ant_str}\n-> {con_str}"
+        return f"{ant_str} -> {con_str}"
     except:
         return f"{ant} -> {con}"
 
@@ -65,16 +65,27 @@ def plot_stage_consensus_heatmap(method, suffix, output_dir):
     """
     Plots a heatmap of Rules vs Pathological Stages.
     Color = Consensus Score.
+    X-Axis labels include (N=...) count of FOVs.
     """
     df = load_data(method, "stage", suffix)
     if df is None or df.empty:
         return
 
+    # Extract Stage Counts map: {Stage: Count}
+    # df has columns: 'Pathological stage', 'Total_FOVs_In_Stage'
+    # We must handle the column name carefully if it's 'Pathological stage' or just 'Stage'
+    stage_col = "Pathological stage"
+    
+    stage_counts = df[[stage_col, "Total_FOVs_In_Stage"]].drop_duplicates().set_index(stage_col)["Total_FOVs_In_Stage"].to_dict()
+
     # Create Clean Rule ID
     df["Rule"] = df.apply(lambda row: clean_rule_name(row["Antecedents"], row["Consequents"]), axis=1)
 
+    # Handle duplicates created by name cleaning (take max score)
+    df = df.groupby(["Rule", stage_col], as_index=False)["Consensus_Score"].max()
+
     # Pivot: Index=Rule, Columns=Stage, Values=Score
-    pivot_df = df.pivot(index="Rule", columns="Pathological stage", values="Consensus_Score")
+    pivot_df = df.pivot(index="Rule", columns=stage_col, values="Consensus_Score")
     
     # Fill NaN with 0 (Rule not present in that stage)
     pivot_df = pivot_df.fillna(0)
@@ -86,15 +97,19 @@ def plot_stage_consensus_heatmap(method, suffix, output_dir):
     # Take top 30 for readability
     pivot_df = pivot_df.head(30)
 
-    plt.figure(figsize=(10, 12))
+    # Rename Columns to include N
+    new_cols = {col: f"Stage {col}\n(N={stage_counts.get(col, '?')})" for col in pivot_df.columns}
+    pivot_df = pivot_df.rename(columns=new_cols)
+
+    plt.figure(figsize=(14, 12))
     sns.heatmap(pivot_df, annot=True, fmt=".2f", cmap="YlOrRd", cbar_kws={'label': 'Consensus Score'})
     plt.title(f"Stage Consensus Heatmap ({method}{suffix})\n(Top 30 Rules)", fontsize=14)
-    plt.xlabel("Pathological Stage")
+    plt.xlabel("") # Hide generic label since columns have it
     plt.ylabel("Rule")
     plt.tight_layout()
     
     save_path = os.path.join(output_dir, f"heatmap_stage_consensus_{method}{suffix}.png")
-    plt.savefig(save_path)
+    plt.savefig(save_path, bbox_inches='tight')
     plt.close()
     print(f"Saved {save_path}")
 
@@ -151,7 +166,7 @@ def plot_biopsy_jaccard_similarity(method, suffix, output_dir):
 
 def plot_global_consensus_bar(method, suffix, output_dir):
     """
-    Plots top global consensus rules.
+    Plots top global consensus rules with counts.
     """
     df = load_data(method, "global", suffix)
     if df is None or df.empty:
@@ -161,17 +176,34 @@ def plot_global_consensus_bar(method, suffix, output_dir):
     df["Rule"] = df.apply(lambda row: clean_rule_name(row["Antecedents"], row["Consequents"]), axis=1)
     
     # Top 20
-    top_df = df.head(20)
+    top_df = df.head(20).copy()
     
-    plt.figure(figsize=(10, 8))
-    sns.barplot(data=top_df, y="Rule", x="Consensus_Score", hue="Rule", palette="Blues_r", legend=False)
-    plt.title(f"Top 20 Global Consensus Rules ({method}{suffix})", fontsize=14)
-    plt.xlabel("Consensus Score (Fraction of FOVs in Dataset)")
-    plt.xlim(0, 1.05)
+    # Add labels for bars
+    # Assuming 'FOV_Count' and 'Total_FOVs_In_Dataset' exist
+    if "FOV_Count" in top_df.columns and "Total_FOVs_In_Dataset" in top_df.columns:
+        total_fovs = top_df["Total_FOVs_In_Dataset"].iloc[0]
+    else:
+        total_fovs = "?"
+
+    plt.figure(figsize=(14, 8))
+    ax = sns.barplot(data=top_df, y="Rule", x="Consensus_Score", palette="Blues_r")
+    
+    # Annotate bars
+    for i, p in enumerate(ax.patches):
+        if i < len(top_df):
+            row = top_df.iloc[i]
+            count = row["FOV_Count"]
+            ax.text(p.get_width() + 0.01, p.get_y() + p.get_height()/2, 
+                    f"n={count}", 
+                    va='center', fontsize=10, color='black')
+
+    plt.title(f"Top 20 Global Consensus Rules ({method}{suffix})\nTotal FOVs in Dataset: {total_fovs}", fontsize=14)
+    plt.xlabel("Consensus Score (Fraction of FOVs)")
+    plt.xlim(0, 1.25) # Add space for labels
     plt.tight_layout()
     
     save_path = os.path.join(output_dir, f"bar_global_consensus_{method}{suffix}.png")
-    plt.savefig(save_path)
+    plt.savefig(save_path, bbox_inches='tight')
     plt.close()
     print(f"Saved {save_path}")
 

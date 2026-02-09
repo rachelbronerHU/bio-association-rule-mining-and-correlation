@@ -160,6 +160,17 @@ def plot_volcano(dfs, output_dir):
     fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows), constrained_layout=True)
     axes = axes.flatten()
     
+    # Fixed Color Map for Stages
+    stage_colors = {
+        0: "forestgreen",
+        1: "gold",
+        2: "darkorange",
+        3: "firebrick"
+    }
+    
+    # Legend Labels
+    stage_labels = ["Stage 0", "Stage 1", "Stage 2", "Stage 3"]
+    
     for i, m in enumerate(valid_methods):
         ax = axes[i]
         df = dfs[m].copy()
@@ -167,37 +178,61 @@ def plot_volcano(dfs, output_dir):
         # Log FDR
         df["log_fdr"] = -np.log10(df["FDR"] + 1e-10)
         
-        # Color
+        # Color Logic
         hue_col = "Pathological stage" if "Pathological stage" in df.columns else "Group"
+        palette = stage_colors if hue_col == "Pathological stage" else "Spectral"
         
         sns.scatterplot(
             data=df, 
             x="Lift", 
             y="log_fdr", 
             hue=hue_col, 
-            palette="Spectral", 
-            alpha=0.7,
-            s=30,
-            ax=ax
+            palette=palette, 
+            alpha=0.6,
+            s=25,
+            ax=ax,
+            legend='brief' # Ensure legend is generated for all to extract handles later
         )
         
-        ax.axhline(-np.log10(0.05), color='red', linestyle='--', label="FDR=0.05")
-        ax.axvline(1.0, color='gray', linestyle='--', label="Lift=1.0")
-        ax.set_title(f"Method: {m}")
-        ax.set_ylabel("-log10(FDR)")
+        ax.axhline(-np.log10(0.05), color='red', linestyle='--', label="FDR=0.05", linewidth=1)
+        ax.axvline(1.0, color='gray', linestyle='--', label="Lift=1.0", linewidth=1)
         
-        # Handle Legend (only distinct if needed, but here we keep per plot or dedupe later)
-        # For simplicity in grid, we keep them or move outside. 
-        # Seaborn adds legend to ax automatically.
-        if i == 0:
-            ax.legend(loc='lower right', title="Pathological Stage", fontsize='small')
-        else:
+        # Calculate Statistics
+        n_total = len(df)
+        p_vals = df["FDR"]
+        
+        stats_subtitle = ""
+        if not p_vals.empty:
+            pcts = np.percentile(p_vals, [10, 25, 50, 75, 90])
+            stats_subtitle = (
+                f"N={n_total} | FDR P-Values: "
+                f"10%:{pcts[0]:.1e}, 50%:{pcts[2]:.1e}, 90%:{pcts[4]:.1e}"
+            )
+            
+        ax.set_title(f"Method: {m}\n{stats_subtitle}", fontsize=10)
+        ax.set_ylabel("-log10(FDR)")
+        ax.set_xlabel("Lift")
+        
+        # Remove individual legends to create a shared one later
+        if ax.get_legend():
+            handles, labels = ax.get_legend_handles_labels()
+            # Store handles from the first plot for the shared legend
+            if i == 0:
+                shared_handles = handles
+                shared_labels = labels
             ax.get_legend().remove()
 
     # Hide empty axes
     for j in range(i + 1, len(axes)):
         axes[j].axis('off')
         
+    # Add Shared Legend to the Figure
+    # Filter handles to just show Stages (0,1,2,3) if present
+    if 'shared_handles' in locals():
+        fig.legend(shared_handles, shared_labels, loc='center right', title="Stage/Group")
+        # Adjust layout to make room for legend
+        plt.subplots_adjust(right=0.85)
+
     plt.suptitle("Volcano Plots: Rule Significance vs Strength", fontsize=16)
     plt.savefig(f"{output_dir}/volcano_grid.png")
     plt.close()

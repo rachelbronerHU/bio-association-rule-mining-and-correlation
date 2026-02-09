@@ -133,5 +133,5 @@ Visualizing the top 3 ranked unique spatial rules (excluding self-referential ru
 
 ## 6. References
 
-<span id="ref1">1.</span> **Bayardo Jr, R. J., Agrawal, R., & Gunopulos, D.** (2000). Constraint-based rule mining in large, dense databases. *Data mining and knowledge discovery*, 4(2), 217-240. [PDF](https://www.bayardo.org/ps/icde99.pdf)
+<span id="ref1">1.</span> <span style="color: #808080; font-style: italic;">Bayardo Jr, R. J., Agrawal, R., & Gunopulos, D. (2000). Constraint-based rule mining in large, dense databases. Data mining and knowledge discovery, 4(2), 217-240. <a href="https://www.bayardo.org/ps/icde99.pdf">[PDF]</a></span>
 

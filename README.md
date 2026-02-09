@@ -2,6 +2,9 @@
 
 This project implements a comprehensive pipeline for discovering spatial association rules between cell types in MIBI-TOF imaging data.
 
+[![Paper](https://img.shields.io/badge/Paper-Science_Translational_Medicine-blue?style=flat-square&logo=doi&logoColor=white)](https://www.science.org/doi/full/10.1126/scitranslmed.adu6032)
+[![Data](https://img.shields.io/badge/Data-Mendeley_Data-orange?style=flat-square&logo=mendeley&logoColor=white)](https://data.mendeley.com/datasets/j4bscsgn6x/2)
+
 ## 1. Pipeline Workflow
 
 The following tree illustrates the processing flow from input data to final validated rules.
@@ -113,7 +116,30 @@ Distribution of the number of validated rules found in each Field of View (FOV) 
 
 ---
 
-## 5. Top Spatial Rules Visualization
+## 5. Consensus & Stability Analysis
+
+[📂 View Full Consensus Plots Directory](results/full_run/plots/consensus_report)
+
+This section analyzes the stability of rules across different biological scales: Global (Dataset), Stage (Disease Group), and Biopsy (Patient).
+
+### Global Consensus (Universal Rules)
+*The rules appearing most frequently across the entire dataset, representing fundamental tissue structure.*
+<img src="results/full_run/plots/consensus_report/bar_global_consensus_KNN_R_no_self.png" width="600">
+
+### Patient Similarity (Biopsy Clustering)
+*Clustering patients based on the similarity of their rule sets (Jaccard Index). Groupings here indicate shared tissue microenvironments.*
+<img src="results/full_run/plots/consensus_report/clustermap_biopsy_similarity_CN_no_self.png" width="600">
+
+### Stage Specificity (Disease Signatures)
+*Comparing rule prevalence across Pathological Stages. The heatmap highlights rules that are specific to certain stages versus those that are stable throughout.*
+
+| **Stage Consensus (with Self-Rules)** | **Stage Consensus (No Self-Rules)** |
+| :---: | :---: |
+| <img src="results/full_run/plots/consensus_report/heatmap_stage_consensus_CN.png" width="400"> | <img src="results/full_run/plots/consensus_report/heatmap_stage_consensus_CN_no_self.png" width="400"> |
+
+---
+
+## 6. Top Spatial Rules Visualization
 
 [📂 View Full Collection of Spatial Plots](results/full_run/plots/top_rules_spatial)
 
@@ -131,7 +157,6 @@ Visualizing the top 3 ranked unique spatial rules (excluding self-referential ru
 
 ---
 
-## 6. References
+## 7. References
 
 <span id="ref1">1.</span> <span style="color: #808080; font-style: italic;">Bayardo Jr, R. J., Agrawal, R., & Gunopulos, D. (2000). Constraint-based rule mining in large, dense databases. Data mining and knowledge discovery, 4(2), 217-240. <a href="https://www.bayardo.org/ps/icde99.pdf">[PDF]</a></span>
-

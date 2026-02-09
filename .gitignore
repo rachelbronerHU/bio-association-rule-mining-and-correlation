@@ -8,7 +8,8 @@ data/
 
 # Experiment Results & Plots
 results/debug_run
-results/final_run/data
+results/full_run/data
+results/full_run/plots/readme_assets
 
 # Logs
 *.log

@@ -1,5 +1,9 @@
+# Debugging Configurations
 DEBUG = False # Set to True for quick test
+DEBUG_FOVS_PER_GROUP = 10
+SAVE_RAW_RULES = True
 
+# Path Configuration
 DATA_DIR = 'data/'
 MIBI_GUT_DIR_PATH = DATA_DIR + 'MIBIGutCsv/'
 
@@ -23,7 +27,7 @@ RESULTS_SIMPLE_STATS_DIR = RESULTS_DIR + 'simple_stats_benchmarks/'
 RESULTS_SIMPLE_STATS_DATA_DIR = RESULTS_SIMPLE_STATS_DIR + 'data/'
 RESULTS_SIMPLE_STATS_PLOTS_DIR = RESULTS_SIMPLE_STATS_DIR + 'plots/'
 
+RESULTS_CLINICAL_CORRELATION_PLOTS_DIR = RESULTS_PLOTS_DIR + 'clinical_correlation_report/'
 
-DEBUG_FOVS_PER_GROUP = 10
-
-SAVE_RAW_RULES = True
+# Param Configuration
+MIN_P_VALUE = 0.05

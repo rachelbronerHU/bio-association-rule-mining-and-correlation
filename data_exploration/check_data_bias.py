@@ -4,6 +4,9 @@ import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from constants import MIBI_GUT_DIR_PATH, RESULTS_DIR
 
 # Configuration

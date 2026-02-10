@@ -17,10 +17,16 @@ from sklearn.feature_selection import SelectFromModel
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# --- IMPORT CONSTANTS ---
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import constants
+
 # --- CONFIGURATION ---
-BASE_INPUT_DIR = "experiment_results/full_run/data"
-OUTPUT_DATA_DIR = "experiment_results/ml_refined_robust_benchmarks/data"
-TOP_N_RULES = 50
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
+OUTPUT_DATA_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR)
+FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS_TO_ANALYZE = ["BAG", "CN", "KNN_R"] 
 TARGETS = [
     "Pathological stage", 
@@ -48,10 +54,10 @@ def load_and_prep_data(input_file):
 
     df = pd.read_csv(input_file)
     
-    # Filter by P-Value
+    # Filter by FDR
     initial_len = len(df)
-    if "P_Value" in df.columns:
-        df = df[df["P_Value"] < 0.05]
+    if "FDR" in df.columns:
+        df = df[df["FDR"] < 0.05]
         dropped = initial_len - len(df)
         if dropped > 0:
             logger.info(f"   Dropped {dropped} rows with P-Value >= 0.05 (Retained: {len(df)})")
@@ -83,12 +89,12 @@ def sanitize_features(X):
 
 # --- CORE LOGIC ---
 
-def process_fold_task(X, y_enc, train_idx, test_idx, fold_id, task_label, is_categorical):
+def process_fold_task(X, y_enc, train_idx, test_idx, fold_id, task_label, is_categorical, k_feat):
 
 
     pid = os.getpid()
     start_t = time.time()
-    log_prefix = f"[{task_label}] Fold {fold_id+1} (PID {pid}) -"
+    log_prefix = f"[{task_label}] Fold {fold_id+1} (PID {pid}) K-Feat {k_feat}-"
 
     X_train = X.iloc[train_idx]
     
@@ -109,20 +115,26 @@ def process_fold_task(X, y_enc, train_idx, test_idx, fold_id, task_label, is_cat
     try:
 
         # --- 2. Feature Selection ---
-        k_best = min(TOP_N_RULES, X_train.shape[1])
+        n_features_in = X_train.shape[1]
         
-        if is_categorical:
-            embed_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=1)
+        # Determine if we do selection
+        if k_feat is not None and k_feat < n_features_in:
+            if is_categorical:
+                embed_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=1)
+            else:
+                embed_model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=1)
+
+            selector = SelectFromModel(embed_model, max_features=k_feat, threshold=-np.inf)
+            selector.fit(X_train, y_train)
+            
+            selected_indices = selector.get_support(indices=True)
+            X_train_sel = selector.transform(X_train)
+            X_test_sel = selector.transform(X_test)
         else:
-            embed_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=1)
-
-        selector = SelectFromModel(embed_model, max_features=TOP_N_RULES, threshold=-np.inf)
-        selector.fit(X_train, y_train)
-        
-        selected_indices = selector.get_support(indices=True)
-
-        X_train_sel = selector.transform(X_train)
-        X_test_sel = selector.transform(X_test)
+            # Use ALL features
+            selected_indices = np.arange(n_features_in)
+            X_train_sel = X_train.values
+            X_test_sel = X_test.values
 
         # --- Scaling (Critical for Lasso) ---
         scaler = StandardScaler()
@@ -300,7 +312,32 @@ def save_filtered_raw_data(raw_df, top_rules, method_name, target_name):
     filtered_df.to_csv(filename, index=False)
     logger.info(f"   >>> SAVED FILTERED RAW: {filename}")
 
-def calculate_leaderboard_score(acc, method, target, is_cat, preds_filename):
+def save_comparison_summary(leaderboard_data):
+    """
+    Creates a pivot table comparing scores across different feature counts.
+    """
+    if not leaderboard_data: return
+    
+    df = pd.DataFrame(leaderboard_data)
+    # Pivot: Index=[Method, Target], Columns=[Num_Features], Values=[Grand_Score]
+    # Handle 'All' vs Numbers for column sorting
+    df["Config_Label"] = df["Num_Features"].apply(lambda x: "All" if pd.isna(x) or x == "All" else f"Top{x}")
+    
+    pivot = df.pivot_table(index=["Method", "Target"], columns="Config_Label", values="Grand_Score")
+    
+    # Ensure idxmax and max are only applied to numerical columns
+    # Create a subset of the pivot table containing only numerical score columns
+    score_columns = [col for col in pivot.columns if col in ["All"] or col.startswith("Top")]
+    numeric_score_pivot = pivot[score_columns]
+
+    pivot["Best_Config"] = numeric_score_pivot.idxmax(axis=1)
+    pivot["Best_Score"] = numeric_score_pivot.max(axis=1)
+    
+    filename = f"{OUTPUT_DATA_DIR}/comparison_summary.csv"
+    pivot.to_csv(filename)
+    logger.info(f"   >>> SAVED COMPARISON SUMMARY: {filename}")
+
+def calculate_leaderboard_score(acc, method, target, is_cat, preds_filename, k_feat):
     """
     Step 4: Calculate final aggregated scores for the Leaderboard.
     """
@@ -314,6 +351,7 @@ def calculate_leaderboard_score(acc, method, target, is_cat, preds_filename):
     return {
         "Method": method,
         "Target": target,
+        "Num_Features": "All" if k_feat is None else k_feat,
         "Metric": metric,
         "Grand_Score": grand_score,
         "RF_Mean": np.mean(acc["agg_scores"]["RF"]),
@@ -353,8 +391,10 @@ def run_pipeline():
 
         X_safe, original_rule_names = sanitize_features(X_raw)
 
-        target_accumulators = {} 
-        futures_map = {} # To track which result belongs to which target
+        # Accumulators Map: Key = (target, k_feat)
+        # We need distinct accumulators for each feature configuration
+        accumulators_map = {} 
+        futures_map = {} 
 
         with ProcessPoolExecutor() as executor:
             
@@ -368,55 +408,59 @@ def run_pipeline():
                     continue
                 
                 # --- Step A: Prepare Target Data ---
-                # Handles NaN removal, Label Encoding, and alignment
                 prep_res = prepare_target_data(X_safe, y_meta_raw, target)
-                if not prep_res: continue # Skip if insufficient data
+                if not prep_res: continue 
                 
-                # Unpack prepared data
                 X_t, y_t, groups_t, le, is_cat = prep_res
+                n_features_total = X_t.shape[1]
 
-                # --- Step B: Execute Cross Validation ---
-                n_features = X_t.shape[1]
-                target_accumulators[target] = {
-                    "meta": {"le": le, "is_cat": is_cat, "count": 0}, # Metadata needed for saving
-                    "rule_counts": np.zeros(n_features),
-                    "rule_imp_sums": {"RF": np.zeros(n_features), "XGB": np.zeros(n_features), "Lasso": np.zeros(n_features)},
-                    "patient_results": [],
-                    "agg_scores": {"RF": [], "XGB": [], "Lasso": []}
-                }
-                # Submit LOGO Folds
-                logo = LeaveOneGroupOut()
-                fold_to_patient_map = {} # Local map for this target
-
-                for fold_idx, (train_idx, test_idx) in enumerate(logo.split(X_t, y_t, groups=groups_t)):
-                    task_label = f"{method}-{target}"
-                    current_biopsy_id = groups_t.iloc[test_idx[0]]
+                # --- Iterate over Feature Counts ---
+                for k_feat in FEATURE_COUNTS:
                     
-                    # Store Biopsy ID in the future object wrapper or map
-                    # We need a complex key for the map: (target, fold_idx, biopsy_id)
-                    key_info = (target, fold_idx, current_biopsy_id)
+                    config_key = (target, k_feat)
                     
-                    future = executor.submit(
-                        process_fold_task, X_t, y_t, train_idx, test_idx, fold_idx, task_label, is_cat
-                    )
-                    futures_map[future] = key_info
+                    # Init Accumulator for this specific config
+                    accumulators_map[config_key] = {
+                        "meta": {"le": le, "is_cat": is_cat, "count": 0}, 
+                        "rule_counts": np.zeros(n_features_total),
+                        "rule_imp_sums": {"RF": np.zeros(n_features_total), "XGB": np.zeros(n_features_total), "Lasso": np.zeros(n_features_total)},
+                        "patient_results": [],
+                        "agg_scores": {"RF": [], "XGB": [], "Lasso": []}
+                    }
 
-            # --- PHASE 2: COLLECT AS COMPLETED (Interleaved) ---
+                    # Submit LOGO Folds
+                    logo = LeaveOneGroupOut()
+
+                    for fold_idx, (train_idx, test_idx) in enumerate(logo.split(X_t, y_t, groups=groups_t)):
+                        
+                        feat_label = f"Top{k_feat}" if k_feat else "All"
+                        task_label = f"{method}-{target}-{feat_label}"
+                        current_biopsy_id = groups_t.iloc[test_idx[0]]
+                        
+                        # Key info to retrieve correct accumulator later
+                        key_info = (target, k_feat, fold_idx, current_biopsy_id)
+                        
+                        future = executor.submit(
+                            process_fold_task, X_t, y_t, train_idx, test_idx, fold_idx, task_label, is_cat, k_feat
+                        )
+                        futures_map[future] = key_info
+
+            # --- PHASE 2: COLLECT AS COMPLETED ---
             total_tasks = len(futures_map)
-            logger.info(f"   >>> Processing {total_tasks} tasks in parallel...")
+            logger.info(f"   >>> Processing {total_tasks} tasks (Combinations of Target x Config x Folds)...")
             
             completed_count = 0
             for future in as_completed(futures_map):
-                target_name, fold_id, biopsy_id = futures_map[future]
+                target_name, k_feat, fold_id, biopsy_id = futures_map[future]
                 res = future.result()
                 
                 completed_count += 1
-                if completed_count % 50 == 0:
+                if completed_count % 100 == 0:
                     logger.info(f"   ... Completed {completed_count}/{total_tasks} tasks")
 
                 if res["success"]:
-                    # Get the specific accumulator for this target
-                    acc = target_accumulators[target_name]
+                    # Get the specific accumulator
+                    acc = accumulators_map[(target_name, k_feat)]
                     acc["meta"]["count"] += 1
                     
                     # A. Update Scores
@@ -440,38 +484,48 @@ def run_pipeline():
                     acc["patient_results"].append(p_rec)
 
 
-                # --- PHASE 3: FINALIZE & SAVE ALL TARGETS ---
+            # --- PHASE 3: FINALIZE & SAVE ---
             logger.info(f"   >>> Saving results for {method}...")
             
-            for target, acc in target_accumulators.items():
+            # Iterate through the map to save each config separately
+            for (target, k_feat), acc in accumulators_map.items():
                 count = acc["meta"]["count"]
                 if count == 0: continue
                 
                 le = acc["meta"]["le"]
                 is_cat = acc["meta"]["is_cat"]
+                
+                # Append suffix to target name for file uniqueness
+                suffix = f"_Top{k_feat}" if k_feat else "_All"
+                target_with_suffix = f"{target}{suffix}"
 
                 # 1. Save Predictions
-                preds_file = save_predictions_log(acc, method, target, le, is_cat)
+                preds_file = save_predictions_log(acc, method, target_with_suffix, le, is_cat)
                 
                 # 2. Compute & Save Rule Stats
-                rules_df = compute_and_save_rule_stats(acc, count, method, target, original_rule_names)
+                rules_df = compute_and_save_rule_stats(acc, count, method, target_with_suffix, original_rule_names)
                 
-                # 3. Save Raw Data Subset
-                save_raw_data_subset(df_raw, rules_df, method, target)
+                # 3. Save Raw Data Subset (Only for specific Feature Counts if needed, or all)
+                # We typically only care about the top rules from the 'Top' configs, 
+                # but we can save for all.
+                save_raw_data_subset(df_raw, rules_df, method, target_with_suffix)
                 
                 # 4. Leaderboard
-                record = calculate_leaderboard_score(acc, method, target, is_cat, preds_file)
+                record = calculate_leaderboard_score(acc, method, target, is_cat, preds_file, k_feat)
                 leaderboard_data.append(record)
-                logger.info(f"Saved {target}: Score = {record['Grand_Score']:.3f}")
+                
+                logger.info(f"Saved {target} [{suffix.strip('_')}]: Score = {record['Grand_Score']:.3f}")
 
-            logger.info(f"   --- All tasks queued for {method}. Processing... ---")
-
-    # --- Final Step: Save Leaderboard ---
+    # --- Final Step: Save Leaderboard & Summary ---
     if leaderboard_data:
-        lb_df = pd.DataFrame(leaderboard_data).sort_values("Grand_Score", ascending=False)
+        # Save Full Leaderboard
+        lb_df = pd.DataFrame(leaderboard_data).sort_values(["Target", "Grand_Score"], ascending=False)
         lb_path = f"{OUTPUT_DATA_DIR}/final_leaderboard.csv"
         lb_df.to_csv(lb_path, index=False)
         logger.info(f"DONE. Leaderboard saved to {lb_path}")
+        
+        # Save Pivot Summary
+        save_comparison_summary(leaderboard_data)
 
 if __name__ == "__main__":
     run_pipeline()

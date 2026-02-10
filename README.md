@@ -126,7 +126,7 @@ This section analyzes the stability of rules across different biological scales:
 *The rules appearing most frequently across the entire dataset, representing fundamental tissue structure.*
 <img src="results/full_run/plots/consensus_report/bar_global_consensus_KNN_R_no_self.png" width="600">
 
-### Patient Similarity (Biopsy Clustering)
+### Patient Similarity (Biopsy Clustering - CN)
 *Clustering patients based on the similarity of their rule sets (Jaccard Index). Groupings here indicate shared tissue microenvironments.*
 <img src="results/full_run/plots/consensus_report/clustermap_biopsy_similarity_CN_no_self.png" width="600">
 

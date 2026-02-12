@@ -1,10 +1,10 @@
 Target,N,Majority_Class_Prop,Majority_Class,Minority_Class,Minority_Count
-liver stage,59,0.8983050847457628,0,3,1
-Pathological score,59,0.7288135593220338,Mild,Severe,16
-skin stage,59,0.5932203389830508,0,3,6
-Clinical score,59,0.576271186440678,Mild,Severe,25
-Cortico Response,52,0.5576923076923077,Responder,Non-responder,23
-Grade GVHD,59,0.5423728813559322,2,1,1
-Survival at follow-up,59,0.5084745762711864,Not survived,Survived,29
-Pathological stage,59,0.423728813559322,0,3,6
-GI stage,59,0.4067796610169492,1,3,7
+liver stage,73,0.726027397260274,1.0,4.0,1
+Pathological score,73,0.589041095890411,Mild,Control,14
+skin stage,73,0.4794520547945205,1.0,4.0,6
+Clinical score,73,0.4657534246575342,Mild,Control,14
+Grade GVHD,73,0.4383561643835616,3.0,2.0,1
+Survival at follow-up,73,0.410958904109589,Not survived,Control,14
+Cortico Response,73,0.3972602739726027,Responder,Control,21
+Pathological stage,73,0.3424657534246575,1.0,4.0,6
+GI stage,73,0.3287671232876712,2.0,4.0,7

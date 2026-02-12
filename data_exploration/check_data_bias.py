@@ -38,8 +38,50 @@ def analyze_targets():
         print(f"Error: Metadata file not found at {DATA_PATH}")
         return
 
-    df = pd.read_csv(DATA_PATH)
-    print(f"Loaded {len(df)} Biopsies.")
+    df_biopsy = pd.read_csv(DATA_PATH)
+    print(f"Loaded {len(df_biopsy)} Biopsies from metadata.")
+
+    # --- Load FOVs and Merge Controls (Logic from run_association_mining.py) ---
+    fovs_path = MIBI_GUT_DIR_PATH + "fovs_metadata.csv"
+    
+    if os.path.exists(fovs_path):
+        df_fovs = pd.read_csv(fovs_path)
+        
+        # Filter unknown 'S_*' (same as _remove_unknown_biopsies)
+        df_fovs = df_fovs[~df_fovs["FOV"].astype(str).str.startswith("S_")]
+        
+        # Get unique Biopsies from FOVs
+        # "Patient" in fovs_metadata maps to "Biopsy_ID"
+        unique_biopsies = df_fovs[["Patient"]].drop_duplicates().rename(columns={"Patient": "Biopsy_ID"})
+        print(f"Total Biopsies from FOVs (excluding S_*): {len(unique_biopsies)}")
+
+        # Pre-process Biopsy Metadata (Shift Numerics) so 0 can be Control
+        numeric_targets = []
+        categorical_targets = []
+        
+        for col in TARGETS:
+            if col in df_biopsy.columns:
+                 if pd.api.types.is_numeric_dtype(df_biopsy[col]):
+                    # Shift 0->1, 1->2... so 0 can be Control
+                    df_biopsy[col] = df_biopsy[col] + 1
+                    numeric_targets.append(col)
+                 else:
+                    categorical_targets.append(col)
+
+        # Merge unique_biopsies (All) with df_biopsy (Metadata)
+        df = pd.merge(unique_biopsies, df_biopsy, on="Biopsy_ID", how="left")
+        
+        # Fill NaNs (Controls)
+        for col in numeric_targets:
+            df[col] = df[col].fillna(0)
+        
+        for col in categorical_targets:
+            df[col] = df[col].fillna("Control")
+            
+        print(f"Final Merged Biopsies for Analysis: {len(df)}")
+    else:
+        print(f"Warning: FOVs metadata not found at {fovs_path}. Using only Biopsy metadata.")
+        df = df_biopsy
     
     report = []
     
@@ -63,25 +105,30 @@ def analyze_targets():
         # Calculate "Imbalance Score" (Gini Impurity-like or just Max Prop)
         # 0.5 = Perfectly balanced (2 classes). 1.0 = All one class.
         majority_class_prop = props.max()
+
+        # Sort classes for Display and Plotting
+        sorted_classes = sorted(counts.index)
         
         # 2. Print Stats
         print(f"\n--- {target} (N={n}) ---")
-        for cls, count in counts.items():
-            print(f"   {cls}: {count} ({props[cls]:.1%})")
+        for cls in sorted_classes:
+            count = counts[cls]
+            prop = props[cls]
+            print(f"   {cls}: {count} ({prop:.1%})")
             
         # 3. Store for Plot
         report.append({
             "Target": target,
             "N": n,
             "Majority_Class_Prop": majority_class_prop,
-            "Majority_Class": counts.index[0],
+            "Majority_Class": counts.index[0], # Keep these based on frequency (counts)
             "Minority_Class": counts.index[-1],
             "Minority_Count": counts.values[-1]
         })
         
         # 4. Plot
         plt.figure(figsize=(6, 4))
-        sns.countplot(data=valid_df, x=target, palette="viridis")
+        sns.countplot(data=valid_df, x=target, palette="viridis", order=sorted_classes)
         plt.title(f"Distribution: {target}\n(N={n})")
         plt.ylabel("Number of Biopsies")
         plt.xticks(rotation=45)

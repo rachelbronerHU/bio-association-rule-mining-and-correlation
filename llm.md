@@ -13,4 +13,4 @@
 * README.md - our final report of the results
 
 # Instructions:
-* Never give code first. always give a clear, not too long and smart design suggestion/s, and only after approval give the code
+* Never give code first!!!!. always give a clear, not too long and smart design suggestion/s, and only after approval give the code

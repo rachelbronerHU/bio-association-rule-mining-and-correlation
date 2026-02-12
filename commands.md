@@ -13,7 +13,7 @@
 # Step no. 4: Result Visualization
 * python visualization\visualize_mining_results.py (results/full_run/plots/mining_report)
 * python visualization\visualize_mining_results.py (results/full_run/plots/raw_rules_report)
-* python visualization\visualize_top_rules_spatial.py [--top_n 20] [--exclude_containing_self_rules / --exclude_self_rules]
+* python visualization\visualize_top_rules_spatial.py [--top_n 20] [--exclude_shared_items / --exclude_self_loops]
 
 # Step no. 5: Consensus Report:
 **(Run each one with and without --no_self flag)**
@@ -28,7 +28,7 @@
 
 # Step no. 2: Comparison
 * python visualization/clinical_correlations/plot_performance_comparisons.py (results/full_run/plots/clinical_correlation_report)
-* python visualization/clinical_correlations/plot_rule_target_value_heatmap.py (results/full_run/plots/clinical_correlation_report)
+* python visualization/clinical_correlations/plot_rule_target_value_heatmap.py [--num_strategies 5] [--exclude_shared_items / --exclude_self_loops] [--method KNN_R / CN / BAG] (results/full_run/plots/clinical_correlation_report)
 
 
 

@@ -31,7 +31,26 @@ def load_and_prep_data(method, base_input_dir):
         
     return df # df is the df_raw from advanced_discovery/simple_stats
 
-def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
+def filter_rules(df, no_self=False, no_dups=False):
+    """
+    Filters the rules DataFrame based on criteria.
+    """
+    if no_self:
+        df = df[df["Antecedents"] != df["Consequents"]]
+        
+    if no_dups:
+        def has_overlap(row):
+            ant = set(x.strip() for x in str(row["Antecedents"]).split(','))
+            con = set(x.strip() for x in str(row["Consequents"]).split(','))
+            return not ant.isdisjoint(con)
+        
+        # Filter out rows where overlap exists
+        df = df[~df.apply(has_overlap, axis=1)]
+        
+    return df
+
+def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1, 
+                                       method_filter=None, exclude_self_loops=False, exclude_shared_items=False):
     """
     Generates heatmaps of top rules vs. clinical target values, colored by mean Lift,
     for the N best strategies.
@@ -62,7 +81,21 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
         return
 
     combined_lb = pd.concat(all_leaderboard_data, ignore_index=True)
-    combined_lb = combined_lb.sort_values(by="Score", ascending=False).head(num_best_strategies)
+    
+    # Sort by Score descending
+    combined_lb = combined_lb.sort_values(by="Score", ascending=False)
+
+    # Deduplicate: Keep only the best score for each Method + Target combination
+    combined_lb = combined_lb.drop_duplicates(subset=["Method", "Target"], keep="first")
+    
+    # Apply Method Filter if requested
+    if method_filter:
+        combined_lb = combined_lb[combined_lb["Method"] == method_filter]
+        if combined_lb.empty:
+            logger.warning(f"No strategies found for method '{method_filter}'.")
+            return
+
+    combined_lb = combined_lb.head(num_best_strategies)
 
     if combined_lb.empty:
         logger.warning("Could not identify any best strategies from leaderboards.")
@@ -74,7 +107,6 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
         logger.info(f"\n--- Strategy {i+1} ({best_strategy['Approach']}) ---")
         logger.info(f"  Method: {best_strategy['Method']}")
         logger.info(f"  Target: {best_strategy['Target']}")
-        logger.info(f"  Num_Features: {best_strategy['Num_Features']}")
         logger.info(f"  Score: {best_strategy['Score']:.3f}")
 
         # 2. Extract Top N Rules for This Best Strategy
@@ -95,7 +127,6 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
         target_for_filename = target.replace(" ", "_").replace("/", "-")
         score_filename_base = f"scores_{method}_{target_for_filename}{config_suffix}"
         
-        # Adjust score filename based on approach (Simple approach uses different prefix)
         if approach == "Simple":
             score_filename_base = f"scores_SIMPLE_{method}_{target_for_filename}{config_suffix}"
 
@@ -107,13 +138,41 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
 
         rule_scores_df = pd.read_csv(score_file_path)
         
-        # Sort rules by importance/frequency and take top N
+        # Ensure Rule, Antecedents, Consequents columns exist
+        if "Rule" not in rule_scores_df.columns:
+            if "Antecedents" in rule_scores_df.columns and "Consequents" in rule_scores_df.columns:
+                rule_scores_df["Rule"] = rule_scores_df["Antecedents"] + " -> " + rule_scores_df["Consequents"]
+            else:
+                raise ValueError(f"Score file for strategy {i+1} missing Rule or Antecedents/Consequents columns.")
+        
+        # If Antecedents/Consequents missing but Rule exists, parse them
+        if "Antecedents" not in rule_scores_df.columns or "Consequents" not in rule_scores_df.columns:
+            split_rules = rule_scores_df["Rule"].str.split(" -> ", n=1, expand=True)
+            if split_rules.shape[1] == 2:
+                rule_scores_df["Antecedents"] = split_rules[0]
+                rule_scores_df["Consequents"] = split_rules[1]
+            else:
+                raise ValueError(f"Could not parse rules for strategy {i+1}. Ensure format is 'Antecedents -> Consequents'.")
+
+        # Apply Rule Filters (Self/Dups)
+        rule_scores_df = filter_rules(rule_scores_df, no_self=exclude_self_loops, no_dups=exclude_shared_items)
+        
+        if rule_scores_df.empty:
+            logger.warning(f"No rules remaining after filtering for strategy {i+1}.")
+            continue
+
+        # Calculate Ranking Score
         if approach == "ML":
-            # Average RF, XGB, Lasso importance
-            rule_scores_df["Avg_Importance"] = rule_scores_df[["Mean_Imp_RF", "Mean_Imp_XGB", "Mean_Imp_Lasso"]].mean(axis=1)
-            top_rules = rule_scores_df.sort_values("Avg_Importance", ascending=False).head(top_n_rules)["Rule"].tolist()
+            rule_scores_df["Rank_Score"] = rule_scores_df[["Mean_Imp_RF", "Mean_Imp_XGB", "Mean_Imp_Lasso"]].mean(axis=1)
+            score_col_name = "Avg_Imp"
         else: # Simple Stats
-            top_rules = rule_scores_df.sort_values("Frequency", ascending=False).head(top_n_rules)["Rule"].tolist()
+            rule_scores_df["Rank_Score"] = rule_scores_df["Frequency"]
+            score_col_name = "Freq"
+
+        # Select Top N
+        top_rules_df = rule_scores_df.sort_values("Rank_Score", ascending=False).head(top_n_rules)
+        top_rules = top_rules_df["Rule"].tolist()
+        top_scores = top_rules_df["Rank_Score"].tolist()
             
         if not top_rules:
             logger.warning(f"No top rules found for best strategy {i+1}.")
@@ -124,30 +183,20 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
         # 3. Identify Clinical Target Values (Columns)
         df_raw = load_and_prep_data(method, os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR))
         if df_raw is None:
-            logger.error(f"Failed to load raw data for heatmap calculation for strategy {i+1}.")
             continue
         
-        # Ensure the target column exists and is not all NaN
         if target not in df_raw.columns or df_raw[target].isna().all():
-            logger.error(f"Target '{target}' not found or is all NaN in metadata for heatmap for strategy {i+1}.")
             continue
             
         unique_target_values = sorted(df_raw[target].dropna().unique().tolist())
         if not unique_target_values:
-            logger.warning(f"No unique non-NaN target values found for '{target}' for strategy {i+1}. Cannot create heatmap.")
             continue
 
-        # 4. Calculate Cell Values: Mean Lift of FOVs for Each Rule-TargetValue Pair
+        # 4. Calculate Cell Values: Mean Lift
         heatmap_data = pd.DataFrame(index=top_rules, columns=unique_target_values)
-        
-        # Filter df_raw by the best strategy's method once for efficiency
-        # This is not necessarily the method the df_raw corresponds to.
-        # df_raw is loaded based on the method parameter of load_and_prep_data
-        # which is the method from the best strategy. So df_raw corresponds to the current method.
 
         for rule in top_rules:
             for target_value in unique_target_values:
-                # Filter df_raw for this rule and target value directly
                 rule_data_for_target_value = df_raw[
                     (df_raw["Rule"] == rule) & 
                     (df_raw[target] == target_value)
@@ -157,22 +206,97 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
                     mean_lift = rule_data_for_target_value["Lift"].mean()
                     heatmap_data.loc[rule, target_value] = mean_lift
                 else:
-                    heatmap_data.loc[rule, target_value] = np.nan # Or 0, depending on preference
+                    heatmap_data.loc[rule, target_value] = np.nan 
 
-        heatmap_data = heatmap_data.astype(float) # Ensure all values are numeric
+        heatmap_data = heatmap_data.astype(float).fillna(0)
 
-        # Handle NaN values for plotting (e.g., fill with 0 or a low value)
-        heatmap_data = heatmap_data.fillna(0) # Or another appropriate value
-
-        # 5. Generate Heatmap
-        plt.figure(figsize=(max(10, len(unique_target_values) * 1.5), max(8, len(top_rules) * 0.5)))
-        sns.heatmap(heatmap_data, annot=True, cmap="Blues", fmt=".2f", linewidths=.5, cbar_kws={'label': 'Mean Lift'})
+        # 5. Generate Layout
+        fig_width = max(16, len(unique_target_values) * 1.5 + 6)
+        fig_height = max(8, len(top_rules) * 0.5)
         
-        plt.title(f"Strategy {i+1} ({approach}): Mean Lift of Top Rules by {target} Value")
-        plt.xlabel(f"{target} Value")
-        plt.ylabel("Rule")
-        plt.tight_layout()
+        fig = plt.figure(figsize=(fig_width, fig_height))
         
+        # GridSpec: Heatmap | Score Text | Violin | Colorbar
+        # Width ratios adjusted to give space for score text
+        gs = fig.add_gridspec(1, 4, width_ratios=[len(unique_target_values), 1, 2, 0.2], wspace=0.05)
+        
+        ax_heatmap = fig.add_subplot(gs[0, 0])
+        ax_score = fig.add_subplot(gs[0, 1])
+        ax_violin = fig.add_subplot(gs[0, 2])
+        ax_cbar = fig.add_subplot(gs[0, 3])
+
+        # Plot Heatmap - Diverging Color Scheme
+        # Center at 1.0 (Neutral). Red > 1, Blue < 1
+        sns.heatmap(heatmap_data, annot=True, cmap="RdBu_r", center=1.0, fmt=".2f", 
+                    linewidths=.5, linecolor='gray',
+                    cbar_ax=ax_cbar, cbar_kws={'label': 'Mean Lift'}, ax=ax_heatmap)
+        
+        # Clean and Informative Title
+        plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}"
+        ax_heatmap.set_title(plot_title, fontsize=12, pad=10)
+        ax_heatmap.set_xlabel(f"{target} Value")
+        ax_heatmap.set_ylabel("Rule")
+
+        # Plot Score Column (Text)
+        ax_score.set_ylim(len(top_rules), 0)
+        ax_score.set_xlim(0, 1)
+        ax_score.axis('off')
+        ax_score.set_title(score_col_name)
+        
+        for idx, score in enumerate(top_scores):
+            ax_score.text(0.5, idx + 0.5, f"{score:.3f}", 
+                          ha='center', va='center', fontsize=10)
+            
+            # Add separator lines to match heatmap rows
+            ax_score.axhline(idx, color='gray', linewidth=0.5)
+            ax_score.axhline(idx + 1, color='gray', linewidth=0.5)
+
+        # Prepare Data for Violin Plot
+        violin_data = []
+        for rule in top_rules:
+            lifts = df_raw[df_raw["Rule"] == rule]["Lift"].dropna().values
+            violin_data.append(lifts if len(lifts) > 0 else np.array([]))
+            
+        violin_positions = np.arange(len(top_rules)) + 0.5
+        
+        # Plot Violins
+        parts = ax_violin.violinplot(violin_data, positions=violin_positions, vert=False, 
+                                     widths=0.8, showextrema=True, showmedians=True)
+        
+        # Style Violins
+        for pc in parts['bodies']:
+            pc.set_facecolor('#a6cee3')
+            pc.set_edgecolor('black')
+            pc.set_linewidth(0.5)
+            pc.set_alpha(0.8)
+            
+        for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
+            if partname in parts:
+                parts[partname].set_edgecolor('black')
+                parts[partname].set_linewidth(1)
+
+        # Overlay Strip Plot (Dots)
+        for rule_idx, lifts in enumerate(violin_data):
+            if len(lifts) > 0:
+                y_jitter = (rule_idx + 0.5) + np.random.uniform(-0.1, 0.1, size=len(lifts))
+                ax_violin.scatter(lifts, y_jitter, color='black', alpha=0.5, s=3, zorder=3)
+
+        # Align Violin Axis
+        ax_violin.set_ylim(len(top_rules), 0)
+        ax_violin.set_yticks([])
+        ax_violin.set_yticklabels([])
+        ax_violin.spines['left'].set_visible(False)
+        ax_violin.spines['right'].set_visible(False)
+        ax_violin.spines['top'].set_visible(False)
+        ax_violin.spines['bottom'].set_visible(True)
+        
+        ax_violin.set_title("Lift Distribution")
+        ax_violin.set_xlabel("Lift")
+        
+        # Add grid lines
+        for y in range(len(top_rules) + 1):
+            ax_violin.axhline(y, color='gray', linewidth=0.5)
+
         plot_filename = os.path.join(
             PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR, 
             f"heatmap_rules_by_target_value_strategy_{i+1}_{method}_{target.replace(' ', '_').replace('/', '-')}_{approach}.png"
@@ -186,8 +310,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate clinical correlation heatmaps.")
     parser.add_argument("--num_strategies", type=int, default=3, help="Number of best strategies to process (default: 3)")
     parser.add_argument("--top_n_rules", type=int, default=20, help="Number of top rules to include in heatmap (default: 20)")
-    
+    parser.add_argument("--method", type=str, help="Filter by specific method (e.g., KNN_R, BAG)")
+    parser.add_argument("--exclude_self_loops", action="store_true", help="Exclude self-loops (A->A)")
+    parser.add_argument("--exclude_shared_items", action="store_true", help="Exclude rules with any cell type overlap between antecedent and consequent")
+
     args = parser.parse_args()
     
     # Generate heatmaps with provided arguments
-    generate_rule_target_value_heatmap(top_n_rules=args.top_n_rules, num_best_strategies=args.num_strategies)
+    generate_rule_target_value_heatmap(
+        top_n_rules=args.top_n_rules, 
+        num_best_strategies=args.num_strategies,
+        method_filter=args.method,
+        exclude_self_loops=args.exclude_self_loops,
+        exclude_shared_items=args.exclude_shared_items
+    )

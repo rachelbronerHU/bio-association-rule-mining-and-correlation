@@ -132,7 +132,7 @@ def _save_individual_plot(method_name, idx, df_fov, ants, cons, color_map, title
     plt.close(fig_single)
     print(f"   -> Saved individual asset: {single_out_path}")
 
-def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=False, exclude_containing_self_rules=False):
+def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_loops=False, exclude_shared_items=False):
     results_path = os.path.join(RESULTS_DIR, f"results_{method_name}.csv")
     if not os.path.exists(results_path):
         print(f"Skipping {method_name}: File not found.")
@@ -148,8 +148,8 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
     # Create a unique rule identifier for deduplication
     rules_df['Rule_Str'] = rules_df['Antecedents'] + "->" + rules_df['Consequents']
 
-    # 1. Filter: Exclude Containing Self (Stricter)
-    if exclude_containing_self_rules:
+    # 1. Filter: Exclude Shared Items (Stricter)
+    if exclude_shared_items:
         # Check intersection: if any item is in both antecedent and consequent
         def has_overlap(row):
             ants = parse_rule_list(row['Antecedents'])
@@ -158,9 +158,9 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
         
         rules_df = rules_df[~rules_df.apply(has_overlap, axis=1)]
         
-    # 2. Filter: Exclude Exact Self Rules (Simpler)
+    # 2. Filter: Exclude Exact Self Loops (Simpler)
     # Only run if strict filter wasn't applied (since strict covers simple)
-    elif exclude_self_rules:
+    elif exclude_self_loops:
         def is_self_rule(row):
             ants = parse_rule_list(row['Antecedents'])
             cons = parse_rule_list(row['Consequents'])
@@ -256,10 +256,10 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
 
     # Determine Output Filename
     suffix = ""
-    if exclude_containing_self_rules:
-        suffix = "_no_containing_self"
-    elif exclude_self_rules:
-        suffix = "_no_self"
+    if exclude_shared_items:
+        suffix = "_no_shared_items"
+    elif exclude_self_loops:
+        suffix = "_no_self_loops"
 
     out_path = os.path.join(OUTPUT_DIR, f"{method_name}_top_rules{suffix}.png")
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
@@ -269,8 +269,8 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
 def main():
     parser = argparse.ArgumentParser(description="Visualize Top Spatial Rules")
     parser.add_argument("--top_n", type=int, default=3, help="Number of top rules to visualize per method")
-    parser.add_argument("--exclude_self_rules", action="store_true", help="Filter out rules where antecedent set EQUALS consequent set.")
-    parser.add_argument("--exclude_containing_self_rules", action="store_true", help="Filter out rules where ANY cell type appears in both antecedent and consequent.")
+    parser.add_argument("--exclude_self_loops", action="store_true", help="Filter out rules where antecedent set EQUALS consequent set.")
+    parser.add_argument("--exclude_shared_items", action="store_true", help="Filter out rules where ANY cell type appears in both antecedent and consequent.")
     args = parser.parse_args()
 
     if not os.path.exists(OUTPUT_DIR):
@@ -287,8 +287,8 @@ def main():
     for method in METHODS:
         visualize_method(method, cell_df, color_map, 
                          top_n=args.top_n, 
-                         exclude_self_rules=args.exclude_self_rules,
-                         exclude_containing_self_rules=args.exclude_containing_self_rules)
+                         exclude_self_loops=args.exclude_self_loops,
+                         exclude_shared_items=args.exclude_shared_items)
 
 if __name__ == "__main__":
     main()

@@ -138,6 +138,7 @@ def plot_distributions(dfs, output_dir):
     hue_col = "Method"
     if "Pathological stage" in full_df.columns:
         hue_col = "Pathological stage"
+        full_df[hue_col] = full_df[hue_col].fillna(-1).astype(int)
         
     g = sns.FacetGrid(full_df, col="Method", col_wrap=3, height=4)
     g.map_dataframe(sns.scatterplot, x="Confidence", y="Lift", hue=hue_col, alpha=0.6, s=20, palette="viridis")
@@ -162,14 +163,15 @@ def plot_volcano(dfs, output_dir):
     
     # Fixed Color Map for Stages
     stage_colors = {
-        0: "forestgreen",
+        0: "forestgreen", # Control
         1: "gold",
-        2: "darkorange",
-        3: "firebrick"
+        2: "orange",
+        3: "darkorange",
+        4: "firebrick"
     }
     
     # Legend Labels
-    stage_labels = ["Stage 0", "Stage 1", "Stage 2", "Stage 3"]
+    stage_labels = ["Control", "Stage 1", "Stage 2", "Stage 3", "Stage 4"]
     
     for i, m in enumerate(valid_methods):
         ax = axes[i]
@@ -182,6 +184,9 @@ def plot_volcano(dfs, output_dir):
         hue_col = "Pathological stage" if "Pathological stage" in df.columns else "Group"
         palette = stage_colors if hue_col == "Pathological stage" else "Spectral"
         
+        if hue_col == "Pathological stage":
+             df[hue_col] = df[hue_col].fillna(-1).astype(int)
+
         sns.scatterplot(
             data=df, 
             x="Lift", 

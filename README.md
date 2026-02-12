@@ -71,20 +71,22 @@ The following tables demonstrate the efficiency of different neighborhood defini
 
 > | METHOD | RULE | LIFT | CONF | CONV | SUP | FDR |
 > | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-> | **BAG** | FibroticEpithelial -> Endothelial, SMV | 27.19 | 0.75 | 3.89 | 0.011 | 0.0016 |
-> | **BAG** | FibroticEpithelial, SMV -> Endothelial | 21.70 | 0.86 | 6.72 | 0.011 | 0.0016 |
+> | **BAG** | FibroticEpithelial -> Endothelial, SMV | 27.19 | 0.75 | 3.89 | 0.011 | 0.0017 |
+> | **BAG** | FibroticEpithelial, SMV -> Endothelial | 21.70 | 0.86 | 6.72 | 0.011 | 0.0017 |
+> | **BAG** | Goblet -> SMV | 0.11 | 0.03 | 0.78 | 0.010 | 0.0021 |
+> | **BAG** | SMV -> Goblet | 0.11 | 0.04 | 0.65 | 0.010 | 0.0021 |
 > | --- | --- | --- | --- | --- | --- | --- |
-> | **CN** | Muscle_CENTER -> Muscle_NEIGHBOR | 43.20 | 1.00 | inf | 0.010 | 0.0012 |
-> | **CN** | Muscle_CENTER -> Fibroblast_NEIGHBOR, Muscle_NEIGHBOR | 27.37 | 0.77 | 4.17 | 0.010 | 0.0014 |
+> | **CN** | Muscle_CENTER -> Muscle_NEIGHBOR | 43.20 | 1.00 | inf | 0.010 | 0.0024 |
+> | **CN** | Muscle_CENTER -> Muscle_NEIGHBOR, Unidentified_NEIGHBOR | 33.30 | 0.79 | 4.56 | 0.016 | 0.0010 |
+> | **CN** | Epithelial_CENTER -> SMV_NEIGHBOR | 0.13 | 0.05 | 0.61 | 0.013 | 0.0014 |
+> | **CN** | Muscle_CENTER -> Epithelial_NEIGHBOR | 0.14 | 0.10 | 0.32 | 0.011 | 0.0012 |
 > | --- | --- | --- | --- | --- | --- | --- |
-> | **KNN_R** | Muscle_CENTER -> Muscle_NEIGHBOR | 43.20 | 1.00 | inf | 0.010 | 0.0014 |
-> | **KNN_R** | Muscle_CENTER -> Fibroblast_NEIGHBOR, Muscle_NEIGHBOR | 27.37 | 0.77 | 4.17 | 0.010 | 0.0014 |
+> | **KNN_R** | Muscle_CENTER -> Muscle_NEIGHBOR | 43.20 | 1.00 | inf | 0.010 | 0.0020 |
+> | **KNN_R** | Muscle_CENTER -> Muscle_NEIGHBOR, Unidentified_NEIGHBOR | 33.30 | 0.79 | 4.56 | 0.016 | 0.0011 |
+> | **KNN_R** | Epithelial_CENTER -> SMV_NEIGHBOR | 0.13 | 0.05 | 0.61 | 0.013 | 0.0014 |
+> | **KNN_R** | Muscle_CENTER -> Epithelial_NEIGHBOR | 0.14 | 0.10 | 0.32 | 0.011 | 0.0012 |
 > | --- | --- | --- | --- | --- | --- | --- |
-> | **WINDOW** | Endocrine, Unidentified -> Epithelial, Monocyte | 100.00 | 1.00 | inf | 0.010 | 0.0147 |
-> | **WINDOW** | Endocrine, Endothelial -> CD8T, Epithelial | 100.00 | 1.00 | inf | 0.010 | 0.0147 |
-> | --- | --- | --- | --- | --- | --- | --- |
-> | **GRID** | Paneth -> Epithelial | 12.67 | 1.00 | inf | 0.011 | 0.0010 |
-> | **GRID** | Endocrine -> Epithelial | 9.43 | 0.79 | 4.28 | 0.018 | 0.0010 |
+
 
 ---
 
@@ -105,10 +107,6 @@ The primary volcano plots below illustrate the relationship between Rule Lift (s
 
 **1. Raw Rules (Before Filtering)**
 > <img src="results/full_run/plots/raw_rules_report/raw_volcano_grid.png" width="600" alt="Raw Rules Volcano">
-
-**2. Low Threshold Run (Relaxed Constraints)**
-*Note the denser cloud of lower-lift rules in this experimental configuration.*
-> <img src="results/full_run/plots/raw_rules_report/raw_volcano_grid_low_threshold.png" width="600" alt="Low Threshold Volcano">
 
 ### Rules per FOV (KNN_R)
 Distribution of the number of validated rules found in each Field of View (FOV) using the KNN_R method.
@@ -148,12 +146,12 @@ Visualizing the top 3 ranked unique spatial rules (excluding self-referential ru
 ### Method: KNN_R (K-Nearest Neighbors Radius)
 | Rank 1 | Rank 2 | Rank 3 |
 | :---: | :---: | :---: |
-| <img src="results/full_run/plots/readme_assets/KNN_R_rank_1.png" width="300"> | <img src="results/full_run/plots/readme_assets/KNN_R_rank_2.png" width="300"> | <img src="results/full_run/plots/readme_assets/KNN_R_rank_3.png" width="300"> |
+| <img src="results/full_run/plots/readme_assets/KNN_R_rule_1.png" width="300"> | <img src="results/full_run/plots/readme_assets/KNN_R_rule_2.png" width="300"> | <img src="results/full_run/plots/readme_assets/KNN_R_rule_3.png" width="300"> |
 
 ### Method: BAG (Bagging)
 | Rank 1 | Rank 2 | Rank 3 |
 | :---: | :---: | :---: |
-| <img src="results/full_run/plots/readme_assets/BAG_rank_1.png" width="300"> | <img src="results/full_run/plots/readme_assets/BAG_rank_2.png" width="300"> | <img src="results/full_run/plots/readme_assets/BAG_rank_3.png" width="300"> |
+| <img src="results/full_run/plots/readme_assets/BAG_rule_1.png" width="300"> | <img src="results/full_run/plots/readme_assets/BAG_rule_2.png" width="300"> | <img src="results/full_run/plots/readme_assets/BAG_rule_3.png" width="300"> |
 
 ---
 

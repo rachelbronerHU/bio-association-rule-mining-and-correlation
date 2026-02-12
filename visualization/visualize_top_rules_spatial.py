@@ -115,6 +115,23 @@ def plot_fov_rule_highlight(ax, df_fov, antecedents, consequents, color_map):
     ax.invert_yaxis()
     # No legend on this side as requested
 
+def _save_individual_plot(method_name, idx, df_fov, ants, cons, color_map, title_str):
+    """Saves a separate plot for a single rule (for README/Reports)."""
+    readme_dir = os.path.join(constants.RESULTS_PLOTS_DIR, 'readme_assets')
+    os.makedirs(readme_dir, exist_ok=True)
+    
+    fig_single, axes_single = plt.subplots(1, 2, figsize=(18, 6))
+    
+    plot_fov_full(axes_single[0], df_fov, color_map)
+    plot_fov_rule_highlight(axes_single[1], df_fov, ants, cons, color_map)
+    
+    fig_single.suptitle(title_str, fontsize=12, fontweight='bold', y=0.98)
+    
+    single_out_path = os.path.join(readme_dir, f"{method_name}_rule_{idx+1}.png")
+    plt.savefig(single_out_path, dpi=150, bbox_inches='tight')
+    plt.close(fig_single)
+    print(f"   -> Saved individual asset: {single_out_path}")
+
 def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=False, exclude_containing_self_rules=False):
     results_path = os.path.join(RESULTS_DIR, f"results_{method_name}.csv")
     if not os.path.exists(results_path):
@@ -232,6 +249,10 @@ def visualize_method(method_name, cell_df, color_map, top_n, exclude_self_rules=
         
         fig.text(center_x, top_y, title_str, ha='center', va='bottom', 
                  fontsize=12, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='lightgray'))
+
+        # Save individual plots for top 3 rules of specific methods
+        if method_name in ["BAG", "KNN_R"] and idx < 3:
+            _save_individual_plot(method_name, idx, df_fov, ants, cons, color_map, title_str)
 
     # Determine Output Filename
     suffix = ""

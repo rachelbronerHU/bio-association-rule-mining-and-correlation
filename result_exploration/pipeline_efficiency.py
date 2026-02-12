@@ -6,7 +6,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=pd.errors.DtypeWarning)
 
 DATA_DIR = "results/full_run/data"
-METHODS = ["BAG", "CN", "KNN_R", "WINDOW", "GRID"]
+METHODS = ["BAG", "CN", "KNN_R"]
 
 def calculate_summary_stats():
     print("\n=== PIPELINE EFFICIENCY REPORT (Raw vs Final) ===\n")
@@ -15,7 +15,7 @@ def calculate_summary_stats():
     print(header)
     print("-" * len(header))
 
-    METHODS = ["BAG", "CN", "KNN_R", "WINDOW", "GRID"]
+    METHODS = ["BAG", "CN", "KNN_R"]
     DATA_DIR = "results/full_run/data"
 
     for method in METHODS:
@@ -42,7 +42,8 @@ def calculate_summary_stats():
                 if not df_raw.empty:
                     raw_count = len(df_raw)
                     raw_fov_avg = raw_count / df_raw['FOV'].nunique()
-                    raw_lift = df_raw['Lift'].mean()
+                    if 'Lift' in df_raw.columns:
+                        raw_lift = df_raw['Lift'].mean()
                     
                     if "FDR" in df_raw.columns:
                         n_sig = len(df_raw[df_raw["FDR"] < 0.01])
@@ -62,7 +63,8 @@ def calculate_summary_stats():
                 if not df_final.empty:
                     final_count = len(df_final)
                     final_fov_avg = final_count / df_final['FOV'].nunique()
-                    final_lift = df_final['Lift'].mean()
+                    if 'Lift' in df_final.columns:
+                        final_lift = df_final['Lift'].mean()
                     
                     if "FDR" in df_final.columns:
                         n_sig = len(df_final[df_final["FDR"] < 0.01])

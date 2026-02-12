@@ -48,10 +48,11 @@ def plot_raw_volcano(dfs, output_dir):
 
     # Fixed Color Map for Stages
     stage_colors = {
-        0: "forestgreen",
+        0: "forestgreen", # Control
         1: "gold",
-        2: "darkorange",
-        3: "firebrick"
+        2: "orange",
+        3: "darkorange",
+        4: "firebrick"
     }
     
     # Setup Grid
@@ -83,6 +84,8 @@ def plot_raw_volcano(dfs, output_dir):
         if hue_col not in df.columns: 
             hue_col = None
             palette = None
+        elif hue_col == "Pathological stage":
+             df[hue_col] = df[hue_col].fillna(-1).astype(int)
         
         sns.scatterplot(
             data=df, 

@@ -7,13 +7,13 @@ import seaborn as sns
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from constants import MIBI_GUT_DIR_PATH, RESULTS_DIR
+from constants import MIBI_GUT_DIR_PATH, RESULTS_PLOTS_DIR
 
 # Configuration
 # We need to load the BIOPSY metadata, as that's the "Unit of Analysis".
 # The cell table is too granular.
 DATA_PATH = MIBI_GUT_DIR_PATH + "biopsy_metadata.csv"
-OUTPUT_DIR = RESULTS_DIR + "data_bias_report/"
+OUTPUT_DIR = RESULTS_PLOTS_DIR + "data_bias_report/"
 
 TARGETS = [
     "Pathological stage", 

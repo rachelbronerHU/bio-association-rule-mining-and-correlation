@@ -53,9 +53,10 @@ def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id=None):
     df_trans = pd.DataFrame(te_ary, columns=te.columns_)
     
     frequent_itemsets = fpgrowth(df_trans, min_support=config["MIN_SUPPORT"], use_colnames=True)
-    if frequent_itemsets.empty: return pd.DataFrame()
+    if frequent_itemsets.empty: 
+        return pd.DataFrame()
         
-    rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=config["MIN_CONFIDENCE"])
+    rules = association_rules(frequent_itemsets, metric="support", min_threshold=config["MIN_SUPPORT"])
     
     # Ensure conviction is present (mlxtend usually adds it, but we handle inf explicitly if needed or missing)
     if "conviction" not in rules.columns:
@@ -67,7 +68,7 @@ def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id=None):
             rules["conviction"] = rules["conviction"].fillna(np.inf)
 
     # Filter by Lift, Leverage, and Conviction
-    is_valid = _filter_rule_by_scores_mask(config, rules["lift"], rules["leverage"], rules["conviction"])
+    is_valid = _filter_rule_by_scores_mask(config, rules["lift"], rules["leverage"], rules["conviction"], rules["confidence"])
     
     rules = rules[is_valid]
     
@@ -179,7 +180,8 @@ def check_rule_in_transactions(rule_row, transactions_sets, config):
     if support_ant == 0: return False # Should not happen if support_both > 0
     
     confidence = support_both / support_ant
-    if confidence < config["MIN_CONFIDENCE"]: return False
+    # Early confidence filter removed to allow negative rules
+    # if confidence < config["MIN_CONFIDENCE"]: return False
     
     if support_cons == 0: return False
     
@@ -195,7 +197,7 @@ def check_rule_in_transactions(rule_row, transactions_sets, config):
     # Note: We check if it is a 'valid discovery' in this random set
     # Using the same criteria as mining
     
-    return _filter_rule_by_scores_mask(config, lift, leverage, conviction)
+    return _filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
 
 def validate_rules_exact(neighborhoods, cell_types, rules_df, config, method):
     """
@@ -244,7 +246,7 @@ def validate_rules_exact(neighborhoods, cell_types, rules_df, config, method):
     rules_df["p_value_adj"] = _apply_fdr_correction(p_values)
     return rules_df
 
-def process_single_sample(sample_id, group_val, df_sample, method, config):
+def process_single_sample(sample_id, df_sample, method, config):
     pid = os.getpid()
     prefix = f"[Worker {pid}] [Sample {sample_id}]"
     
@@ -289,15 +291,14 @@ def process_single_sample(sample_id, group_val, df_sample, method, config):
     
     return {
         "Sample": sample_id,
-        "Group": group_val,
         "Rules": rules_v,
         "RawRules": raw_rules_v,
         "Stats": stats
     }
 
-def _filter_rule_by_scores_mask(config, lift, leverage, conviction):
+def _filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence):
     min_conv = config.get("MIN_CONVICTION", 1.0)
-    is_positive = (lift >= config["MIN_LIFT"]) & (leverage >= config["MIN_LEVERAGE"]) & (conviction >= min_conv)
+    is_positive = (lift >= config["MIN_LIFT"]) & (leverage >= config["MIN_LEVERAGE"]) & (conviction >= min_conv) & (confidence >= config["MIN_CONFIDENCE"])
     is_negative = (lift <= config["MAX_NEGATIVE_LIFT"])
     return is_positive | is_negative
 

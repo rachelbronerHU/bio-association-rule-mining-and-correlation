@@ -182,7 +182,12 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1):
         logger.info(f"Heatmap for strategy {i+1} saved to {plot_filename}")
 
 if __name__ == "__main__":
-    # Example usage: Generate heatmaps for the top 3 best strategies
-    generate_rule_target_value_heatmap(num_best_strategies=3)
-    # To generate for only the single best strategy (default), call without args:
-    # generate_rule_target_value_heatmap()
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate clinical correlation heatmaps.")
+    parser.add_argument("--num_strategies", type=int, default=3, help="Number of best strategies to process (default: 3)")
+    parser.add_argument("--top_n_rules", type=int, default=20, help="Number of top rules to include in heatmap (default: 20)")
+    
+    args = parser.parse_args()
+    
+    # Generate heatmaps with provided arguments
+    generate_rule_target_value_heatmap(top_n_rules=args.top_n_rules, num_best_strategies=args.num_strategies)

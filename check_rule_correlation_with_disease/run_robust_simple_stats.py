@@ -3,6 +3,8 @@ import numpy as np
 import os
 import time
 import logging
+import argparse
+import ast
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import LabelEncoder
@@ -20,7 +22,7 @@ import constants
 # --- CONFIGURATION ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
-OUTPUT_DATA_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR)
+
 FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS = ["BAG", "CN", "KNN_R"] 
 TARGETS = [
@@ -37,19 +39,44 @@ TARGETS = [
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("SimpleStats")
 
-def load_and_prep_data(input_file):
+def parse_rule_items(item_str):
+    """
+    Parses string representation of list "['A', 'B']" into a python set.
+    """
+    try:
+        items = ast.literal_eval(item_str)
+        # Clean items (remove _CENTER/_NEIGHBOR suffixes if present, though strictly 'no_self' usually implies checking raw types)
+        # Assuming format matches what visualize_top_rules_spatial expects
+        return set(i.replace('_CENTER', '').replace('_NEIGHBOR', '') for i in items)
+    except:
+        return set([str(item_str).strip("[]'\"")])
+
+def load_and_prep_data(input_file, no_self=False):
     if not os.path.exists(input_file): return None, None, None
     df = pd.read_csv(input_file)
     
     initial_len = len(df)
+    
+    # Apply No-Self Filter (Strict: No Shared Items)
+    if no_self:
+        def has_overlap(row):
+            # Parse Antecedents and Consequents
+            ant = parse_rule_items(row['Antecedents'])
+            con = parse_rule_items(row['Consequents'])
+            return not ant.isdisjoint(con)
+        
+        df = df[~df.apply(has_overlap, axis=1)]
+        logger.info(f"   Applied No-Self Filter: {initial_len} -> {len(df)} rules")
+
     if "FDR" in df.columns:
+        initial_len = len(df)
         df = df[df["FDR"] < 0.05]
         dropped = initial_len - len(df)
         if dropped > 0:
             logger.info(f"   Dropped {dropped} rows with FDR >= 0.05 (Retained: {len(df)})")
     
     if df.empty:
-        logger.warning("   No data left after FDR filtering.")
+        logger.warning("   No data left after filtering.")
         return None, None, None
 
     if "Rule" not in df.columns:
@@ -170,7 +197,7 @@ def process_single_fold(X, y_enc, train_idx, test_idx, fold_id, task_label, is_m
         logger.error(f"{task_label} Fold {fold_id+1} - Error: {str(e)}")
         return {"success": False, "msg": str(e)}
 
-def save_comparison_summary_simple(leaderboard_data):
+def save_comparison_summary_simple(leaderboard_data, output_dir):
     """
     Creates a pivot table comparing scores across different feature counts for simple stats.
     """
@@ -187,24 +214,34 @@ def save_comparison_summary_simple(leaderboard_data):
     pivot["Best_Config"] = numeric_score_pivot.idxmax(axis=1)
     pivot["Best_Score"] = numeric_score_pivot.max(axis=1)
     
-    filename = f"{OUTPUT_DATA_DIR}/comparison_summary_simple.csv"
+    filename = f"{output_dir}/comparison_summary_simple.csv"
     pivot.to_csv(filename)
     logger.info(f"   >>> SAVED COMPARISON SUMMARY (Simple): {filename}")
 
-def run_pipeline():
+def run_pipeline(no_self=False):
     if not os.path.exists(BASE_INPUT_DIR):
         logger.error("CRITICAL: Input directory missing.")
         return
-    os.makedirs(OUTPUT_DATA_DIR, exist_ok=True)
+
+    # Select Output Directory
+    if no_self:
+        output_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR_NO_SELF)
+        logger.info(f"Running in NO_SELF mode. Output: {output_dir}")
+    else:
+        output_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR)
+        logger.info(f"Running in STANDARD mode. Output: {output_dir}")
+
+    os.makedirs(output_dir, exist_ok=True)
     
-    leaderboard_data = [] # Changed to leaderboard_data for consistency with advanced_discovery
+    leaderboard_data = []
 
     for method in METHODS:
         path = f"{BASE_INPUT_DIR}/results_{method}.csv"
         if not os.path.exists(path): continue
         
         logger.info(f"=== METHOD: {method} ===")
-        X_raw, y_meta, _ = load_and_prep_data(path)
+        # Pass no_self flag to loader
+        X_raw, y_meta, _ = load_and_prep_data(path, no_self=no_self)
         if X_raw is None: continue
         
         accumulators_map = {} # Key = (target, k_feat)
@@ -291,14 +328,14 @@ def run_pipeline():
                 suffix = f"_Top{k_feat}" if k_feat else "_All"
                 target_with_suffix = f"{target}{suffix}"
 
-                fname_preds = f"{OUTPUT_DATA_DIR}/preds_SIMPLE_{method}_{target_with_suffix.replace(' ', '_')}.csv"
+                fname_preds = f"{output_dir}/preds_SIMPLE_{method}_{target_with_suffix.replace(' ', '_')}.csv"
                 df_res.to_csv(fname_preds, index=False)
                 
                 r_counts = acc["rule_stats"]
                 df_rules = pd.DataFrame(list(r_counts.items()), columns=["Rule", "Count"])
                 df_rules["Frequency"] = df_rules["Count"] / len(acc["patient_results"])
                 df_rules = df_rules.sort_values("Count", ascending=False)
-                fname_scores = f"{OUTPUT_DATA_DIR}/scores_SIMPLE_{method}_{target_with_suffix.replace(' ', '_')}.csv"
+                fname_scores = f"{output_dir}/scores_SIMPLE_{method}_{target_with_suffix.replace(' ', '_')}.csv"
                 df_rules.to_csv(fname_scores, index=False)
                 
                 accuracy = (df_res["True_Value"] == df_res["Pred_Label"]).mean()
@@ -314,12 +351,16 @@ def run_pipeline():
     # Final Leaderboard
     if leaderboard_data:
         lb_df = pd.DataFrame(leaderboard_data).sort_values(["Target", "Accuracy"], ascending=False)
-        lb_path = f"{OUTPUT_DATA_DIR}/leaderboard_simple.csv"
+        lb_path = f"{output_dir}/leaderboard_simple.csv"
         lb_df.to_csv(lb_path, index=False)
         logger.info(f"DONE. Leaderboard (Simple) saved to {lb_path}")
         
-        save_comparison_summary_simple(leaderboard_data)
+        save_comparison_summary_simple(leaderboard_data, output_dir)
     print("\nBenchmark Complete.")
 
 if __name__ == "__main__":
-    run_pipeline()
+    parser = argparse.ArgumentParser(description="Run Robust Simple Stats Benchmark")
+    parser.add_argument("--no_self", action="store_true", help="Exclude rules with any shared cell types (strict no-self).")
+    args = parser.parse_args()
+    
+    run_pipeline(no_self=args.no_self)

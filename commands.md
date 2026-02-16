@@ -23,12 +23,12 @@
 ##### RULE CORRELATION FLOW #####
 
 # Step no. 1: Run discovery:
-* *Simple Discovery*: python check_rule_correlation_with_disease/run_robust_simple_stats.py
-* *Advanced Discovery*: python check_rule_correlation_with_disease/advanced_discovery.py
+* *Simple Discovery*: python check_rule_correlation_with_disease/run_robust_simple_stats.py [--no_self]
+* *Advanced Discovery*: python check_rule_correlation_with_disease/advanced_discovery.py [--no_self]
 
 # Step no. 2: Comparison
 * python visualization/clinical_correlations/plot_performance_comparisons.py (results/full_run/plots/clinical_correlation_report)
-* python visualization/clinical_correlations/plot_rule_target_value_heatmap.py [--num_strategies 5] [--exclude_shared_items / --exclude_self_loops] [--method KNN_R / CN / BAG] (results/full_run/plots/clinical_correlation_report)
+* python visualization/clinical_correlations/plot_rule_target_value_heatmap.py [--num_strategies 5] [--no_self] [--method KNN_R / CN / BAG] (results/full_run/plots/clinical_correlation_report)
 
 
 

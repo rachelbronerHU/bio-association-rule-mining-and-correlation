@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 import logging
+import argparse
 
 # --- IMPORT CONSTANTS ---
 import sys
@@ -16,12 +17,21 @@ logger = logging.getLogger("ComparisonPlotter")
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-def load_and_merge_leaderboards():
+def load_and_merge_leaderboards(no_self=False):
     """
-    Loads ML and Simple leaderboards, extracts individual model scores, and merges them for comparison.
+    Loads ML and Simple leaderboards from the appropriate directories based on no_self flag.
     """
-    lb_ml_path = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR, "final_leaderboard.csv")
-    lb_simple_path = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR, "leaderboard_simple.csv")
+    if no_self:
+        ml_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR_NO_SELF)
+        simple_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR_NO_SELF)
+        logger.info("Loading leaderboards from NO_SELF directories.")
+    else:
+        ml_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR)
+        simple_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR)
+        logger.info("Loading leaderboards from STANDARD directories.")
+
+    lb_ml_path = os.path.join(ml_data_dir, "final_leaderboard.csv")
+    lb_simple_path = os.path.join(simple_data_dir, "leaderboard_simple.csv")
 
     all_scores = []
 
@@ -68,13 +78,13 @@ def load_and_merge_leaderboards():
 
     return df_combined
 
-def generate_comparison_plots():
+def generate_comparison_plots(no_self=False):
     """
     Generates grouped bar charts and scatter plots for ML vs Simple performance comparison.
     """
     os.makedirs(os.path.join(PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR), exist_ok=True)
     
-    df_combined = load_and_merge_leaderboards()
+    df_combined = load_and_merge_leaderboards(no_self=no_self)
     if df_combined is None:
         return
 
@@ -99,31 +109,46 @@ def generate_comparison_plots():
     )
     
     g.set_axis_labels("Feature Configuration (Number of Rules Used)", "Score") # More descriptive X-axis label
-    g.set_titles("Method: {col_name} | Target: {row_name}")
+    g.set_titles("{col_name} | {row_name}")
     g.set_xticklabels(rotation=45, ha="right")
-    g.set(ylim=(0, df_combined["Score"].max() * 1.1)) # Adjust y-limit
+    
+    # Determine safe Y limit
+    y_max = df_combined["Score"].max()
+    if pd.isna(y_max) or y_max <= 0:
+        y_max = 1.0
+    g.set(ylim=(0, y_max * 1.1)) 
     
     # Add annotations to bars
     for ax in g.axes.flat:
         for container in ax.containers:
+            labels = []
             for bar in container:
                 height = bar.get_height()
-                if not pd.isna(height) and height > 0: # Only annotate non-NaN/non-zero bars
-                    ax.text(bar.get_x() + bar.get_width() / 2, height, 
-                            f'{height:.1f}', ha='center', va='bottom', fontsize=7, color='black')
+                if not pd.isna(height) and height > 0: 
+                    labels.append(f'{height:.2f}')
+                else:
+                    labels.append("")
+            ax.bar_label(container, labels=labels, label_type='edge', fontsize=7, padding=2)
 
-    g.fig.suptitle("Model-wise Performance Comparison (ML vs. Simple)", y=1.02) # Overall title
+    suffix_title = "(NO SELF)" if no_self else "(STANDARD)"
+    g.fig.suptitle(f"Model-wise Performance Comparison {suffix_title}", y=1.02) 
     
     # Move the auto-generated legend to top-right
     sns.move_legend(g, "upper right", bbox_to_anchor=(1, 1))
 
-    plt.tight_layout(rect=[0, 0, 0.85, 0.98]) # Adjust rect to accommodate layout and legend
+    plt.tight_layout(rect=[0, 0, 0.85, 0.98]) 
     
-    plot_filename_models_bars = os.path.join(PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR, "performance_model_wise_bars.png")
+    mode_str = "_NO_SELF" if no_self else ""
+    plot_filename_models_bars = os.path.join(PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR, f"performance_model_wise_bars{mode_str}.png")
+    
     plt.savefig(plot_filename_models_bars)
-    plt.close(g.fig) # Use g.fig to close the figure
+    plt.close(g.fig) 
     logger.info(f"Model-wise Grouped Bar Charts saved to {plot_filename_models_bars}")
 
 
 if __name__ == "__main__":
-    generate_comparison_plots()
+    parser = argparse.ArgumentParser(description="Generate Comparison Plots")
+    parser.add_argument("--no_self", action="store_true", help="Load data from NO_SELF directories")
+    args = parser.parse_args()
+    
+    generate_comparison_plots(no_self=args.no_self)

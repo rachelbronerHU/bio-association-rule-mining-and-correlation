@@ -29,38 +29,30 @@ def load_and_prep_data(method, base_input_dir):
     if "Rule" not in df.columns:
         df["Rule"] = df["Antecedents"] + " -> " + df["Consequents"]
         
-    return df # df is the df_raw from advanced_discovery/simple_stats
-
-def filter_rules(df, no_self=False, no_dups=False):
-    """
-    Filters the rules DataFrame based on criteria.
-    """
-    if no_self:
-        df = df[df["Antecedents"] != df["Consequents"]]
-        
-    if no_dups:
-        def has_overlap(row):
-            ant = set(x.strip() for x in str(row["Antecedents"]).split(','))
-            con = set(x.strip() for x in str(row["Consequents"]).split(','))
-            return not ant.isdisjoint(con)
-        
-        # Filter out rows where overlap exists
-        df = df[~df.apply(has_overlap, axis=1)]
-        
-    return df
+    return df 
 
 def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1, 
-                                       method_filter=None, exclude_self_loops=False, exclude_shared_items=False):
+                                       method_filter=None, no_self=False):
     """
-    Generates heatmaps of top rules vs. clinical target values, colored by mean Lift,
-    for the N best strategies.
+    Generates heatmaps of top rules vs. clinical target values.
+    If no_self is True, loads data from the pre-filtered NO_SELF directories.
     """
     
     os.makedirs(os.path.join(PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR), exist_ok=True)
 
-    # 1. Load leaderboards to identify the best strategy(ies)
-    lb_ml_path = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR, "final_leaderboard.csv")
-    lb_simple_path = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR, "leaderboard_simple.csv")
+    # 1. Determine Source Directories based on Flag
+    if no_self:
+        ml_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR_NO_SELF)
+        simple_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR_NO_SELF)
+        logger.info("Running in NO_SELF mode. Loading data from pre-filtered directories.")
+    else:
+        ml_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR)
+        simple_data_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR)
+        logger.info("Running in STANDARD mode.")
+
+    # 2. Load Leaderboards
+    lb_ml_path = os.path.join(ml_data_dir, "final_leaderboard.csv")
+    lb_simple_path = os.path.join(simple_data_dir, "leaderboard_simple.csv")
 
     all_leaderboard_data = []
 
@@ -77,16 +69,10 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             all_leaderboard_data.append(lb_simple[["Method", "Target", "Num_Features", "Score", "Approach"]])
 
     if not all_leaderboard_data:
-        logger.error("No leaderboard files found. Run advanced_discovery.py and run_robust_simple_stats.py first.")
+        logger.error(f"No leaderboard files found in:\n  {ml_data_dir}\n  {simple_data_dir}")
         return
 
     combined_lb = pd.concat(all_leaderboard_data, ignore_index=True)
-    
-    # Sort by Score descending
-    combined_lb = combined_lb.sort_values(by="Score", ascending=False)
-
-    # Deduplicate: Keep only the best score for each Method + Target combination
-    combined_lb = combined_lb.drop_duplicates(subset=["Method", "Target"], keep="first")
     
     # Apply Method Filter if requested
     if method_filter:
@@ -95,6 +81,10 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             logger.warning(f"No strategies found for method '{method_filter}'.")
             return
 
+    # Sort & Deduplicate
+    combined_lb = combined_lb.sort_values(by="Score", ascending=False)
+    combined_lb = combined_lb.drop_duplicates(subset=["Method", "Target"], keep="first")
+    
     combined_lb = combined_lb.head(num_best_strategies)
 
     if combined_lb.empty:
@@ -109,13 +99,13 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         logger.info(f"  Target: {best_strategy['Target']}")
         logger.info(f"  Score: {best_strategy['Score']:.3f}")
 
-        # 2. Extract Top N Rules for This Best Strategy
+        # 3. Extract Top N Rules
         method = best_strategy["Method"]
         target = best_strategy["Target"]
         num_features = best_strategy["Num_Features"] # Can be 'All' or a number
         approach = best_strategy["Approach"]
 
-        score_file_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR) if approach == "ML" else os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR)
+        score_file_dir = ml_data_dir if approach == "ML" else simple_data_dir
         
         config_suffix = ""
         if num_features == "All" or pd.isna(num_features):
@@ -123,7 +113,6 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         else:
             config_suffix = f"_Top{int(num_features)}"
 
-        # Note: Target name in score files also includes config_suffix
         target_for_filename = target.replace(" ", "_").replace("/", "-")
         score_filename_base = f"scores_{method}_{target_for_filename}{config_suffix}"
         
@@ -138,28 +127,15 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
 
         rule_scores_df = pd.read_csv(score_file_path)
         
-        # Ensure Rule, Antecedents, Consequents columns exist
+        # Ensure Rule column exists (Standardization)
         if "Rule" not in rule_scores_df.columns:
-            if "Antecedents" in rule_scores_df.columns and "Consequents" in rule_scores_df.columns:
-                rule_scores_df["Rule"] = rule_scores_df["Antecedents"] + " -> " + rule_scores_df["Consequents"]
-            else:
-                raise ValueError(f"Score file for strategy {i+1} missing Rule or Antecedents/Consequents columns.")
-        
-        # If Antecedents/Consequents missing but Rule exists, parse them
-        if "Antecedents" not in rule_scores_df.columns or "Consequents" not in rule_scores_df.columns:
-            split_rules = rule_scores_df["Rule"].str.split(" -> ", n=1, expand=True)
-            if split_rules.shape[1] == 2:
-                rule_scores_df["Antecedents"] = split_rules[0]
-                rule_scores_df["Consequents"] = split_rules[1]
-            else:
-                raise ValueError(f"Could not parse rules for strategy {i+1}. Ensure format is 'Antecedents -> Consequents'.")
+             if "Antecedents" in rule_scores_df.columns:
+                 rule_scores_df["Rule"] = rule_scores_df["Antecedents"] + " -> " + rule_scores_df["Consequents"]
+             else:
+                 logger.error(f"Score file missing Rule column: {score_file_path}")
+                 continue
 
-        # Apply Rule Filters (Self/Dups)
-        rule_scores_df = filter_rules(rule_scores_df, no_self=exclude_self_loops, no_dups=exclude_shared_items)
-        
-        if rule_scores_df.empty:
-            logger.warning(f"No rules remaining after filtering for strategy {i+1}.")
-            continue
+        # No filtering needed here! Data is already filtered in the source directory.
 
         # Calculate Ranking Score
         if approach == "ML":
@@ -178,10 +154,42 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             logger.warning(f"No top rules found for best strategy {i+1}.")
             continue
 
-        logger.info(f"Extracted {len(top_rules)} top rules for strategy {i+1}.")
+        # 4. Load Raw Data (filtered) for Heatmap Values
+        # Note: We load from the directory corresponding to the active mode (Standard or No Self)
+        # However, load_and_prep_data expects a base_input_dir.
+        # Since we have unified directories for data, we pass 'ml_data_dir' or 'simple_data_dir' ? 
+        # No, 'load_and_prep_data' looks for 'results_{method}.csv'.
+        # In the new design, 'results_{method}_{target}.csv' are saved in the data dir.
+        # But 'load_and_prep_data' in the original script looked for 'results_{method}.csv' in constants.RESULTS_DATA_DIR.
+        # The new pipeline saves subsetted raw data ('results_METHOD_TARGET.csv') in the OUTPUT dir.
+        # So we should look for the TARGET-SPECIFIC raw data file in the score_file_dir.
+        
+        # Construct target-specific results filename
+        results_filename = f"results_{method}_{target_for_filename}{config_suffix}.csv"
+        # For simple stats it might be prefixed differently? 
+        # In run_robust_simple_stats.py: f"results_{method_name}_{safe_target}.csv" (no SIMPLE prefix for results file)
+        
+        # Let's try to find the specific subset file first
+        target_results_path = os.path.join(score_file_dir, results_filename)
+        
+        if os.path.exists(target_results_path):
+            df_raw = pd.read_csv(target_results_path)
+            if "Rule" not in df_raw.columns:
+                df_raw["Rule"] = df_raw["Antecedents"] + " -> " + df_raw["Consequents"]
+        else:
+            # Fallback to general results file if specific one is missing (might be risky if filtering differs)
+            # But in NO_SELF mode, general file isn't pre-filtered? 
+            # Actually, the pipeline saves 'results_METHOD_TARGET.csv'. We should rely on that.
+            logger.warning(f"Target-specific results file not found: {target_results_path}. Trying generic...")
+            # If we are in NO_SELF mode, we MUST NOT use the generic file from standard dir.
+            # We should probably fail if specific file is missing in NO_SELF mode.
+            if no_self:
+                logger.error("In NO_SELF mode, target-specific filtered data is required but missing.")
+                continue
+            
+            # Standard fallback
+            df_raw = load_and_prep_data(method, os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR))
 
-        # 3. Identify Clinical Target Values (Columns)
-        df_raw = load_and_prep_data(method, os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR))
         if df_raw is None:
             continue
         
@@ -192,7 +200,7 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         if not unique_target_values:
             continue
 
-        # 4. Calculate Cell Values: Mean Lift
+        # 5. Calculate Cell Values: Mean Lift
         heatmap_data = pd.DataFrame(index=top_rules, columns=unique_target_values)
 
         for rule in top_rules:
@@ -210,14 +218,12 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
 
         heatmap_data = heatmap_data.astype(float).fillna(0)
 
-        # 5. Generate Layout
+        # 6. Generate Layout
         fig_width = max(16, len(unique_target_values) * 1.5 + 6)
         fig_height = max(8, len(top_rules) * 0.5)
         
         fig = plt.figure(figsize=(fig_width, fig_height))
         
-        # GridSpec: Heatmap | Score Text | Violin | Colorbar
-        # Width ratios adjusted to give space for score text
         gs = fig.add_gridspec(1, 4, width_ratios=[len(unique_target_values), 1, 2, 0.2], wspace=0.05)
         
         ax_heatmap = fig.add_subplot(gs[0, 0])
@@ -225,19 +231,17 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         ax_violin = fig.add_subplot(gs[0, 2])
         ax_cbar = fig.add_subplot(gs[0, 3])
 
-        # Plot Heatmap - Diverging Color Scheme
-        # Center at 1.0 (Neutral). Red > 1, Blue < 1
+        # Plot Heatmap
         sns.heatmap(heatmap_data, annot=True, cmap="RdBu_r", center=1.0, fmt=".2f", 
                     linewidths=.5, linecolor='gray',
                     cbar_ax=ax_cbar, cbar_kws={'label': 'Mean Lift'}, ax=ax_heatmap)
         
-        # Clean and Informative Title
         plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}"
         ax_heatmap.set_title(plot_title, fontsize=12, pad=10)
         ax_heatmap.set_xlabel(f"{target} Value")
         ax_heatmap.set_ylabel("Rule")
 
-        # Plot Score Column (Text)
+        # Plot Score Column
         ax_score.set_ylim(len(top_rules), 0)
         ax_score.set_xlim(0, 1)
         ax_score.axis('off')
@@ -246,12 +250,10 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         for idx, score in enumerate(top_scores):
             ax_score.text(0.5, idx + 0.5, f"{score:.3f}", 
                           ha='center', va='center', fontsize=10)
-            
-            # Add separator lines to match heatmap rows
             ax_score.axhline(idx, color='gray', linewidth=0.5)
             ax_score.axhline(idx + 1, color='gray', linewidth=0.5)
 
-        # Prepare Data for Violin Plot
+        # Prepare Violin Data
         violin_data = []
         for rule in top_rules:
             lifts = df_raw[df_raw["Rule"] == rule]["Lift"].dropna().values
@@ -263,7 +265,6 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         parts = ax_violin.violinplot(violin_data, positions=violin_positions, vert=False, 
                                      widths=0.8, showextrema=True, showmedians=True)
         
-        # Style Violins
         for pc in parts['bodies']:
             pc.set_facecolor('#a6cee3')
             pc.set_edgecolor('black')
@@ -275,13 +276,11 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                 parts[partname].set_edgecolor('black')
                 parts[partname].set_linewidth(1)
 
-        # Overlay Strip Plot (Dots)
         for rule_idx, lifts in enumerate(violin_data):
             if len(lifts) > 0:
                 y_jitter = (rule_idx + 0.5) + np.random.uniform(-0.1, 0.1, size=len(lifts))
                 ax_violin.scatter(lifts, y_jitter, color='black', alpha=0.5, s=3, zorder=3)
 
-        # Align Violin Axis
         ax_violin.set_ylim(len(top_rules), 0)
         ax_violin.set_yticks([])
         ax_violin.set_yticklabels([])
@@ -293,17 +292,18 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         ax_violin.set_title("Lift Distribution")
         ax_violin.set_xlabel("Lift")
         
-        # Add grid lines
         for y in range(len(top_rules) + 1):
             ax_violin.axhline(y, color='gray', linewidth=0.5)
 
+        # Output Filename - include NO_SELF in name if active
+        mode_str = "_NO_SELF" if no_self else ""
         plot_filename = os.path.join(
             PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR, 
-            f"heatmap_rules_by_target_value_strategy_{i+1}_{method}_{target.replace(' ', '_').replace('/', '-')}_{approach}.png"
+            f"heatmap_rules_{method}_{target_for_filename}{mode_str}.png"
         )
         plt.savefig(plot_filename, bbox_inches='tight')
         plt.close()
-        logger.info(f"Heatmap for strategy {i+1} saved to {plot_filename}")
+        logger.info(f"Heatmap saved to {plot_filename}")
 
 if __name__ == "__main__":
     import argparse
@@ -311,16 +311,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_strategies", type=int, default=3, help="Number of best strategies to process (default: 3)")
     parser.add_argument("--top_n_rules", type=int, default=20, help="Number of top rules to include in heatmap (default: 20)")
     parser.add_argument("--method", type=str, help="Filter by specific method (e.g., KNN_R, BAG)")
-    parser.add_argument("--exclude_self_loops", action="store_true", help="Exclude self-loops (A->A)")
-    parser.add_argument("--exclude_shared_items", action="store_true", help="Exclude rules with any cell type overlap between antecedent and consequent")
+    parser.add_argument("--no_self", action="store_true", help="Load results from 'no_self' directories (strict no shared items).")
 
     args = parser.parse_args()
     
-    # Generate heatmaps with provided arguments
     generate_rule_target_value_heatmap(
         top_n_rules=args.top_n_rules, 
         num_best_strategies=args.num_strategies,
         method_filter=args.method,
-        exclude_self_loops=args.exclude_self_loops,
-        exclude_shared_items=args.exclude_shared_items
+        no_self=args.no_self
     )

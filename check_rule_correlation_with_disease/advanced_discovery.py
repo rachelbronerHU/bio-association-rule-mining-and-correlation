@@ -4,6 +4,8 @@ import os
 import logging
 import warnings
 import time
+import argparse
+import ast
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import Lasso, LogisticRegression
@@ -25,7 +27,7 @@ import constants
 # --- CONFIGURATION ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
-OUTPUT_DATA_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR)
+
 FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS_TO_ANALYZE = ["BAG", "CN", "KNN_R"] 
 TARGETS = [
@@ -47,13 +49,36 @@ logger = logging.getLogger("Robust_Discovery")
 
 # --- DATA PREP ---
 
-def load_and_prep_data(input_file):
+def parse_rule_items(item_str):
+    """
+    Parses string representation of list "['A', 'B']" into a python set.
+    """
+    try:
+        items = ast.literal_eval(item_str)
+        # Clean items (remove _CENTER/_NEIGHBOR suffixes)
+        return set(i.replace('_CENTER', '').replace('_NEIGHBOR', '') for i in items)
+    except:
+        return set([str(item_str).strip("[]'\"")])
+
+def load_and_prep_data(input_file, no_self=False):
     if not os.path.exists(input_file):
         logger.warning(f"File not found: {input_file}")
         return None, None, None
 
     df = pd.read_csv(input_file)
+    initial_len = len(df)
     
+    # Apply No-Self Filter (Strict: No Shared Items)
+    if no_self:
+        def has_overlap(row):
+            # Parse Antecedents and Consequents
+            ant = parse_rule_items(row['Antecedents'])
+            con = parse_rule_items(row['Consequents'])
+            return not ant.isdisjoint(con)
+        
+        df = df[~df.apply(has_overlap, axis=1)]
+        logger.info(f"   Applied No-Self Filter: {initial_len} -> {len(df)} rules")
+
     # Filter by FDR
     initial_len = len(df)
     if "FDR" in df.columns:
@@ -63,7 +88,7 @@ def load_and_prep_data(input_file):
             logger.info(f"   Dropped {dropped} rows with P-Value >= 0.05 (Retained: {len(df)})")
     
     if df.empty:
-        logger.warning("   No data left after P-Value filtering.")
+        logger.warning("   No data left after filtering.")
         return None, None, None
 
     if "Rule" not in df.columns:
@@ -246,7 +271,7 @@ def prepare_target_data(X_safe, y_meta_raw, target):
 
     return X_target, y_final, groups_target, le, is_categorical
 
-def save_predictions_log(acc, method, target, le, is_cat):
+def save_predictions_log(acc, method, target, le, is_cat, output_dir):
     """
     Step 1: Save the per-patient prediction details.
     """
@@ -257,11 +282,11 @@ def save_predictions_log(acc, method, target, le, is_cat):
     if is_cat and le:
         pred_df["True_Value_Label"] = le.inverse_transform(pred_df["True_Value"].astype(int))
         
-    filename = f"{OUTPUT_DATA_DIR}/preds_{method}_{safe_target}.csv"
+    filename = f"{output_dir}/preds_{method}_{safe_target}.csv"
     pred_df.to_csv(filename, index=False)
     return filename
 
-def compute_and_save_rule_stats(acc, count, method, target, original_rule_names):
+def compute_and_save_rule_stats(acc, count, method, target, original_rule_names, output_dir):
     """
     Step 2: Calculate Stability (Frequency) and Mean Importance.
     Returns the Rules DataFrame for further use.
@@ -290,12 +315,12 @@ def compute_and_save_rule_stats(acc, count, method, target, original_rule_names)
     rules_df = rules_df[rules_df["Selection_Frequency"] > 0].sort_values("Selection_Frequency", ascending=False)
     
     # Save
-    filename = f"{OUTPUT_DATA_DIR}/scores_{method}_{safe_target}.csv"
+    filename = f"{output_dir}/scores_{method}_{safe_target}.csv"
     rules_df.to_csv(filename, index=False)
     
     return rules_df
 
-def save_raw_data_subset(df_raw, rules_df, method, target):
+def save_raw_data_subset(df_raw, rules_df, method, target, output_dir):
     """
     Step 3: Save the raw data rows for the Top 100 most stable rules.
     """
@@ -303,16 +328,16 @@ def save_raw_data_subset(df_raw, rules_df, method, target):
     top_stable_rules = rules_df.head(100)["Rule"].tolist()
     
     # Call the existing helper to filter and save
-    save_filtered_raw_data(df_raw, top_stable_rules, method, target)
+    save_filtered_raw_data(df_raw, top_stable_rules, method, target, output_dir)
 
-def save_filtered_raw_data(raw_df, top_rules, method_name, target_name):
+def save_filtered_raw_data(raw_df, top_rules, method_name, target_name, output_dir):
     filtered_df = raw_df[raw_df["Rule"].isin(top_rules)].copy()
     safe_target = target_name.replace(" ", "_").replace("/", "-")
-    filename = f"{OUTPUT_DATA_DIR}/results_{method_name}_{safe_target}.csv"
+    filename = f"{output_dir}/results_{method_name}_{safe_target}.csv"
     filtered_df.to_csv(filename, index=False)
     logger.info(f"   >>> SAVED FILTERED RAW: {filename}")
 
-def save_comparison_summary(leaderboard_data):
+def save_comparison_summary(leaderboard_data, output_dir):
     """
     Creates a pivot table comparing scores across different feature counts.
     """
@@ -333,7 +358,7 @@ def save_comparison_summary(leaderboard_data):
     pivot["Best_Config"] = numeric_score_pivot.idxmax(axis=1)
     pivot["Best_Score"] = numeric_score_pivot.max(axis=1)
     
-    filename = f"{OUTPUT_DATA_DIR}/comparison_summary.csv"
+    filename = f"{output_dir}/comparison_summary.csv"
     pivot.to_csv(filename)
     logger.info(f"   >>> SAVED COMPARISON SUMMARY: {filename}")
 
@@ -363,7 +388,7 @@ def calculate_leaderboard_score(acc, method, target, is_cat, preds_filename, k_f
 
 # --- ORCHESTRATOR ---
 
-def run_pipeline():
+def run_pipeline(no_self=False):
     """
     Main Orchestrator function.
     Iterates over methods and targets, runs the LOGO validation,
@@ -374,7 +399,16 @@ def run_pipeline():
     if not os.path.exists(abs_base_input):
         logger.error("CRITICAL: Input directory missing.")
         return
-    os.makedirs(OUTPUT_DATA_DIR, exist_ok=True)
+        
+    # Select Output Directory
+    if no_self:
+        output_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR_NO_SELF)
+        logger.info(f"Running in NO_SELF mode. Output: {output_dir}")
+    else:
+        output_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR)
+        logger.info(f"Running in STANDARD mode. Output: {output_dir}")
+
+    os.makedirs(output_dir, exist_ok=True)
 
     leaderboard_data = []
 
@@ -384,7 +418,8 @@ def run_pipeline():
             
         logger.info(f"=== METHOD: {method} === input file: {input_file}")
         
-        X_raw, y_meta_raw, df_raw = load_and_prep_data(input_file)
+        # Pass no_self flag to loader
+        X_raw, y_meta_raw, df_raw = load_and_prep_data(input_file, no_self=no_self)
         if X_raw is None: 
             logger.warning(f"   Skipping {method} due to data issues - X_raw is None")
             continue
@@ -500,15 +535,15 @@ def run_pipeline():
                 target_with_suffix = f"{target}{suffix}"
 
                 # 1. Save Predictions
-                preds_file = save_predictions_log(acc, method, target_with_suffix, le, is_cat)
+                preds_file = save_predictions_log(acc, method, target_with_suffix, le, is_cat, output_dir)
                 
                 # 2. Compute & Save Rule Stats
-                rules_df = compute_and_save_rule_stats(acc, count, method, target_with_suffix, original_rule_names)
+                rules_df = compute_and_save_rule_stats(acc, count, method, target_with_suffix, original_rule_names, output_dir)
                 
                 # 3. Save Raw Data Subset (Only for specific Feature Counts if needed, or all)
                 # We typically only care about the top rules from the 'Top' configs, 
                 # but we can save for all.
-                save_raw_data_subset(df_raw, rules_df, method, target_with_suffix)
+                save_raw_data_subset(df_raw, rules_df, method, target_with_suffix, output_dir)
                 
                 # 4. Leaderboard
                 record = calculate_leaderboard_score(acc, method, target, is_cat, preds_file, k_feat)
@@ -520,152 +555,16 @@ def run_pipeline():
     if leaderboard_data:
         # Save Full Leaderboard
         lb_df = pd.DataFrame(leaderboard_data).sort_values(["Target", "Grand_Score"], ascending=False)
-        lb_path = f"{OUTPUT_DATA_DIR}/final_leaderboard.csv"
+        lb_path = f"{output_dir}/final_leaderboard.csv"
         lb_df.to_csv(lb_path, index=False)
         logger.info(f"DONE. Leaderboard saved to {lb_path}")
         
         # Save Pivot Summary
-        save_comparison_summary(leaderboard_data)
+        save_comparison_summary(leaderboard_data, output_dir)
 
 if __name__ == "__main__":
-    run_pipeline()
-
-
-# =========================== OLD METHODS =============================
-
-
-# def process_fold_task(X, y_enc, train_idx, fold_id, task_label):
-#     pid = os.getpid()
-#     start_t = time.time()
-#     log_prefix = f"[{task_label}] Fold {fold_id+1} (PID {pid}) -"
+    parser = argparse.ArgumentParser(description="Run Advanced Discovery (ML) Benchmark")
+    parser.add_argument("--no_self", action="store_true", help="Exclude rules with any shared cell types (strict no-self).")
+    args = parser.parse_args()
     
-#     X_train = X.iloc[train_idx]
-#     y_train = y_enc[train_idx]
-    
-#     if len(np.unique(y_train)) < 2:
-#         logger.warning(f"{log_prefix} Skipped (<2 classes)")
-#         return {"success": False, "fold_id": fold_id, "msg": "Skipped (<2 classes)"}
-        
-#     try:
-#         imp_rf, imp_xgb, imp_lasso = train_fold_logic(X_train, y_train, log_prefix)
-#         duration = time.time() - start_t
-        
-#         return {
-#             "success": True, 
-#             "fold_id": fold_id, 
-#             "imp_rf": imp_rf,
-#             "imp_xgb": imp_xgb,
-#             "imp_lasso": imp_lasso,
-#             "duration": duration,
-#             "pid": pid,
-#             "label": task_label
-#         }
-#     except Exception as e:
-#         logger.error(f"{log_prefix} FAILED: {e}")
-#         return {"success": False, "fold_id": fold_id, "msg": str(e)}
-
-# def train_fold_logic(X_train, y_train, log_prefix=""):
-#     scaler = StandardScaler()
-#     X_train_scaled = scaler.fit_transform(X_train)
-    
-#     # 1. RF
-#     logger.info(f"{log_prefix} Training RF")
-#     rf = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42, class_weight='balanced', n_jobs=1)
-#     rf.fit(X_train, y_train)
-#     imp_rf = rf.feature_importances_
-    
-#     # 2. XGB
-#     logger.info(f"{log_prefix} Training XGB")
-#     xgb_model = xgb.XGBClassifier(eval_metric='logloss', max_depth=3, reg_alpha=1, random_state=42, n_jobs=1)
-#     xgb_model.fit(X_train, y_train)
-#     imp_xgb = xgb_model.feature_importances_
-    
-#     # 3. Lasso
-#     logger.info(f"{log_prefix} Training Lasso")
-#     logit = LogisticRegression(penalty='elasticnet', l1_ratio=1.0, solver='saga', C=0.5, 
-#                                class_weight='balanced', random_state=42, max_iter=2000)
-#     logit.fit(X_train_scaled, y_train)
-    
-#     imp_lasso = np.abs(logit.coef_).flatten()
-#     if logit.coef_.ndim > 1: 
-#         imp_lasso = np.mean(np.abs(logit.coef_), axis=0)
-
-#     # Normalize
-#     for imp in [imp_rf, imp_xgb, imp_lasso]:
-#         if imp.max() > 0: imp /= imp.max()
-        
-#     return imp_rf, imp_xgb, imp_lasso
-
-# def save_detailed_results(top_rules_df, method_name, target_name):
-#     # Save the detailed dataframe directly (Rule, Scores...)
-#     safe_target = target_name.replace(" ", "_").replace("/", "-")
-#     filename = f"{OUTPUT_DATA_DIR}/scores_{method_name}_{safe_target}.csv"
-#     top_rules_df.to_csv(filename, index=False)
-#     logger.info(f"   >>> SAVED SCORES: {filename}")
-    
-#     # Return all rules in this set (Union set)
-#     return top_rules_df["Rule"].tolist()
-
-# def execute_cross_validation(executor, X, y, groups, method, target, is_cat):
-#     """
-#     Manages the Parallel Leave-One-Group-Out Loop.
-#     Collects raw results into accumulators.
-#     """
-#     n_features = X.shape[1]
-
-#     # Accumulators
-#     accumulators = {
-#         "rule_counts": np.zeros(n_features),
-#         "rule_imp_sums": {"RF": np.zeros(n_features), "XGB": np.zeros(n_features), "Lasso": np.zeros(n_features)},
-#         "patient_results": [],
-#         "agg_scores": {"RF": [], "XGB": [], "Lasso": []}
-#     }
-
-#     # Setup LOGO
-#     logo = LeaveOneGroupOut()
-#     futures = []
-#     fold_to_patient_map = {} # Maps fold_id -> Biopsy_ID
-
-#     # Submit Tasks
-#     for fold_idx, (train_idx, test_idx) in enumerate(logo.split(X, y, groups=groups)):
-#         task_label = f"{method}-{target}"
-        
-#         # Identify patient for logging
-#         current_biopsy_id = groups.iloc[test_idx[0]]
-#         fold_to_patient_map[fold_idx] = current_biopsy_id
-        
-#         futures.append(executor.submit(
-#             process_fold_task, X, y, train_idx, test_idx, fold_idx, task_label, is_cat
-#         ))
-
-#         logger.info(f"   Queued {task_label} Fold {fold_idx+1} for Biopsy_ID {current_biopsy_id}")
-
-#     # Collect Results
-#     completed_count = 0
-#     for f in as_completed(futures):
-#         res = f.result()
-#         if res["success"]:
-#             completed_count += 1
-            
-#             # A. Scores
-#             for m, s in res["scores"].items():
-#                 accumulators["agg_scores"][m].append(s)
-            
-#             # B. Rule Stats
-#             idx = res["selected_indices"]
-#             accumulators["rule_counts"][idx] += 1
-#             for m in ["RF", "XGB", "Lasso"]:
-#                 accumulators["rule_imp_sums"][m][idx] += res["importances"][m]
-            
-#             # C. Patient Predictions
-#             p_rec = {
-#                 "Biopsy_ID": fold_to_patient_map[res["fold_id"]],
-#                 "True_Value": res["true_value"],
-#                 "Pred_RF": res["predictions"]["RF"],
-#                 "Pred_XGB": res["predictions"]["XGB"],
-#                 "Pred_Lasso": res["predictions"]["Lasso"]
-#             }
-#             accumulators["patient_results"].append(p_rec)
-
-#     return accumulators, completed_count
-
+    run_pipeline(no_self=args.no_self)

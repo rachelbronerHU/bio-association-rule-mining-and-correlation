@@ -8,9 +8,11 @@
 * visualization - scripts for creating plots from the result data
 * check_rule_correlation_with_disease - sub flow for checking correlation of rules from the base flow (association rule mining) with clinical stage metadata
 
-# Important Files:
+# Important Files - read them before you start working:
+* commands.md - how to use this repo
 * constants.py, where constants and paths are stored
 * README.md - our final report of the results
+* data_exploration/data_inspection_report.md
 
 # Instructions:
-* Never give code first!!!!. always give a clear, not too long and smart design suggestion/s, and only after approval give the code
+* Never give code first when we start discussion about on new feature / design / bug fix. Always give a clear, not too long and smart design suggestion/s (no code, only design / plan) and only after approval give the code changes

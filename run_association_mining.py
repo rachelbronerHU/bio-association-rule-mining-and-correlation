@@ -6,11 +6,18 @@ import logging
 import os
 import json
 from concurrent.futures import ProcessPoolExecutor
-from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES
+from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES, TRANSACTION_DATA_DIR
 import worker_task
 
 # Setup Logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(os.getcwd(), "run_association_mining.log"))
+    ],
+    force=True
+)
 logger = logging.getLogger("manager")
 warnings.filterwarnings('ignore')
 
@@ -35,10 +42,45 @@ CONFIG = {
     "TARGET_CELLS": 30,
     "MIN_CELLS_PER_PATCH": 2,
     "N_PERMUTATIONS": 5 if DEBUG else 1000,
-    "N_TOP_RULES": 100 if DEBUG else 3000
+    "N_TOP_RULES": 100 if DEBUG else 2000,
+    "MIN_CELL_TYPE_FREQUENCY": 5,  # Minimum absolute cell count (adaptive with MIN_SUPPORT)
 }
 
 # --- 1. DATA LOADING ---
+def _normalize_coordinates(df):
+    """
+    Normalizes x/y coordinates to microns using fixed resolution standards.
+    Standard: 400um = 1024px, 800um = 2048px.
+    """
+    if "Size [um]" not in df.columns:
+        logger.warning("Size [um] column missing. Skipping coordinate normalization.")
+        return df
+
+    # Scale factors based on known resolution:
+    # 400um / 1024px = 0.390625 um/px
+    # 800um / 2048px = 0.390625 um/px
+    
+    # Default scale (fallback)
+    default_scale = 400.0 / 1024.0
+
+    conditions = [
+        df["Size [um]"] == 400,
+        df["Size [um]"] == 800
+    ]
+    
+    choices = [
+        400.0 / 1024.0,
+        800.0 / 2048.0
+    ]
+    
+    scale_factors = np.select(conditions, choices, default=default_scale)
+    
+    df["x"] = df["x"] * scale_factors
+    df["y"] = df["y"] * scale_factors
+    
+    logger.info("Coordinates normalized to microns using Fixed Resolution Standards (1024px/400um, 2048px/800um).")
+    return df
+
 def load_data():
     base_path = os.path.join(os.getcwd(), MIBI_GUT_DIR_PATH)
     logger.info(f"Loading data from {base_path}...")
@@ -55,21 +97,25 @@ def load_data():
     
     n_cells_merged = len(df_final)
     if n_cells_merged < n_cells_raw:
-        logger.warning(f"Lost {n_cells_raw - n_cells_merged} cells during FOV metadata merge! (Unknown FOVs in cell table?)")
+        # detailed check
+        fovs_cells = set(df_cells["fov"].unique())
+        fovs_meta = set(df_fovs["FOV"].unique())
+        missing_fovs = fovs_cells - fovs_meta
+        logger.warning(f"Lost {n_cells_raw - n_cells_merged} cells during FOV metadata merge!")
+        logger.warning(f"The following {len(missing_fovs)} FOVs are in cell_table but missing from fovs_metadata: {sorted(list(missing_fovs))}")
     
     # Assert no data loss (strict check)
-    assert n_cells_merged == n_cells_raw, f"Lost {n_cells_raw - n_cells_merged} cells during FOV merge! Aborting to prevent data corruption."
+    assert n_cells_merged == n_cells_raw, f"Lost {n_cells_raw - n_cells_merged} cells during FOV merge! See log for missing FOVs. Aborting."
 
     df_final = df_final.rename(columns={"centroid_x": "x", "centroid_y": "y", "cell type": "cell_type"})
     
+    df_final = _normalize_coordinates(df_final)
+
     # We only need basic spatial data for mining
     req_cols = ["fov", "cell_type", "x", "y"]
     df_final = df_final.dropna(subset=req_cols)
     
     logger.info(f"Data loaded: {len(df_final)} cells.")
-
-    df_final = _remove_unknown_biopsies(df_final)
-    df_fovs = _remove_unknown_biopsies(df_fovs)
 
     return df_final, df_biopsy, df_fovs
 
@@ -84,8 +130,8 @@ def get_samples_to_process(df):
 # --- 2. OUTPUT UTILS ---
 
 def _enrich_with_metadata(df_flat, df_biopsy, df_fovs):
-    # 1. Attach Patient ID from df_fovs
-    df_flat = pd.merge(df_flat, df_fovs[["FOV", "Patient"]], on="FOV", how="left")
+    # 1. Attach Patient ID and Cohort from df_fovs
+    df_flat = pd.merge(df_flat, df_fovs[["FOV", "Patient", "Cohort"]], on="FOV", how="left")
     df_flat = df_flat.rename(columns={"Patient": "Biopsy_ID"})
     
     # 2. Dynamic Metadata Handling
@@ -129,14 +175,15 @@ def _enrich_with_metadata(df_flat, df_biopsy, df_fovs):
             missing_examples = df_merged[df_merged[check_col].isna()]["FOV"].unique()[:5]
             logger.info(f"      Example Control FOVs: {missing_examples}")
             
-            # Assertion: Ensure missing metadata ONLY happens for FOVs/BiopsyIDs containing "control"
+            # Assertion: Ensure missing metadata ONLY happens for FOVs/BiopsyIDs/Cohorts containing "control"
             missing_rows = df_merged[df_merged[check_col].isna()]
             is_control = missing_rows["Biopsy_ID"].astype(str).str.contains("control", case=False) | \
-                         missing_rows["FOV"].astype(str).str.contains("control", case=False)
+                         missing_rows["FOV"].astype(str).str.contains("control", case=False) | \
+                         missing_rows["Cohort"].astype(str).str.contains("control", case=False)
             
             if not is_control.all():
                 invalid_fovs = missing_rows[~is_control]["FOV"].unique()
-                raise AssertionError(f"CRITICAL: Metadata missing for FOVs that do NOT appear to be controls (no 'control' in ID): {invalid_fovs[:10]}...")
+                raise AssertionError(f"CRITICAL: Metadata missing for FOVs that do NOT appear to be controls (no 'control' in ID or Cohort): {invalid_fovs[:10]}...")
     
     # 4. Impute Controls (NaNs)
     for col in numeric_cols:
@@ -255,15 +302,7 @@ def run_pipeline():
         with open(f"{out_dir}/stats_{method}.json", "w") as f:
             json.dump(stats_collection, f)
             
-    print(f"Total Suite Time: {time.time() - start_time:.2f}s")
-
-def _remove_unknown_biopsies(df_final, fov_col = "FOV"):
-    # Remove "S_*" biopsies because they are not in metadata, and their condition is unknown (likely controls but not confirmed)
-    pre_filter_count = len(df_final)
-    df_final = df_final[~df_final[fov_col].astype(str).str.startswith("S_")]
-    filtered_count = len(df_final)
-    logger.info(f"Filtered out {pre_filter_count - filtered_count} cells from 'S_*' biopsies (not in metadata).")   
-    return df_final
+    logger.info(f"Total Suite Time: {time.time() - start_time:.2f}s")
 
 if __name__ == "__main__":
     run_pipeline()

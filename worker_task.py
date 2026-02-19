@@ -3,13 +3,20 @@ import numpy as np
 import time
 import logging
 import os
+import csv
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import fpgrowth, association_rules
 from statsmodels.stats.multitest import multipletests
+from constants import TRANSACTION_DATA_DIR
 import transactions as tx
 
 # Setup Worker Logger
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[logging.FileHandler(os.path.join(os.getcwd(), "run_association_mining.log"))],
+    force=True
+)
 logger = logging.getLogger("worker")
 
 def select_top_rules(rules, n=2000):
@@ -231,7 +238,7 @@ def validate_rules_exact(neighborhoods, cell_types, rules_df, config, method):
         
         # 2. Rebuild Transactions
         # Uses the PRE-CALCULATED neighborhoods structure
-        perm_trans, _ = tx.build_transactions_from_neighborhoods(neighborhoods, shuffled_types, method)
+        perm_trans, _ = tx.build_transactions_from_neighborhoods(neighborhoods, shuffled_types, method, config)
         
         # OPTIMIZATION: Convert to sets ONCE per permutation
         perm_trans_sets = [set(t) for t in perm_trans]
@@ -258,10 +265,12 @@ def process_single_sample(sample_id, df_sample, method, config):
     neighborhoods = tx.get_neighborhoods(coords, method, config)
     t_struct = time.time() - t0
     
-    # 2. Get Initial Transactions
+    # 2. Get Initial Transactions (with rare cell filtering)
     t0 = time.time()
-    trans, stats = tx.build_transactions_from_neighborhoods(neighborhoods, cell_types, method)
+    trans, stats = tx.build_transactions_from_neighborhoods(neighborhoods, cell_types, method, config)
     t_trans = time.time() - t0
+    
+    _save_transaction_cell_counts(sample_id, method, stats.get("cell_counts", []))
     
     # 3. Mine
     t0 = time.time()
@@ -355,3 +364,15 @@ def _filter_redundant_rules(rules, config):
     filtered_rules = rules.drop(index=list(indices_to_drop)).drop(columns=['ant_frozen'])
     
     return filtered_rules, count_removed
+
+def _save_transaction_cell_counts(sample_id, method, cell_counts):
+    if not cell_counts:
+        return
+    out_dir = os.path.join(TRANSACTION_DATA_DIR, method)
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{sample_id}.csv")
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["transaction_idx", "num_cells"])
+        for idx, count in enumerate(cell_counts):
+            writer.writerow([idx, count])

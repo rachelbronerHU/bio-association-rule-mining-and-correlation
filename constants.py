@@ -16,6 +16,7 @@ else:
 RESULTS_DATA_DIR = RESULTS_DIR + 'data/'
 RESULTS_PLOTS_DIR = RESULTS_DIR + 'plots/'
 
+TRANSACTION_DATA_DIR = RESULTS_DIR + 'transaction_data/'
 RESULT_EXPLORATION_DIR = 'result_exploration/'
 CONSENSUS_RESULTS_EXPLORATION_DIR = RESULTS_DATA_DIR + '/consensus_tables/'
 

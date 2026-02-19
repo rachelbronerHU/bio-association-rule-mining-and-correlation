@@ -13,6 +13,10 @@ The following tree illustrates the processing flow from input data to final vali
 Input Data (Biopsies, FOVs, Cell Types)
   │
   ▼
+Data preparation
+  ├── Normelize coordinates (for microns instead of pixels)
+        │
+        ▼
 Select Iteration Method
   ├── KNN_R
   ├── Center-Neighbour (CN)
@@ -26,17 +30,20 @@ Iterate Through FOVs (Field of Views)
   ├──► [ FOV Processing Pipeline ]
   │       │
   │       ├── 1. Determine Neighborhoods (Method Dependent)
-  │       ├── 2. Construct Transaction Sets
-  │       ├── 3. Extract Rules (FP-Growth Algorithm)
-  │       ├── 4. Filter Rules (Min Lift, Confidence, Conviction)
-  │       ├── 5. Select Top N Rules (Ranked by Lift)
-  │       ├── 6. Statistical Validation (1000 Permutations)
-  │       ├── 7. FDR Correction (Benjamini-Hochberg)
-  │       └── 8. Prune Redundant Rules <a href="#ref1">[1]</a>
+  │       ├── 2. Filter Rare Cell Types (Adaptive Threshold) <a href="#rare-cell-filter">[*]</a>
+  │       ├── 3. Construct Transaction Sets
+  │       ├── 4. Extract Rules (FP-Growth Algorithm)
+  │       ├── 5. Filter Rules (Min Lift, Confidence, Conviction)
+  │       ├── 6. Select Top N Rules (Ranked by Lift)
+  │       ├── 7. Statistical Validation (1000 Permutations)
+  │       ├── 8. FDR Correction (Benjamini-Hochberg)
+  │       └── 9. Prune Redundant Rules <a href="#ref1">[1]</a>
   │               │
   │               ▼
   └──────► Output: Validated, Non-Redundant Spatial Rules
 </pre>
+
+<span id="rare-cell-filter">**[*] Rare Cell Type Filtering:**</span> Cell types with counts below an adaptive threshold (max(5 cells, 1% of FOV)) are excluded from transactions before mining. This prevents spurious rules from extremely rare cell types (e.g., single-cell artifacts) while preserving biologically meaningful rare populations in larger FOVs.
 
 ---
 
@@ -71,21 +78,23 @@ The following tables demonstrate the efficiency of different neighborhood defini
 
 > | METHOD | RULE | LIFT | CONF | CONV | SUP | FDR |
 > | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-> | **BAG** | FibroticEpithelial -> Endothelial, SMV | 27.19 | 0.75 | 3.89 | 0.011 | 0.0017 |
-> | **BAG** | FibroticEpithelial, SMV -> Endothelial | 21.70 | 0.86 | 6.72 | 0.011 | 0.0017 |
-> | **BAG** | Goblet -> SMV | 0.11 | 0.03 | 0.78 | 0.010 | 0.0021 |
-> | **BAG** | SMV -> Goblet | 0.11 | 0.04 | 0.65 | 0.010 | 0.0021 |
+> | **BAG** | Endothelial, Muscle -> BrunnerGland, CD4T | 18.98 | 0.95 | 19.95 | 0.011 | 0.2709 |
+> | **BAG** | Muscle, SMV -> BrunnerGland, CD4T | 15.95 | 0.80 | 4.75 | 0.011 | 0.1620 |
+> | **BAG** | Muscle -> Epithelial, Goblet | 0.07 | 0.03 | 0.58 | 0.013 | 0.0022 |
+> | **BAG** | Muscle -> Epithelial | 0.07 | 0.03 | 0.52 | 0.011 | 0.0033 |
 > | --- | --- | --- | --- | --- | --- | --- |
-> | **CN** | Muscle_CENTER -> Muscle_NEIGHBOR | 43.20 | 1.00 | inf | 0.010 | 0.0024 |
-> | **CN** | Muscle_CENTER -> Muscle_NEIGHBOR, Unidentified_NEIGHBOR | 33.30 | 0.79 | 4.56 | 0.016 | 0.0010 |
-> | **CN** | Epithelial_CENTER -> SMV_NEIGHBOR | 0.13 | 0.05 | 0.61 | 0.013 | 0.0014 |
-> | **CN** | Muscle_CENTER -> Epithelial_NEIGHBOR | 0.14 | 0.10 | 0.32 | 0.011 | 0.0012 |
+> | **CN** | Endothelial_NEIGHBOR, Muscle_CENTER -> Epithelial_NEIGHBOR, Muscle_NEIGHBOR | 44.29 | 0.73 | 3.69 | 0.010 | 0.0013 |
+> | **CN** | Muscle_CENTER -> Muscle_NEIGHBOR, Paneth_NEIGHBOR | 34.46 | 0.89 | 8.96 | 0.019 | 0.0020 |
+> | **CN** | Muscle_CENTER -> Epithelial_NEIGHBOR | 0.07 | 0.04 | 0.48 | 0.011 | 0.0014 |
+> | **CN** | Fibroblast_NEIGHBOR, Muscle_CENTER -> Epithelial_NEIGHBOR | 0.08 | 0.04 | 0.48 | 0.011 | 0.0014 |
 > | --- | --- | --- | --- | --- | --- | --- |
-> | **KNN_R** | Muscle_CENTER -> Muscle_NEIGHBOR | 43.20 | 1.00 | inf | 0.010 | 0.0020 |
-> | **KNN_R** | Muscle_CENTER -> Muscle_NEIGHBOR, Unidentified_NEIGHBOR | 33.30 | 0.79 | 4.56 | 0.016 | 0.0011 |
-> | **KNN_R** | Epithelial_CENTER -> SMV_NEIGHBOR | 0.13 | 0.05 | 0.61 | 0.013 | 0.0014 |
-> | **KNN_R** | Muscle_CENTER -> Epithelial_NEIGHBOR | 0.14 | 0.10 | 0.32 | 0.011 | 0.0012 |
+> | **KNN_R** | Endothelial_NEIGHBOR, Muscle_CENTER -> Epithelial_NEIGHBOR, Muscle_NEIGHBOR | 46.98 | 0.73 | 3.69 | 0.010 | 0.0012 |
+> | **KNN_R** | Muscle_CENTER, Plasma_NEIGHBOR -> Muscle_NEIGHBOR, Neuron_NEIGHBOR | 35.02 | 0.95 | 20.43 | 0.010 | 0.0017 |
+> | **KNN_R** | Muscle_CENTER -> Macrophage_NEIGHBOR, Neutrophil_NEIGHBOR | 0.11 | 0.08 | 0.33 | 0.011 | 0.0013 |
+> | **KNN_R** | Epithelial_CENTER -> CD4T_NEIGHBOR, Mesenchymal_VIM_NEIGHBOR, SMV_NEIGHBOR | 0.12 | 0.05 | 0.65 | 0.012 | 0.0014 |
 > | --- | --- | --- | --- | --- | --- | --- |
+
+
 
 
 ---

@@ -9,6 +9,7 @@ data/
 # Experiment Results & Plots
 results/debug_run
 results/full_run/data
+results/full_run/transaction_data
 
 # Logs
 *.log

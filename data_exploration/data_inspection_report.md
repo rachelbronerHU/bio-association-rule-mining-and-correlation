@@ -23,6 +23,14 @@ This report documents the structure and biological meaning of the provided datas
 | **Cohort** | `Duodenum_Cohort_Control_1`, `Duodenum_Cohort_Control_2`, `Colon_Cohort_Control`, `Cohort_GVHD` | Defines the experimental groups. **Issue:** `Cohort_GVHD` is mixed. **Fix:** Split GVHD by `Localization` in Biopsy Metadata. |
 | **Size [um]** | `400`, `800` | Physical side length of the image. **Critical:** Pixel coordinates (0-2048) must be converted to microns using this value. |
 
+**Resolution Analysis & Normalization Strategy:**
+To determine the correct pixel-to-micron conversion, we analyzed the coordinate ranges for each FOV size.
+*   **Findings:**
+    *   **400µm FOVs:** Coordinates range **0 - 1024**.
+    *   **800µm FOVs:** Coordinates range **0 - 2048**.
+*   **Conclusion:** The **resolution is consistent** (~0.39 µm/pixel), but the image dimensions vary.
+    *   Normalization must be **group-specific**: Divide 400µm images by 1024, and 800µm images by 2048.
+
 ### B. Biopsy Metadata (`biopsy_metadata.csv`)
 
 This file contains clinical covariates crucial for rule mining.
@@ -77,10 +85,26 @@ venv\Scripts\python.exe -c "import pandas as pd; df = pd.read_csv('data/MIBIGutC
 venv\Scripts\python.exe -c "import pandas as pd; df = pd.read_csv('data/MIBIGutCsv/cell_table.csv', nrows=5); print(f'Columns: {list(df.columns)}')"
 ```
 
+**4. Check for Non-Square FOVs & Resolution Consistency**
+```bash
+venv\Scripts\python.exe -c "import pandas as pd; df = pd.read_csv('data/MIBIGutCsv/cell_table.csv', usecols=['fov', 'centroid_x', 'centroid_y']); meta = pd.read_csv('data/MIBIGutCsv/fovs_metadata.csv', usecols=['FOV', 'Size [um]']); df = df.merge(meta, left_on='fov', right_on='FOV'); print(df.groupby('Size [um]')[['centroid_x', 'centroid_y']].agg(['min', 'max']))"
+```
+
+**5. Check for Biopsy Overlap (Colon + Duodenum in same Patient)**
+```bash
+venv\Scripts\python.exe -c "import pandas as pd; df = pd.read_csv('data/MIBIGutCsv/biopsy_metadata.csv'); mixed_patients = df.groupby('Patient_ID')['Localization'].nunique(); print(f'Patients with mixed biopsies: {mixed_patients[mixed_patients > 1]}')"
+```
+
 ---
 
-## 4. Recommended Next Steps
+## 4. Methodology & Mitigation Strategies
 
-1.  **Coordinate Normalization:** Update `load_data` to convert `centroid_x` and `centroid_y` to microns: `coord_micron = coord_pixel * (Size_um / max(coord_pixel))` (dynamically determined per FOV).
-2.  **Cohort Splitting:** Implement a filter to process `Colon` and `Duodenum` samples separately.
-3.  **Region Integration:** Update `transactions.py` to include anatomical regions (`in_CryptVilli`, etc.) as items in the transaction sets.
+To address the findings from the data inspection, the following protocols have been established for the mining pipeline:
+
+1.  **Coordinate Normalization (Implemented):**
+    *   To ensure spatial consistency across FOVs with varying physical sizes (400µm vs 800µm) but identical pixel resolutions, we normalize all pixel coordinates to microns.
+    *   **Logic:** $Coordinate_{\mu m} = Coordinate_{px} \times \frac{Size_{\mu m}}{Resolution_{max}}$. This allows for resolution-independent distance calculations (e.g., neighbors within 30µm).
+
+2.  **Cohort Stratification:**
+    *   Given the distinct biological profiles of the large and small intestine, analysis is strictly stratified by organ.
+    *   **Strategy:** GVHD samples are split based on their `Localization` metadata (Colon vs. Duodenum), while Control samples are grouped by their specific `Cohort` identifier. This prevents confounding organ-specific signals with disease signals.

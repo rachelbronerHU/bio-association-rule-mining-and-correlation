@@ -98,61 +98,136 @@ def mine_rules_fpgrowth(transactions, config, method="BAG", sample_id=None):
         
     return rules
 
+def count_cell_types_in_fov(cell_types):
+    """
+    Count actual cells of each type in FOV.
+    Args: cell_types: Array of cell type labels 
+    Returns: dict: {cell_type: count}
+    """
+    from collections import Counter
+    return dict(Counter(cell_types))
+
+def filter_rules_by_rare_cells(rules, cell_type_counts, config, method):
+    """
+    Filter out rules where any cell type is rare (below threshold).
+    
+    Returns:
+        filtered_rules: DataFrame of rules without rare cell types
+        n_filtered: Number of rules removed
+    """
+    if rules.empty:
+        return rules, 0
+    
+    # Calculate threshold
+    n_cells = sum(cell_type_counts.values())
+    min_absolute = config.get("MIN_CELL_TYPE_FREQUENCY", 5)
+    min_percentage = config.get("MIN_SUPPORT", 0.01)
+    threshold = max(min_absolute, int(min_percentage * n_cells))
+    
+    # Extract cell types from rules
+    def get_cell_types_from_rule(row):
+        """Extract raw cell types from antecedents and consequents"""
+        cell_types = set()
+        for item in list(row['antecedents']) + list(row['consequents']):
+            # Strip _CENTER and _NEIGHBOR suffixes for CN/KNN_R methods
+            if method in ["CN", "KNN_R"]:
+                cell_type = item.replace("_CENTER", "").replace("_NEIGHBOR", "")
+            else:
+                cell_type = item
+            cell_types.add(cell_type)
+        return cell_types
+    
+    # Filter rules
+    original_count = len(rules)
+    mask = []
+    
+    for idx, row in rules.iterrows():
+        cell_types_in_rule = get_cell_types_from_rule(row)
+        # Check if all cell types meet threshold
+        all_sufficient = all(cell_type_counts.get(ct, 0) >= threshold for ct in cell_types_in_rule)
+        mask.append(all_sufficient)
+    
+    filtered_rules = rules[mask].copy()
+    n_filtered = original_count - len(filtered_rules)
+    
+    if n_filtered > 0:
+        logger.info(f"Filtered {n_filtered} rules with rare cell types (threshold={threshold} cells)")
+    
+    return filtered_rules, n_filtered
+
 def _process_with_raw_rules(mined_rules, neighborhoods, cell_types, config, method):
     """
     Scenario: SAVE_RAW_RULES = True
-    1. Select Top N from mined rules.
-    2. Validate ALL of them (to get p-values for raw rules).
-    3. Filter redundancy from this validated set.
+    1. Filter rules with rare cell types FIRST
+    2. Select Top N from filtered rules
+    3. Validate ALL of them (to get p-values for raw rules)
+    4. Filter redundancy from the validated set
     """
     n_removed = 0
+    n_rare_filtered = 0
     raw_rules_v = pd.DataFrame()
     rules_v = pd.DataFrame()
     
     if mined_rules.empty:
-        return rules_v, raw_rules_v, n_removed
+        return rules_v, raw_rules_v, n_removed, n_rare_filtered
         
-    # 1. Select Candidates
+    # 1. Filter rules with rare cell types
+    cell_type_counts = count_cell_types_in_fov(cell_types)
+    mined_rules, n_rare_filtered = filter_rules_by_rare_cells(mined_rules, cell_type_counts, config, method)
+    
+    if mined_rules.empty:
+        return rules_v, raw_rules_v, n_removed, n_rare_filtered
+        
+    # 2. Select Candidates
     n_top_rules = config["N_TOP_RULES"]
     candidates = select_top_rules(mined_rules, n=n_top_rules)
     
-    # 2. Validate ALL Candidates (Get P-values for raw set)
+    # 3. Validate ALL Candidates (Get P-values for raw set)
     # This gives us our "Raw Rules" with P-values
     raw_rules_v = validate_rules_exact(neighborhoods, cell_types, candidates, config, method=method)
     
-    # 3. Filter Redundancy from the Validated Set
+    # 4. Filter Redundancy from the Validated Set
     # We filter ONLY the ones that passed validation
     # (Though logic-wise, filtering structure doesn't depend on p-value, doing it after preserves p-values)
     rules_v, n_removed = _filter_redundant_rules(raw_rules_v, config)
         
-    return rules_v, raw_rules_v, n_removed
+    return rules_v, raw_rules_v, n_removed, n_rare_filtered
 
 def _process_optimized(mined_rules, neighborhoods, cell_types, config, method):
     """
     Scenario: SAVE_RAW_RULES = False
-    1. Filter Redundancy FIRST (on unvalidated rules).
-    2. Validate ONLY the survivors.
+    1. Filter rules with rare cell types FIRST
+    2. Filter Redundancy (on unvalidated rules)
+    3. Validate ONLY the survivors
     """
     n_removed = 0
+    n_rare_filtered = 0
     raw_rules_v = pd.DataFrame() # Empty, we don't save raw
     rules_v = pd.DataFrame()
     
     if mined_rules.empty:
-        return rules_v, raw_rules_v, n_removed
+        return rules_v, raw_rules_v, n_removed, n_rare_filtered
         
-    # 1. Filter Redundancy
+    # 1. Filter rules with rare cell types
+    cell_type_counts = count_cell_types_in_fov(cell_types)
+    mined_rules, n_rare_filtered = filter_rules_by_rare_cells(mined_rules, cell_type_counts, config, method)
+    
+    if mined_rules.empty:
+        return rules_v, raw_rules_v, n_removed, n_rare_filtered
+        
+    # 2. Filter Redundancy
     filtered_rules, n_removed = _filter_redundant_rules(mined_rules, config)
     
-    # 2. Select Top N
+    # 3. Select Top N
     n_top_rules = config["N_TOP_RULES"]
 
     if len(filtered_rules) > n_top_rules:
         filtered_rules = select_top_rules(filtered_rules, n=n_top_rules)
         
-    # 3. Validate Survivors
+    # 4. Validate Survivors
     rules_v = validate_rules_exact(neighborhoods, cell_types, filtered_rules, config, method=method)
     
-    return rules_v, raw_rules_v, n_removed
+    return rules_v, raw_rules_v, n_removed, n_rare_filtered
 
 def check_rule_in_transactions(rule_row, transactions_sets, config):
     """
@@ -238,7 +313,7 @@ def validate_rules_exact(neighborhoods, cell_types, rules_df, config, method):
         
         # 2. Rebuild Transactions
         # Uses the PRE-CALCULATED neighborhoods structure
-        perm_trans, _ = tx.build_transactions_from_neighborhoods(neighborhoods, shuffled_types, method, config)
+        perm_trans, _ = tx.build_transactions_from_neighborhoods(neighborhoods, shuffled_types, method)
         
         # OPTIMIZATION: Convert to sets ONCE per permutation
         perm_trans_sets = [set(t) for t in perm_trans]
@@ -265,9 +340,9 @@ def process_single_sample(sample_id, df_sample, method, config):
     neighborhoods = tx.get_neighborhoods(coords, method, config)
     t_struct = time.time() - t0
     
-    # 2. Get Initial Transactions (with rare cell filtering)
+    # 2. Get Initial Transactions (NO rare cell filtering - mine everything)
     t0 = time.time()
-    trans, stats = tx.build_transactions_from_neighborhoods(neighborhoods, cell_types, method, config)
+    trans, stats = tx.build_transactions_from_neighborhoods(neighborhoods, cell_types, method)
     t_trans = time.time() - t0
     
     _save_transaction_cell_counts(sample_id, method, stats.get("cell_counts", []))
@@ -286,17 +361,21 @@ def process_single_sample(sample_id, df_sample, method, config):
     save_raw = config.get("SAVE_RAW_RULES", True)
     
     if save_raw:
-        rules_v, raw_rules_v, n_removed = _process_with_raw_rules(mined_rules, neighborhoods, cell_types, config, method)
+        rules_v, raw_rules_v, n_removed, n_rare_filtered = _process_with_raw_rules(mined_rules, neighborhoods, cell_types, config, method)
     else:
-        rules_v, raw_rules_v, n_removed = _process_optimized(mined_rules, neighborhoods, cell_types, config, method)
+        rules_v, raw_rules_v, n_removed, n_rare_filtered = _process_optimized(mined_rules, neighborhoods, cell_types, config, method)
         
     t_val = time.time() - t0
     n_val = len(rules_v)
     
     if stats is None: stats = {}
     stats["redundant_removed"] = n_removed
+    stats["rare_filtered"] = n_rare_filtered
     
-    logger.info(f"{prefix} {method}: {len(trans)} Trans | {n_mined} Mined | {n_val} Validated (S:{t_struct:.2f}s T:{t_trans:.2f}s V:{t_val:.2f}s)")
+    logger.info(f"{prefix} {method}: {len(trans)} Trans | {n_mined} Mined | {n_rare_filtered} RareFiltered | {n_val} Validated (S:{t_struct:.2f}s T:{t_trans:.2f}s V:{t_val:.2f}s)")
+    
+    # Save rare filtering stats
+    _save_rare_filtering_stats(sample_id, method, n_mined, n_rare_filtered, n_val)
     
     return {
         "Sample": sample_id,
@@ -364,6 +443,25 @@ def _filter_redundant_rules(rules, config):
     filtered_rules = rules.drop(index=list(indices_to_drop)).drop(columns=['ant_frozen'])
     
     return filtered_rules, count_removed
+
+def _save_rare_filtering_stats(sample_id, method, n_mined, n_rare_filtered, n_validated):
+    """Save statistics about rare cell filtering to a CSV file"""
+    from constants import RESULTS_BASE_DIR
+    
+    os.makedirs(RARE_FILTERING_STATS_DIR, exist_ok=True)
+    
+    stats_file = os.path.join(RARE_FILTERING_STATS_DIR, f"{method}_rare_filtering.csv")
+    
+    # Check if file exists to determine if we need to write header
+    file_exists = os.path.exists(stats_file)
+    
+    with open(stats_file, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["sample_id", "n_mined", "n_rare_filtered", "n_validated", "pct_filtered"])
+        
+        pct_filtered = (n_rare_filtered / n_mined * 100) if n_mined > 0 else 0
+        writer.writerow([sample_id, n_mined, n_rare_filtered, n_validated, f"{pct_filtered:.2f}"])
 
 def _save_transaction_cell_counts(sample_id, method, cell_counts):
     if not cell_counts:

@@ -10,7 +10,7 @@ data/
 results/debug_run
 results/full_run/data
 results/full_run/transaction_data
-
+results/full_run/rare_filtering_stats
 # Logs
 *.log
 

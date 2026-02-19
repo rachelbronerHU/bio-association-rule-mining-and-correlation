@@ -1,5 +1,5 @@
 # Debugging Configurations
-DEBUG = False # Set to True for quick test
+DEBUG = True # Set to True for quick test
 DEBUG_FOVS_PER_GROUP = 10
 SAVE_RAW_RULES = True
 
@@ -16,7 +16,8 @@ else:
 RESULTS_DATA_DIR = RESULTS_DIR + 'data/'
 RESULTS_PLOTS_DIR = RESULTS_DIR + 'plots/'
 
-TRANSACTION_DATA_DIR = RESULTS_DIR + 'transaction_data/'
+TRANSACTION_DATA_DIR = RESULTS_DATA_DIR + 'transaction_data/'
+RARE_FILTERING_STATS_DIR = RESULTS_DATA_DIR + 'rare_filtering_stats/'
 RESULT_EXPLORATION_DIR = 'result_exploration/'
 CONSENSUS_RESULTS_EXPLORATION_DIR = RESULTS_DATA_DIR + '/consensus_tables/'
 

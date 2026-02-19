@@ -244,6 +244,10 @@ def save_results(results, df_biopsy, df_fovs, suffix, data_key="Rules"):
     logger.info(f"Saved {filename}")
 
 def run_pipeline():
+    logger.info("========================================================================================================")
+    logger.info("================================= STARTING ASSOCIATION MINING PIPELINE =================================")
+    logger.info("========================================================================================================")
+
     start_time = time.time()
     df, df_biopsy, df_fovs = load_data()
     samples = get_samples_to_process(df)

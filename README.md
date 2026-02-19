@@ -30,10 +30,10 @@ Iterate Through FOVs (Field of Views)
   ├──► [ FOV Processing Pipeline ]
   │       │
   │       ├── 1. Determine Neighborhoods (Method Dependent)
-  │       ├── 2. Filter Rare Cell Types (Adaptive Threshold) <a href="#rare-cell-filter">[*]</a>
-  │       ├── 3. Construct Transaction Sets
-  │       ├── 4. Extract Rules (FP-Growth Algorithm)
-  │       ├── 5. Filter Rules (Min Lift, Confidence, Conviction)
+  │       ├── 2. Construct Transaction Sets (All Cell Types Included)
+  │       ├── 3. Extract Rules (FP-Growth Algorithm)
+  │       ├── 4. Filter Rules (Min Lift, Confidence, Conviction)
+  │       ├── 5. Filter Rare Cell Rules (Post-Mining) <a href="#rare-cell-filter">[*]</a>
   │       ├── 6. Select Top N Rules (Ranked by Lift)
   │       ├── 7. Statistical Validation (1000 Permutations)
   │       ├── 8. FDR Correction (Benjamini-Hochberg)
@@ -43,7 +43,7 @@ Iterate Through FOVs (Field of Views)
   └──────► Output: Validated, Non-Redundant Spatial Rules
 </pre>
 
-<span id="rare-cell-filter">**[*] Rare Cell Type Filtering:**</span> Cell types with counts below an adaptive threshold (max(5 cells, 1% of FOV)) are excluded from transactions before mining. This prevents spurious rules from extremely rare cell types (e.g., single-cell artifacts) while preserving biologically meaningful rare populations in larger FOVs.
+<span id="rare-cell-filter">**[*] Post-Mining Rare Cell Filtering:**</span> After mining, rules containing cell types below an adaptive threshold (max(5 cells, 1% of FOV)) are filtered out **before validation**. This two-stage approach ensures: (1) accurate support/lift calculations during mining (preserves full spatial context), (2) computational efficiency (rare-cell rules skip expensive 1000-permutation validation), and (3) cleaner final results (no single-cell artifacts).
 
 ---
 

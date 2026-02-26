@@ -1,5 +1,5 @@
 # Debugging Configurations
-DEBUG = True # Set to True for quick test
+DEBUG = False # Set to True for quick test
 DEBUG_FOVS_PER_GROUP = 10
 SAVE_RAW_RULES = True
 

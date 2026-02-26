@@ -95,6 +95,37 @@ venv\Scripts\python.exe -c "import pandas as pd; df = pd.read_csv('data/MIBIGutC
 venv\Scripts\python.exe -c "import pandas as pd; df = pd.read_csv('data/MIBIGutCsv/biopsy_metadata.csv'); mixed_patients = df.groupby('Patient_ID')['Localization'].nunique(); print(f'Patients with mixed biopsies: {mixed_patients[mixed_patients > 1]}')"
 ```
 
+**6. Analyze Class Balance by Organ (Stratification Viability)**
+```bash
+venv\Scripts\python.exe data_exploration\check_data_bias.py
+```
+
+**Stratification Analysis Results:**
+*   **Total Biopsies:** 73 (23 Colon, 50 Duodenum)
+*   **Sample Composition:** 14 Controls, 59 GVHD patients
+*   **Viable Strata:** 10/18 target×organ combinations (55.6%)
+
+**Viable Targets for Correlation Analysis:**
+
+| Target | Colon | Duodenum | Notes |
+| :--- | :---: | :---: | :--- |
+| **Pathological stage** | 23 ✗ | 50 ✓ | Colon: stage 4 has only 2 biopsies |
+| **GI stage** | 23 ✗ | 50 ✓ | Colon: stage 1 has only 1 biopsy |
+| **liver stage** | 23 ✗ | 50 ✗ | Too few advanced cases in gut biopsies |
+| **skin stage** | 23 ✗ | 50 ✗ | Too few advanced cases in gut biopsies |
+| **Grade GVHD** | 23 ✗ | 50 ✗ | Grade 2 has only 1 biopsy total |
+| **Cortico Response** | 23 ✓ | 50 ✓ | 3 balanced classes (Control/Responder/Non-responder) |
+| **Survival at follow-up** | 23 ✓ | 50 ✓ | 3 balanced classes |
+| **Clinical score** | 23 ✓ | 50 ✓ | Simplified 3-class severity (Control/Mild/Severe) |
+| **Pathological score** | 23 ✓ | 50 ✓ | Simplified 3-class severity |
+
+**Key Findings:**
+*   **Colon Limitation:** Only 23 biopsies cannot support fine-grained 5-class targets (stages 0-4).
+*   **Duodenum Advantage:** 50 biopsies sufficient for stage-based analyses.
+*   **Simplified Targets Robust:** 3-class targets (Clinical/Pathological score, Response, Survival) viable in both organs.
+*   **Systemic GVHD:** liver/skin stage rarely severe in gut biopsies (primarily GI-specific disease).
+*   **Action:** Correlation analysis must enforce organ-specific eligibility; pooling organs would confound biological differences.
+
 ---
 
 ## 4. Methodology & Mitigation Strategies

@@ -17,9 +17,11 @@
 * python visualization\visualize_transaction_distributions.py (results/full_run/plots/transaction_distributions)
 
 # Step no. 5: Consensus Report:
-**(Run each one with and without --no_self flag)**
-* *step 1* python result_exploration/generate_consensus_tables.py [--top_n 100] [--no_self] (tables under: results/full_run/data/consensus_tables)
-* *step 2* python visualization\visualize_consensus.py [--no_self] (results/full_run/plots/consensus_report)
+**(Run each one with and without --no_self flag. Auto-discovers and processes all organs by default.)**
+* *step 1* python result_exploration/generate_consensus_tables.py [--top_n 100] [--no_self] [--organs Colon Duodenum] (tables under: results/full_run/data/consensus_tables, organ-stratified)
+  - Omit --top_n to save ALL rules (recommended for complete analysis)
+  - Use --top_n N to save only top N rules (faster, but may miss stage-specific rules)
+* *step 2* python visualization\visualize_consensus.py [--no_self] [--organs Colon Duodenum] (results/full_run/plots/consensus_report, organ-stratified)
 
 ##### RULE CORRELATION FLOW #####
 

@@ -5,7 +5,6 @@ import logging
 import warnings
 import time
 import argparse
-import ast
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import Lasso, LogisticRegression
@@ -24,150 +23,122 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
 
+from data_exploration.check_data_bias import load_stratified_biopsies
+from check_rule_correlation_with_disease.stratified_utils import (
+    CONTROLS_ELIGIBLE, TARGETS, parse_rule_items, load_and_prep_data,
+    filter_viable_stratum, compute_per_class_metrics, bootstrap_single_iteration
+)
+
 # --- CONFIGURATION ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
 
 FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS_TO_ANALYZE = ["BAG", "CN", "KNN_R"] 
-TARGETS = [
-    "Pathological stage", 
-    "GI stage", 
-    # "liver stage", 
-    # "skin stage", 
-    "Cortico Response", 
-    "Grade GVHD",
-    "Survival at follow-up",
-    "Clinical score",
-    "Pathological score"
-]
+N_BOOTSTRAP = 200
 
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("Robust_Discovery")
 
-# --- DATA PREP ---
+# ── Data preparation helpers ───────────────────────────────────────────────────
 
-def parse_rule_items(item_str):
+def _sanitize_features(rule_lift_pivot):
+    """Rename rule columns to safe names for XGBoost (which rejects special chars)."""
+    rule_names = rule_lift_pivot.columns.tolist()
+    safe_name_map = {rule: f"Rule_{i}" for i, rule in enumerate(rule_names)}
+    rule_features = rule_lift_pivot.rename(columns=safe_name_map)
+    return rule_features, rule_names
+
+def prepare_target_data(rule_features, fov_metadata, target):
     """
-    Parses string representation of list "['A', 'B']" into a python set.
+    Filter to valid rows for a target, encode labels, and return arrays for LOGO CV.
+    Returns (rule_features, labels, biopsy_ids, label_encoder, is_classification) or None.
     """
-    try:
-        items = ast.literal_eval(item_str)
-        # Clean items (remove _CENTER/_NEIGHBOR suffixes)
-        return set(i.replace('_CENTER', '').replace('_NEIGHBOR', '') for i in items)
-    except:
-        return set([str(item_str).strip("[]'\"")])
+    valid_mask = fov_metadata[target].notna()
+    n_valid = valid_mask.sum()
+    if n_valid == 0:
+        logger.warning(f"   [DEBUG] Target {target}: 0 valid rows (all NaN).")
+        return None
 
-def load_and_prep_data(input_file, no_self=False):
-    if not os.path.exists(input_file):
-        logger.warning(f"File not found: {input_file}")
-        return None, None, None
-
-    df = pd.read_csv(input_file)
-    initial_len = len(df)
+    target_rule_features = rule_features[valid_mask]
+    target_values = fov_metadata.loc[valid_mask, target]
+    biopsy_ids = fov_metadata.loc[valid_mask, "Biopsy_ID"]
+    is_classification = (target_values.dtype == 'object') or (len(target_values.unique()) < 10)
     
-    # Apply No-Self Filter (Strict: No Shared Items)
-    if no_self:
-        def has_overlap(row):
-            # Parse Antecedents and Consequents
-            ant = parse_rule_items(row['Antecedents'])
-            con = parse_rule_items(row['Consequents'])
-            return not ant.isdisjoint(con)
+    logger.info(f"   [DEBUG] Target {target}: {n_valid} valid rows. Unique vals: {target_values.unique()}")
+
+    if is_classification:
+        label_encoder = LabelEncoder()
+        encoded = label_encoder.fit_transform(target_values.astype(str))
+        labels = pd.Series(encoded, index=target_values.index)
         
-        df = df[~df.apply(has_overlap, axis=1)]
-        logger.info(f"   Applied No-Self Filter: {initial_len} -> {len(df)} rules")
+        if len(np.unique(labels)) < 2: 
+            logger.warning(f"   [DEBUG] Target {target} has less than 2 classes ({np.unique(labels)}) after encoding. Skipping.")
+            return None
+    else:
+        label_encoder = None
+        labels = target_values
 
-    # Filter by FDR
-    initial_len = len(df)
-    if "FDR" in df.columns:
-        df = df[df["FDR"] < 0.05]
-        dropped = initial_len - len(df)
-        if dropped > 0:
-            logger.info(f"   Dropped {dropped} rows with P-Value >= 0.05 (Retained: {len(df)})")
-    
-    if df.empty:
-        logger.warning("   No data left after filtering.")
-        return None, None, None
+    return target_rule_features, labels, biopsy_ids, label_encoder, is_classification
 
-    if "Rule" not in df.columns:
-        df["Rule"] = df["Antecedents"] + " -> " + df["Consequents"]
+# ── Fold computation ───────────────────────────────────────────────────────────
 
-    # Pivot
-    pivot_df = df.pivot_table(index="FOV", columns="Rule", values="Lift", aggfunc="mean").fillna(0)
-    
-    available_targets = [t for t in TARGETS if t in df.columns]
-    meta_cols = ["FOV", "Biopsy_ID"] + available_targets
-    meta_df = df[meta_cols].drop_duplicates(subset="FOV").set_index("FOV")
-    
-    common = pivot_df.index.intersection(meta_df.index)
-    return pivot_df.loc[common], meta_df.loc[common], df
+def _get_xgb_sample_weights(y_train):
+    """Balanced sample weights for XGBoost (mirrors class_weight='balanced' in RF/Lasso)."""
+    from sklearn.utils.class_weight import compute_sample_weight
+    return compute_sample_weight('balanced', y_train)
 
-def sanitize_features(X):
-    original_rules = X.columns.tolist()
-    rule_map = {rule: f"Rule_{i}" for i, rule in enumerate(original_rules)}
-    reverse_map = {v: k for k, v in rule_map.items()}
-    X_renamed = X.rename(columns=rule_map)
-    # Return the ordered list of names, which corresponds exactly to Rule_0, Rule_1...
-    return X_renamed, original_rules
-
-# --- CORE LOGIC ---
-
-def process_fold_task(X, y_enc, train_idx, test_idx, fold_id, task_label, is_categorical, k_feat):
-
+def _process_fold_task(rule_features, labels, train_idx, test_idx, fold_id, task_label, is_classification, top_k):
 
     pid = os.getpid()
     start_t = time.time()
-    log_prefix = f"[{task_label}] Fold {fold_id+1} (PID {pid}) K-Feat {k_feat}-"
+    log_prefix = f"[{task_label}] Fold {fold_id+1} (PID {pid}) K-Feat {top_k}-"
 
-    X_train = X.iloc[train_idx]
+    X_train = rule_features.iloc[train_idx]
     
-    # Handle Series vs Array slicing
-    if hasattr(y_enc, 'iloc'):
-        y_train = y_enc.iloc[train_idx]
-        y_test = y_enc.iloc[test_idx]
+    if hasattr(labels, 'iloc'):
+        y_train = labels.iloc[train_idx]
+        y_test = labels.iloc[test_idx]
     else:
-        y_train = y_enc[train_idx]
-        y_test = y_enc[test_idx]
+        y_train = labels[train_idx]
+        y_test = labels[test_idx]
         
-    X_test = X.iloc[test_idx]
+    X_test = rule_features.iloc[test_idx]
 
     if len(np.unique(y_train)) < 2:
         logger.warning(f"{log_prefix} Skipped (<2 classes)")
         return {"success": False, "fold_id": fold_id, "msg": "Skipped (<2 classes)"}
     
     try:
-
-        # --- 2. Feature Selection ---
+        # --- Feature Selection ---
         n_features_in = X_train.shape[1]
         
-        # Determine if we do selection
-        if k_feat is not None and k_feat < n_features_in:
-            if is_categorical:
+        if top_k is not None and top_k < n_features_in:
+            if is_classification:
                 embed_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=1)
             else:
                 embed_model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=1)
 
-            selector = SelectFromModel(embed_model, max_features=k_feat, threshold=-np.inf)
+            selector = SelectFromModel(embed_model, max_features=top_k, threshold=-np.inf)
             selector.fit(X_train, y_train)
             
-            selected_indices = selector.get_support(indices=True)
-            X_train_sel = selector.transform(X_train)
-            X_test_sel = selector.transform(X_test)
+            selected_rule_indices = selector.get_support(indices=True)
+            X_train_selected = selector.transform(X_train)
+            X_test_selected = selector.transform(X_test)
         else:
-            # Use ALL features
-            selected_indices = np.arange(n_features_in)
-            X_train_sel = X_train.values
-            X_test_sel = X_test.values
+            selected_rule_indices = np.arange(n_features_in)
+            X_train_selected = X_train.values
+            X_test_selected = X_test.values
 
-        # --- Scaling (Critical for Lasso) ---
+        # --- Scaling (critical for Lasso) ---
         scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train_sel)
-        X_test_scaled = scaler.transform(X_test_sel)
+        X_train_scaled = scaler.fit_transform(X_train_selected)
+        X_test_scaled = scaler.transform(X_test_selected)
 
-        # --- 3. Model Training ---
-        if is_categorical:
+        # --- Model Training ---
+        if is_classification:
             models = {
                 "RF": RandomForestClassifier(n_estimators=50, max_depth=5, class_weight='balanced', random_state=42, n_jobs=1),
                 "XGB": xgb.XGBClassifier(eval_metric='logloss', max_depth=3, random_state=42, n_jobs=1),
@@ -180,41 +151,38 @@ def process_fold_task(X, y_enc, train_idx, test_idx, fold_id, task_label, is_cat
                 "Lasso": Lasso(alpha=0.01, random_state=42)
             }
        
-        fold_preds = {}
+        fold_predictions = {}
         fold_scores = {}
         
         for name, model in models.items():
-            model.fit(X_train_scaled, y_train)       # Training the model with selected features
-            pred = model.predict(X_test_scaled)      # Predicting on the test set
+            if name == "XGB":
+                model.fit(X_train_scaled, y_train, sample_weight=_get_xgb_sample_weights(y_train))
+            else:
+                model.fit(X_train_scaled, y_train)
+            pred = model.predict(X_test_scaled)
             
-            fold_preds[name] = pred[0]            # Save prediction (single fov)
+            fold_predictions[name] = pred[0]
             
-            # Score Calculation
-            if is_categorical:
+            if is_classification:
                 fold_scores[name] = f1_score(y_test, pred, average='macro')
             else:
                 fold_scores[name] = r2_score(y_test, pred)
 
-        # 1. RF Importance
-        imp_rf = models["RF"].feature_importances_
-        
-        # 2. XGB Importance
-        imp_xgb = models["XGB"].feature_importances_
-        
-        # 3. Lasso Coefficients 
-        logit = models["Lasso"]
-        imp_lasso = np.abs(logit.coef_).flatten()
-        if logit.coef_.ndim > 1:
-            imp_lasso = np.mean(np.abs(logit.coef_), axis=0)
+        # --- Feature Importances ---
+        rf_importance = models["RF"].feature_importances_
+        xgb_importance = models["XGB"].feature_importances_
+        lasso_model = models["Lasso"]
+        lasso_importance = np.abs(lasso_model.coef_).flatten()
+        if lasso_model.coef_.ndim > 1:
+            lasso_importance = np.mean(np.abs(lasso_model.coef_), axis=0)
             
-        
-        importances_dict = {"RF": imp_rf, "XGB": imp_xgb, "Lasso": imp_lasso}
+        importances = {"RF": rf_importance, "XGB": xgb_importance, "Lasso": lasso_importance}
 
-        # Normalize Importances
-        for name in importances_dict:
-            arr = importances_dict[name]
+        # Normalize importances to [0, 1]
+        for name in importances:
+            arr = importances[name]
             if arr.max() > 0:
-                importances_dict[name] = arr / arr.max()
+                importances[name] = arr / arr.max()
         
         duration = time.time() - start_t
         logger.info(f"{log_prefix} Completed in {duration:.1f}s - Scores: {fold_scores}")
@@ -223,10 +191,10 @@ def process_fold_task(X, y_enc, train_idx, test_idx, fold_id, task_label, is_cat
             "success": True,
             "fold_id": fold_id,
             "scores": fold_scores,
-            "predictions": fold_preds,
+            "predictions": fold_predictions,
             "true_value": y_test.iloc[0],
-            "selected_indices": selected_indices,
-            "importances": importances_dict 
+            "selected_rule_indices": selected_rule_indices,
+            "importances": importances 
         }
 
     except Exception as e:
@@ -234,173 +202,344 @@ def process_fold_task(X, y_enc, train_idx, test_idx, fold_id, task_label, is_cat
         return {"success": False, "fold_id": fold_id, "msg": str(e)}
 
 
-# =========== HELPER FUNCTIONS ===========
+# ── Save / output helpers ──────────────────────────────────────────────────────
 
-def prepare_target_data(X_safe, y_meta_raw, target):
-    """
-    Handles data filtering, NaN removal, and Label Encoding for a specific target.
-    Returns clean X, y, groups (Biopsy_ID), encoder, and categorical flag.
-    """
-    valid_mask = y_meta_raw[target].notna()
-    n_valid = valid_mask.sum()
-    if n_valid == 0:
-        logger.warning(f"   [DEBUG] Target {target}: 0 valid rows (all NaN).")
-        return None
-
-    # Per FOV
-    X_target = X_safe[valid_mask]
-    y_target = y_meta_raw.loc[valid_mask, target]
-
-    # Per Biopsy Groups
-    groups_target = y_meta_raw.loc[valid_mask, "Biopsy_ID"]
-    is_categorical = (y_target.dtype == 'object') or (len(y_target.unique()) < 10)
+def save_predictions_log(accumulator, method, file_label, label_encoder, is_classification, output_dir):
+    """Save per-biopsy prediction details."""
+    safe_label = file_label.replace(" ", "_").replace("/", "-")
+    pred_df = pd.DataFrame(accumulator["biopsy_predictions"])
     
-    unique_vals = y_target.unique()
-    logger.info(f"   [DEBUG] Target {target}: {n_valid} valid rows. Unique vals: {unique_vals}")
-
-    if is_categorical:
-        le = LabelEncoder()
-        y_enc = le.fit_transform(y_target.astype(str))
-        y_final = pd.Series(y_enc, index=y_target.index)
+    if is_classification and label_encoder:
+        pred_df["True_Value_Label"] = label_encoder.inverse_transform(pred_df["True_Value"].astype(int))
         
-        if len(np.unique(y_final)) < 2: 
-            logger.warning(f"   [DEBUG] Target {target} has less than 2 classes ({np.unique(y_final)}) after encoding. Skipping.")
-            return None
-    else:
-        y_final = y_target
-
-    return X_target, y_final, groups_target, le, is_categorical
-
-def save_predictions_log(acc, method, target, le, is_cat, output_dir):
-    """
-    Step 1: Save the per-patient prediction details.
-    """
-    safe_target = target.replace(" ", "_").replace("/", "-")
-    pred_df = pd.DataFrame(acc["patient_results"])
-    
-    # If categorical, map numbers (0,1) back to names (Stage 1, Stage 2)
-    if is_cat and le:
-        pred_df["True_Value_Label"] = le.inverse_transform(pred_df["True_Value"].astype(int))
-        
-    filename = f"{output_dir}/preds_{method}_{safe_target}.csv"
+    filename = f"{output_dir}/preds_{method}_{safe_label}.csv"
     pred_df.to_csv(filename, index=False)
     return filename
 
-def compute_and_save_rule_stats(acc, count, method, target, original_rule_names, output_dir):
+def compute_and_save_rule_stats(accumulator, n_folds_completed, method, file_label, rule_names, output_dir):
     """
-    Step 2: Calculate Stability (Frequency) and Mean Importance.
-    Returns the Rules DataFrame for further use.
+    Calculate rule selection frequency (stability) and mean importance across folds.
+    Returns rule_stats DataFrame for further use.
     """
-    safe_target = target.replace(" ", "_").replace("/", "-")
+    safe_label = file_label.replace(" ", "_").replace("/", "-")
     
-    # Calculate Mean Importance (Sum / Count) safely
-    avg_imps = {}
     with np.errstate(divide='ignore', invalid='ignore'):
+        avg_importances = {}
         for m in ["RF", "XGB", "Lasso"]:
-            # We divide sum of importance by the number of times it was SELECTED (not total folds)
-            avg = acc["rule_imp_sums"][m] / acc["rule_counts"]
-            avg_imps[m] = np.nan_to_num(avg)
+            avg = accumulator["rule_imp_sums"][m] / accumulator["rule_selection_counts"]
+            avg_importances[m] = np.nan_to_num(avg)
 
-    # Create the DataFrame
-    rules_df = pd.DataFrame({
-        "Rule": original_rule_names,
-        "Selection_Frequency": acc["rule_counts"], # The "Stability" Metric (Raw Count)
-        "Selection_Percent": (acc["rule_counts"] / count) * 100, # The "Stability" Metric (%)
-        "Mean_Imp_RF": avg_imps["RF"],
-        "Mean_Imp_XGB": avg_imps["XGB"],
-        "Mean_Imp_Lasso": avg_imps["Lasso"]
+    rule_stats = pd.DataFrame({
+        "Rule": rule_names,
+        "Selection_Frequency": accumulator["rule_selection_counts"],
+        "Selection_Percent": (accumulator["rule_selection_counts"] / n_folds_completed) * 100,
+        "Mean_Imp_RF": avg_importances["RF"],
+        "Mean_Imp_XGB": avg_importances["XGB"],
+        "Mean_Imp_Lasso": avg_importances["Lasso"]
     })
     
-    # Filter: Keep only rules selected at least once
-    rules_df = rules_df[rules_df["Selection_Frequency"] > 0].sort_values("Selection_Frequency", ascending=False)
+    rule_stats = rule_stats[rule_stats["Selection_Frequency"] > 0].sort_values("Selection_Frequency", ascending=False)
     
-    # Save
-    filename = f"{output_dir}/scores_{method}_{safe_target}.csv"
-    rules_df.to_csv(filename, index=False)
-    
-    return rules_df
+    filename = f"{output_dir}/scores_{method}_{safe_label}.csv"
+    rule_stats.to_csv(filename, index=False)
+    return rule_stats
 
-def save_raw_data_subset(df_raw, rules_df, method, target, output_dir):
-    """
-    Step 3: Save the raw data rows for the Top 100 most stable rules.
-    """
-    # Get the names of the top 100 rules (sorted by stability)
-    top_stable_rules = rules_df.head(100)["Rule"].tolist()
-    
-    # Call the existing helper to filter and save
-    save_filtered_raw_data(df_raw, top_stable_rules, method, target, output_dir)
-
-def save_filtered_raw_data(raw_df, top_rules, method_name, target_name, output_dir):
-    filtered_df = raw_df[raw_df["Rule"].isin(top_rules)].copy()
-    safe_target = target_name.replace(" ", "_").replace("/", "-")
-    filename = f"{output_dir}/results_{method_name}_{safe_target}.csv"
+def save_filtered_raw_data(raw_rules, rule_stats, method, file_label, output_dir, top_n=100):
+    """Save the raw rule rows for the top N most stable rules."""
+    top_rules = rule_stats.head(top_n)["Rule"].tolist()
+    filtered_df = raw_rules[raw_rules["Rule"].isin(top_rules)].copy()
+    safe_label = file_label.replace(" ", "_").replace("/", "-")
+    filename = f"{output_dir}/results_{method}_{safe_label}.csv"
     filtered_df.to_csv(filename, index=False)
     logger.info(f"   >>> SAVED FILTERED RAW: {filename}")
 
-def save_comparison_summary(leaderboard_data, output_dir):
-    """
-    Creates a pivot table comparing scores across different feature counts.
-    """
-    if not leaderboard_data: return
-    
-    df = pd.DataFrame(leaderboard_data)
-    # Pivot: Index=[Method, Target], Columns=[Num_Features], Values=[Grand_Score]
-    # Handle 'All' vs Numbers for column sorting
+def calculate_leaderboard_score(accumulator, method, target, is_classification, predictions_file, top_k):
+    """Calculate final aggregated scores for the leaderboard."""
+    metric = "F1-Macro" if is_classification else "R2"
+
+    grand_score = (np.mean(accumulator["model_scores"]["RF"]) +
+                   np.mean(accumulator["model_scores"]["XGB"]) +
+                   np.mean(accumulator["model_scores"]["Lasso"])) / 3
+
+    return {
+        "Method": method,
+        "Target": target,
+        "Num_Features": "All" if top_k is None else top_k,
+        "Metric": metric,
+        "Grand_Score": grand_score,
+        "RF_Mean": np.mean(accumulator["model_scores"]["RF"]),
+        "XGB_Mean": np.mean(accumulator["model_scores"]["XGB"]),
+        "Lasso_Mean": np.mean(accumulator["model_scores"]["Lasso"]),
+        "Log_Preds": os.path.basename(predictions_file)
+    }
+
+def save_comparison_summary(leaderboard_records, output_dir):
+    """Creates a pivot table comparing scores across different feature counts."""
+    if not leaderboard_records: return
+
+    df = pd.DataFrame(leaderboard_records)
     df["Config_Label"] = df["Num_Features"].apply(lambda x: "All" if pd.isna(x) or x == "All" else f"Top{x}")
-    
-    pivot = df.pivot_table(index=["Method", "Target"], columns="Config_Label", values="Grand_Score")
-    
-    # Ensure idxmax and max are only applied to numerical columns
-    # Create a subset of the pivot table containing only numerical score columns
+
+    pivot = df.pivot_table(index=["Method", "Organ", "Target"], columns="Config_Label", values="Grand_Score")
+
     score_columns = [col for col in pivot.columns if col in ["All"] or col.startswith("Top")]
     numeric_score_pivot = pivot[score_columns]
-
     pivot["Best_Config"] = numeric_score_pivot.idxmax(axis=1)
     pivot["Best_Score"] = numeric_score_pivot.max(axis=1)
-    
+
     filename = f"{output_dir}/comparison_summary.csv"
     pivot.to_csv(filename)
     logger.info(f"   >>> SAVED COMPARISON SUMMARY: {filename}")
 
-def calculate_leaderboard_score(acc, method, target, is_cat, preds_filename, k_feat):
+
+# ── Orchestration ──────────────────────────────────────────────────────────────
+
+def _load_method_data(method, biopsy_strat, no_self):
     """
-    Step 4: Calculate final aggregated scores for the Leaderboard.
+    Load and prepare data for a single method:
+    - Load rules CSV, filter by FDR, pivot to rule_features matrix
+    - Sanitize feature names for XGBoost
+    - Attach Organ and Is_Control to fov_metadata
+    - Fill NaN target values for eligible control biopsies
+    Returns (rule_features, fov_metadata, raw_rules, rule_names) or None on failure.
     """
-    metric = "F1-Macro" if is_cat else "R2"
-    
-    # Grand Score = Average of the 3 models
-    grand_score = (np.mean(acc["agg_scores"]["RF"]) + 
-                   np.mean(acc["agg_scores"]["XGB"]) + 
-                   np.mean(acc["agg_scores"]["Lasso"])) / 3
-    
-    return {
-        "Method": method,
-        "Target": target,
-        "Num_Features": "All" if k_feat is None else k_feat,
-        "Metric": metric,
-        "Grand_Score": grand_score,
-        "RF_Mean": np.mean(acc["agg_scores"]["RF"]),
-        "XGB_Mean": np.mean(acc["agg_scores"]["XGB"]),
-        "Lasso_Mean": np.mean(acc["agg_scores"]["Lasso"]),
-        "Log_Preds": os.path.basename(preds_filename)
-    }
+    input_file = f"{BASE_INPUT_DIR}/results_{method}.csv"
+    if not os.path.exists(input_file):
+        return None
+
+    rule_lift_pivot, fov_metadata, raw_rules = load_and_prep_data(input_file, no_self=no_self)
+    if rule_lift_pivot is None:
+        logger.warning(f"   Skipping {method} due to data issues")
+        return None
+
+    rule_features, rule_names = _sanitize_features(rule_lift_pivot)
+
+    # Attach organ and control flag to FOV-level metadata
+    fov_metadata["Organ"] = fov_metadata["Biopsy_ID"].map(biopsy_strat["Organ"])
+    fov_metadata["Is_Control"] = fov_metadata["Biopsy_ID"].map(biopsy_strat["Is_Control"])
+
+    # Fill NaN target values for controls — only for eligible targets
+    is_control_fov = fov_metadata["Is_Control"].fillna(False).astype(bool)
+    for target in TARGETS:
+        if not CONTROLS_ELIGIBLE.get(target, False):
+            continue
+        if target not in fov_metadata.columns or target not in biopsy_strat.columns:
+            continue
+        missing_target_for_controls = is_control_fov & fov_metadata[target].isna()
+        if missing_target_for_controls.any():
+            fov_metadata.loc[missing_target_for_controls, target] = (
+                fov_metadata.loc[missing_target_for_controls, "Biopsy_ID"].map(biopsy_strat[target])
+            )
+
+    return rule_features, fov_metadata, raw_rules, rule_names
 
 
-# --- ORCHESTRATOR ---
+def _run_logo_cv(rule_features, fov_metadata, organs, method):
+    """
+    Run Leave-One-Group-Out CV across all organ × target × top_k configs in parallel.
+    Returns (fold_accumulators, bootstrap_data).
+    """
+    fold_accumulators = {}
+    fold_futures = {}
+    bootstrap_data = {}  # (organ, target) -> (feat_arr, label_arr, group_arr, is_classification)
+
+    with ProcessPoolExecutor() as executor:
+
+        for organ in organs:
+            organ_mask = fov_metadata["Organ"] == organ
+            organ_rule_features = rule_features[organ_mask]
+            organ_fov_metadata = fov_metadata[organ_mask]
+            n_biopsies = organ_fov_metadata["Biopsy_ID"].nunique()
+            logger.info(f"  --- Organ: {organ} ({organ_mask.sum()} FOVs, {n_biopsies} biopsies) ---")
+
+            for target in TARGETS:
+                if target not in organ_fov_metadata.columns:
+                    logger.warning(f"   Target {target} not found in metadata. Skipping.")
+                    continue
+                if organ_fov_metadata[target].isna().all():
+                    logger.warning(f"   Target {target} x {organ} has all NaN values. Skipping.")
+                    continue
+
+                # Filter to eligible population (GVHD only vs GVHD + controls)
+                include_controls = CONTROLS_ELIGIBLE.get(target, True)
+                if not include_controls:
+                    gvhd_only_mask = ~organ_fov_metadata["Is_Control"].fillna(False).astype(bool)
+                    eligible_rule_features = organ_rule_features[gvhd_only_mask]
+                    eligible_fov_metadata = organ_fov_metadata[gvhd_only_mask]
+                else:
+                    eligible_rule_features = organ_rule_features
+                    eligible_fov_metadata = organ_fov_metadata
+
+                # Drop rare classes; skip only if not viable after filtering
+                eligible_fov_metadata, note = filter_viable_stratum(eligible_fov_metadata, target)
+                if eligible_fov_metadata is None:
+                    logger.info(f"  Skipping {target} x {organ}: {note}")
+                    continue
+                if note:
+                    logger.info(f"  {target} x {organ}: {note}")
+                eligible_rule_features = eligible_rule_features.loc[eligible_fov_metadata.index]
+
+                # Encode labels and prepare arrays for CV
+                prep = prepare_target_data(eligible_rule_features, eligible_fov_metadata, target)
+                if not prep:
+                    continue
+
+                target_rule_features, target_labels, biopsy_ids, label_encoder, is_classification = prep
+                n_rules = target_rule_features.shape[1]
+
+                # Store full-feature data once per (organ, target) for bootstrap CI
+                bootstrap_data[(organ, target)] = (
+                    target_rule_features.values if hasattr(target_rule_features, 'values') else target_rule_features,
+                    target_labels.values if hasattr(target_labels, 'values') else np.array(target_labels),
+                    biopsy_ids.values if hasattr(biopsy_ids, 'values') else np.array(biopsy_ids),
+                    is_classification
+                )
+
+                for top_k in FEATURE_COUNTS:
+                    config_key = (organ, target, top_k)
+
+                    fold_accumulators[config_key] = {
+                        "meta": {"label_encoder": label_encoder, "is_classification": is_classification, "n_folds_completed": 0},
+                        "rule_selection_counts": np.zeros(n_rules),
+                        "rule_imp_sums": {"RF": np.zeros(n_rules), "XGB": np.zeros(n_rules), "Lasso": np.zeros(n_rules)},
+                        "biopsy_predictions": [],
+                        "model_scores": {"RF": [], "XGB": [], "Lasso": []}
+                    }
+
+                    logo = LeaveOneGroupOut()
+                    for fold_idx, (train_idx, test_idx) in enumerate(logo.split(target_rule_features, target_labels, groups=biopsy_ids)):
+                        features_label = f"Top{top_k}" if top_k else "All"
+                        task_label = f"{method}-{organ}-{target}-{features_label}"
+                        test_biopsy_id = biopsy_ids.iloc[test_idx[0]]
+                        fold_key = (organ, target, top_k, fold_idx, test_biopsy_id)
+
+                        future = executor.submit(
+                            _process_fold_task, target_rule_features, target_labels,
+                            train_idx, test_idx, fold_idx, task_label, is_classification, top_k
+                        )
+                        fold_futures[future] = fold_key
+
+        # --- Collect results as they complete ---
+        total_tasks = len(fold_futures)
+        logger.info(f"   >>> Processing {total_tasks} tasks (Organ x Target x Config x Folds)...")
+
+        completed_count = 0
+        for future in as_completed(fold_futures):
+            organ_name, target_name, top_k, fold_id, biopsy_id = fold_futures[future]
+            res = future.result()
+
+            completed_count += 1
+            if completed_count % 100 == 0:
+                logger.info(f"   ... Completed {completed_count}/{total_tasks} tasks")
+
+            if res["success"]:
+                accumulator = fold_accumulators[(organ_name, target_name, top_k)]
+                accumulator["meta"]["n_folds_completed"] += 1
+
+                for model_name, score in res["scores"].items():
+                    accumulator["model_scores"][model_name].append(score)
+
+                selected_rule_indices = res["selected_rule_indices"]
+                accumulator["rule_selection_counts"][selected_rule_indices] += 1
+                for model_name in ["RF", "XGB", "Lasso"]:
+                    accumulator["rule_imp_sums"][model_name][selected_rule_indices] += res["importances"][model_name]
+
+                fold_prediction = {
+                    "Biopsy_ID": biopsy_id,
+                    "True_Value": res["true_value"],
+                    "Pred_RF": res["predictions"]["RF"],
+                    "Pred_XGB": res["predictions"]["XGB"],
+                    "Pred_Lasso": res["predictions"]["Lasso"]
+                }
+                accumulator["biopsy_predictions"].append(fold_prediction)
+
+    return fold_accumulators, bootstrap_data
+
+
+def _save_method_results(fold_accumulators, raw_rules, rule_names, method, output_dir):
+    """
+    Save artifacts for all (organ, target, top_k) configs of one method.
+    Returns list of leaderboard records for this method.
+    """
+    logger.info(f"   >>> Saving results for {method}...")
+    method_leaderboard_records = []
+
+    for (organ, target, top_k), accumulator in fold_accumulators.items():
+        n_folds_completed = accumulator["meta"]["n_folds_completed"]
+        if n_folds_completed == 0:
+            continue
+
+        label_encoder = accumulator["meta"]["label_encoder"]
+        is_classification = accumulator["meta"]["is_classification"]
+
+        features_suffix = f"_Top{top_k}" if top_k else "_All"
+        file_label = f"{organ}_{target}{features_suffix}"
+
+        predictions_file = save_predictions_log(accumulator, method, file_label, label_encoder, is_classification, output_dir)
+        rule_stats = compute_and_save_rule_stats(accumulator, n_folds_completed, method, file_label, rule_names, output_dir)
+        save_filtered_raw_data(raw_rules, rule_stats, method, file_label, output_dir)
+
+        record = calculate_leaderboard_score(accumulator, method, target, is_classification, predictions_file, top_k)
+        record["Organ"] = organ
+
+        if is_classification and accumulator["biopsy_predictions"]:
+            true_labels = np.array([r["True_Value"] for r in accumulator["biopsy_predictions"]], dtype=int)
+            record["Per_Class_F1_RF"] = str(compute_per_class_metrics(true_labels, np.array([r["Pred_RF"] for r in accumulator["biopsy_predictions"]], dtype=int), label_encoder))
+            record["Per_Class_F1_XGB"] = str(compute_per_class_metrics(true_labels, np.array([r["Pred_XGB"] for r in accumulator["biopsy_predictions"]], dtype=int), label_encoder))
+            record["Per_Class_F1_Lasso"] = str(compute_per_class_metrics(true_labels, np.array([r["Pred_Lasso"] for r in accumulator["biopsy_predictions"]], dtype=int), label_encoder))
+
+        method_leaderboard_records.append(record)
+        logger.info(f"Saved {organ} x {target} [{features_suffix.strip('_')}]: Score = {record['Grand_Score']:.3f}")
+
+    return method_leaderboard_records
+
+
+def _attach_bootstrap_ci(bootstrap_data, method_leaderboard_records, method):
+    """
+    Run bootstrap CI in parallel across all (organ, target) combos and attach CI columns
+    to method_leaderboard_records in place.
+    """
+    if not bootstrap_data:
+        return
+
+    bootstrap_tasks = []
+    bootstrap_combo_index = []
+    for (organ, target), (feat_arr, label_arr, group_arr, is_classification) in bootstrap_data.items():
+        unique_biopsies = np.unique(group_arr)
+        for seed in range(N_BOOTSTRAP):
+            bootstrap_tasks.append((feat_arr, label_arr, group_arr, unique_biopsies, is_classification, seed))
+            bootstrap_combo_index.append((organ, target))
+
+    logger.info(f"   >>> Running bootstrap CI ({N_BOOTSTRAP} iters x {len(bootstrap_data)} combos in parallel)...")
+    with ProcessPoolExecutor() as executor:
+        bootstrap_scores = list(executor.map(bootstrap_single_iteration, bootstrap_tasks))
+
+    ci_scores_per_combo = {}
+    for (organ, target), score in zip(bootstrap_combo_index, bootstrap_scores):
+        key = (organ, target)
+        if key not in ci_scores_per_combo:
+            ci_scores_per_combo[key] = []
+        if not np.isnan(score):
+            ci_scores_per_combo[key].append(score)
+
+    for record in method_leaderboard_records:
+        combo_scores = ci_scores_per_combo.get((record["Organ"], record["Target"]), [])
+        if len(combo_scores) >= 10:
+            record["CI_Mean"] = round(float(np.mean(combo_scores)), 4)
+            record["CI_Lower"] = round(float(np.percentile(combo_scores, 2.5)), 4)
+            record["CI_Upper"] = round(float(np.percentile(combo_scores, 97.5)), 4)
+        else:
+            record["CI_Mean"] = record["CI_Lower"] = record["CI_Upper"] = np.nan
+
 
 def run_pipeline(no_self=False):
     """
-    Main Orchestrator function.
-    Iterates over methods and targets, runs the LOGO validation,
-    and saves detailed artifacts (Predictions, Scores, Raw Data, Leaderboard).
+    Main orchestrator. Iterates methods, runs LOGO CV per organ×target, saves artifacts and leaderboard.
     """
-    abs_base_input = os.path.abspath(BASE_INPUT_DIR)
-    logger.info(f"Input Dir: {abs_base_input}")
-    if not os.path.exists(abs_base_input):
+    if not os.path.exists(os.path.abspath(BASE_INPUT_DIR)):
         logger.error("CRITICAL: Input directory missing.")
         return
-        
-    # Select Output Directory
+
     if no_self:
         output_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_ML_DATA_DIR_NO_SELF)
         logger.info(f"Running in NO_SELF mode. Output: {output_dir}")
@@ -410,157 +549,33 @@ def run_pipeline(no_self=False):
 
     os.makedirs(output_dir, exist_ok=True)
 
-    leaderboard_data = []
+    stratification = load_stratified_biopsies()
+    organs = sorted([o for o in stratification["Organ"].unique() if o != "Unknown"])
+    biopsy_strat = stratification.set_index("Biopsy_ID")
+
+    leaderboard_records = []
 
     for method in METHODS_TO_ANALYZE:
-        input_file = f"{BASE_INPUT_DIR}/results_{method}.csv"
-        if not os.path.exists(input_file): continue
-            
-        logger.info(f"=== METHOD: {method} === input file: {input_file}")
-        
-        # Pass no_self flag to loader
-        X_raw, y_meta_raw, df_raw = load_and_prep_data(input_file, no_self=no_self)
-        if X_raw is None: 
-            logger.warning(f"   Skipping {method} due to data issues - X_raw is None")
+        logger.info(f"=== METHOD: {method} ===")
+        method_data = _load_method_data(method, biopsy_strat, no_self)
+        if method_data is None:
             continue
 
-        X_safe, original_rule_names = sanitize_features(X_raw)
+        rule_features, fov_metadata, raw_rules, rule_names = method_data
 
-        # Accumulators Map: Key = (target, k_feat)
-        # We need distinct accumulators for each feature configuration
-        accumulators_map = {} 
-        futures_map = {} 
+        fold_accumulators, bootstrap_data = _run_logo_cv(rule_features, fov_metadata, organs, method)
+        method_records = _save_method_results(fold_accumulators, raw_rules, rule_names, method, output_dir)
+        _attach_bootstrap_ci(bootstrap_data, method_records, method)
+        leaderboard_records.extend(method_records)
 
-        with ProcessPoolExecutor() as executor:
-            
-            for target in TARGETS:
-                if target not in y_meta_raw.columns: 
-                    logger.warning(f"   Target {target} not found in metadata. Skipping.")
-                    continue
-
-                if y_meta_raw[target].isna().all(): 
-                    logger.warning(f"   Target {target} has all NaN values. Skipping.")
-                    continue
-                
-                # --- Step A: Prepare Target Data ---
-                prep_res = prepare_target_data(X_safe, y_meta_raw, target)
-                if not prep_res: continue 
-                
-                X_t, y_t, groups_t, le, is_cat = prep_res
-                n_features_total = X_t.shape[1]
-
-                # --- Iterate over Feature Counts ---
-                for k_feat in FEATURE_COUNTS:
-                    
-                    config_key = (target, k_feat)
-                    
-                    # Init Accumulator for this specific config
-                    accumulators_map[config_key] = {
-                        "meta": {"le": le, "is_cat": is_cat, "count": 0}, 
-                        "rule_counts": np.zeros(n_features_total),
-                        "rule_imp_sums": {"RF": np.zeros(n_features_total), "XGB": np.zeros(n_features_total), "Lasso": np.zeros(n_features_total)},
-                        "patient_results": [],
-                        "agg_scores": {"RF": [], "XGB": [], "Lasso": []}
-                    }
-
-                    # Submit LOGO Folds
-                    logo = LeaveOneGroupOut()
-
-                    for fold_idx, (train_idx, test_idx) in enumerate(logo.split(X_t, y_t, groups=groups_t)):
-                        
-                        feat_label = f"Top{k_feat}" if k_feat else "All"
-                        task_label = f"{method}-{target}-{feat_label}"
-                        current_biopsy_id = groups_t.iloc[test_idx[0]]
-                        
-                        # Key info to retrieve correct accumulator later
-                        key_info = (target, k_feat, fold_idx, current_biopsy_id)
-                        
-                        future = executor.submit(
-                            process_fold_task, X_t, y_t, train_idx, test_idx, fold_idx, task_label, is_cat, k_feat
-                        )
-                        futures_map[future] = key_info
-
-            # --- PHASE 2: COLLECT AS COMPLETED ---
-            total_tasks = len(futures_map)
-            logger.info(f"   >>> Processing {total_tasks} tasks (Combinations of Target x Config x Folds)...")
-            
-            completed_count = 0
-            for future in as_completed(futures_map):
-                target_name, k_feat, fold_id, biopsy_id = futures_map[future]
-                res = future.result()
-                
-                completed_count += 1
-                if completed_count % 100 == 0:
-                    logger.info(f"   ... Completed {completed_count}/{total_tasks} tasks")
-
-                if res["success"]:
-                    # Get the specific accumulator
-                    acc = accumulators_map[(target_name, k_feat)]
-                    acc["meta"]["count"] += 1
-                    
-                    # A. Update Scores
-                    for m, s in res["scores"].items():
-                        acc["agg_scores"][m].append(s)
-                    
-                    # B. Update Rule Stats
-                    idx = res["selected_indices"]
-                    acc["rule_counts"][idx] += 1
-                    for m in ["RF", "XGB", "Lasso"]:
-                        acc["rule_imp_sums"][m][idx] += res["importances"][m]
-                    
-                    # C. Update Patient Results
-                    p_rec = {
-                        "Biopsy_ID": biopsy_id,
-                        "True_Value": res["true_value"],
-                        "Pred_RF": res["predictions"]["RF"],
-                        "Pred_XGB": res["predictions"]["XGB"],
-                        "Pred_Lasso": res["predictions"]["Lasso"]
-                    }
-                    acc["patient_results"].append(p_rec)
-
-
-            # --- PHASE 3: FINALIZE & SAVE ---
-            logger.info(f"   >>> Saving results for {method}...")
-            
-            # Iterate through the map to save each config separately
-            for (target, k_feat), acc in accumulators_map.items():
-                count = acc["meta"]["count"]
-                if count == 0: continue
-                
-                le = acc["meta"]["le"]
-                is_cat = acc["meta"]["is_cat"]
-                
-                # Append suffix to target name for file uniqueness
-                suffix = f"_Top{k_feat}" if k_feat else "_All"
-                target_with_suffix = f"{target}{suffix}"
-
-                # 1. Save Predictions
-                preds_file = save_predictions_log(acc, method, target_with_suffix, le, is_cat, output_dir)
-                
-                # 2. Compute & Save Rule Stats
-                rules_df = compute_and_save_rule_stats(acc, count, method, target_with_suffix, original_rule_names, output_dir)
-                
-                # 3. Save Raw Data Subset (Only for specific Feature Counts if needed, or all)
-                # We typically only care about the top rules from the 'Top' configs, 
-                # but we can save for all.
-                save_raw_data_subset(df_raw, rules_df, method, target_with_suffix, output_dir)
-                
-                # 4. Leaderboard
-                record = calculate_leaderboard_score(acc, method, target, is_cat, preds_file, k_feat)
-                leaderboard_data.append(record)
-                
-                logger.info(f"Saved {target} [{suffix.strip('_')}]: Score = {record['Grand_Score']:.3f}")
-
-    # --- Final Step: Save Leaderboard & Summary ---
-    if leaderboard_data:
-        # Save Full Leaderboard
-        lb_df = pd.DataFrame(leaderboard_data).sort_values(["Target", "Grand_Score"], ascending=False)
+    if leaderboard_records:
+        lb_df = pd.DataFrame(leaderboard_records).sort_values(["Organ", "Target", "Grand_Score"], ascending=False)
         lb_path = f"{output_dir}/final_leaderboard.csv"
         lb_df.to_csv(lb_path, index=False)
         logger.info(f"DONE. Leaderboard saved to {lb_path}")
-        
-        # Save Pivot Summary
-        save_comparison_summary(leaderboard_data, output_dir)
+
+        save_comparison_summary(leaderboard_records, output_dir)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Advanced Discovery (ML) Benchmark")

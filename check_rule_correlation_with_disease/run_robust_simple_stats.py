@@ -4,7 +4,6 @@ import os
 import time
 import logging
 import argparse
-import ast
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import LabelEncoder
@@ -18,6 +17,11 @@ warnings.filterwarnings('ignore')
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
+from data_exploration.check_data_bias import load_stratified_biopsies
+from check_rule_correlation_with_disease.stratified_utils import (
+    CONTROLS_ELIGIBLE, TARGETS, parse_rule_items, load_and_prep_data,
+    filter_viable_stratum, compute_per_class_metrics, bootstrap_single_iteration
+)
 
 # --- CONFIGURATION ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -25,69 +29,15 @@ BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
 
 FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS = ["BAG", "CN", "KNN_R"] 
-TARGETS = [
-    "Pathological stage", 
-    "GI stage", 
-    "Cortico Response", 
-    "Grade GVHD",
-    "Survival at follow-up",
-    "Clinical score",
-    "Pathological score"
-]
+N_BOOTSTRAP = 200
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("SimpleStats")
 
-def parse_rule_items(item_str):
-    """
-    Parses string representation of list "['A', 'B']" into a python set.
-    """
-    try:
-        items = ast.literal_eval(item_str)
-        # Clean items (remove _CENTER/_NEIGHBOR suffixes if present, though strictly 'no_self' usually implies checking raw types)
-        # Assuming format matches what visualize_top_rules_spatial expects
-        return set(i.replace('_CENTER', '').replace('_NEIGHBOR', '') for i in items)
-    except:
-        return set([str(item_str).strip("[]'\"")])
+# ── Fold computation ───────────────────────────────────────────────────────────
 
-def load_and_prep_data(input_file, no_self=False):
-    if not os.path.exists(input_file): return None, None, None
-    df = pd.read_csv(input_file)
-    
-    initial_len = len(df)
-    
-    # Apply No-Self Filter (Strict: No Shared Items)
-    if no_self:
-        def has_overlap(row):
-            # Parse Antecedents and Consequents
-            ant = parse_rule_items(row['Antecedents'])
-            con = parse_rule_items(row['Consequents'])
-            return not ant.isdisjoint(con)
-        
-        df = df[~df.apply(has_overlap, axis=1)]
-        logger.info(f"   Applied No-Self Filter: {initial_len} -> {len(df)} rules")
-
-    if "FDR" in df.columns:
-        initial_len = len(df)
-        df = df[df["FDR"] < 0.05]
-        dropped = initial_len - len(df)
-        if dropped > 0:
-            logger.info(f"   Dropped {dropped} rows with FDR >= 0.05 (Retained: {len(df)})")
-    
-    if df.empty:
-        logger.warning("   No data left after filtering.")
-        return None, None, None
-
-    if "Rule" not in df.columns:
-        df["Rule"] = df["Antecedents"] + " -> " + df["Consequents"]
-    pivot = df.pivot_table(index="FOV", columns="Rule", values="Lift", fill_value=0)
-    meta_cols = ["FOV", "Biopsy_ID"] + [t for t in TARGETS if t in df.columns]
-    meta = df[meta_cols].drop_duplicates(subset="FOV").set_index("FOV")
-    common = pivot.index.intersection(meta.index)
-    return pivot.loc[common], meta.loc[common], df
-
-def get_top_rules_stats(X_train, y_train, top_n, is_multiclass):
+def _get_top_rules_stats(X_train, y_train, top_n, is_multiclass):
     """
     Selects Top N rules using T-test (Binary) or ANOVA (Multiclass).
     If top_n is None or exceeds available rules, returns all valid rules.
@@ -121,7 +71,7 @@ def get_top_rules_stats(X_train, y_train, top_n, is_multiclass):
     scores.sort(key=lambda x: x[1])
     return [x[0] for x in scores[:top_n]]
 
-def predict_simple(X_train, y_train, X_test, top_rules, is_multiclass):
+def _predict_simple(X_train, y_train, X_test, top_rules, is_multiclass):
     """
     Predicts using simple statistical methods.
     Binary: Voting (High value -> Vote for class with High Mean).
@@ -166,7 +116,7 @@ def predict_simple(X_train, y_train, X_test, top_rules, is_multiclass):
         
     return pred, prob
 
-def process_single_fold(X, y_enc, train_idx, test_idx, fold_id, task_label, is_multiclass, k_feat):
+def _process_single_fold(X, y_enc, train_idx, test_idx, fold_id, task_label, is_multiclass, k_feat):
     try:
         X_train = X.iloc[train_idx]
         X_test = X.iloc[test_idx]
@@ -180,10 +130,10 @@ def process_single_fold(X, y_enc, train_idx, test_idx, fold_id, task_label, is_m
             y_test_val = y_enc[test_idx][0]
             
         # 1. Selection
-        top_rules = get_top_rules_stats(X_train, y_train, k_feat, is_multiclass)
+        top_rules = _get_top_rules_stats(X_train, y_train, k_feat, is_multiclass)
         
         # 2. Prediction
-        pred, prob = predict_simple(X_train, y_train, X_test, top_rules, is_multiclass)
+        pred, prob = _predict_simple(X_train, y_train, X_test, top_rules, is_multiclass)
         
         return {
             "success": True,
@@ -197,7 +147,9 @@ def process_single_fold(X, y_enc, train_idx, test_idx, fold_id, task_label, is_m
         logger.error(f"{task_label} Fold {fold_id+1} - Error: {str(e)}")
         return {"success": False, "msg": str(e)}
 
-def save_comparison_summary_simple(leaderboard_data, output_dir):
+# ── Save / output helpers ──────────────────────────────────────────────────────
+
+def _save_comparison_summary_simple(leaderboard_data, output_dir):
     """
     Creates a pivot table comparing scores across different feature counts for simple stats.
     """
@@ -206,7 +158,7 @@ def save_comparison_summary_simple(leaderboard_data, output_dir):
     df = pd.DataFrame(leaderboard_data)
     df["Config_Label"] = df["Num_Features"].apply(lambda x: "All" if pd.isna(x) or x == "All" else f"Top{x}")
     
-    pivot = df.pivot_table(index=["Method", "Target"], columns="Config_Label", values="Accuracy")
+    pivot = df.pivot_table(index=["Method", "Organ", "Target"], columns="Config_Label", values="Accuracy")
     
     score_columns = [col for col in pivot.columns if col in ["All"] or col.startswith("Top")]
     numeric_score_pivot = pivot[score_columns]
@@ -218,12 +170,247 @@ def save_comparison_summary_simple(leaderboard_data, output_dir):
     pivot.to_csv(filename)
     logger.info(f"   >>> SAVED COMPARISON SUMMARY (Simple): {filename}")
 
+
+# ── Orchestration ──────────────────────────────────────────────────────────────
+
+def _load_method_data(method, biopsy_strat, no_self):
+    """
+    Load and prepare data for a single method:
+    - Load rules CSV, filter by FDR, pivot to rule_lift_pivot matrix
+    - Attach Organ and Is_Control to fov_metadata
+    - Fill NaN target values for eligible control biopsies
+    Returns (rule_lift_pivot, fov_metadata, raw_rules) or None on failure.
+    """
+    input_file = f"{BASE_INPUT_DIR}/results_{method}.csv"
+    if not os.path.exists(input_file):
+        return None
+
+    rule_lift_pivot, fov_metadata, raw_rules = load_and_prep_data(input_file, no_self=no_self)
+    if rule_lift_pivot is None:
+        logger.warning(f"   Skipping {method} due to data issues")
+        return None
+
+    fov_metadata["Organ"] = fov_metadata["Biopsy_ID"].map(biopsy_strat["Organ"])
+    fov_metadata["Is_Control"] = fov_metadata["Biopsy_ID"].map(biopsy_strat["Is_Control"])
+
+    # Fill NaN target values for controls — only for eligible targets
+    is_control_fov = fov_metadata["Is_Control"].fillna(False).astype(bool)
+    for target in TARGETS:
+        if not CONTROLS_ELIGIBLE.get(target, False):
+            continue
+        if target not in fov_metadata.columns or target not in biopsy_strat.columns:
+            continue
+        missing_target_for_controls = is_control_fov & fov_metadata[target].isna()
+        if missing_target_for_controls.any():
+            fov_metadata.loc[missing_target_for_controls, target] = (
+                fov_metadata.loc[missing_target_for_controls, "Biopsy_ID"].map(biopsy_strat[target])
+            )
+
+    return rule_lift_pivot, fov_metadata, raw_rules
+
+def _run_logo_cv(rule_lift_pivot, fov_metadata, organs, method):
+    """
+    Run Leave-One-Group-Out CV across all organ × target × top_k configs in parallel.
+    Returns (fold_accumulators, bootstrap_data).
+    """
+    fold_accumulators = {}
+    fold_futures = {}
+    bootstrap_data = {}  # (organ, target) -> (feat_arr, label_arr, group_arr, is_multiclass)
+
+    with ProcessPoolExecutor() as executor:
+        for organ in organs:
+            organ_mask = fov_metadata["Organ"] == organ
+            organ_rule_features = rule_lift_pivot[organ_mask]
+            organ_fov_metadata = fov_metadata[organ_mask]
+            n_biopsies = organ_fov_metadata["Biopsy_ID"].nunique()
+            logger.info(f"  --- Organ: {organ} ({organ_mask.sum()} FOVs, {n_biopsies} biopsies) ---")
+
+            for target in TARGETS:
+                if target not in organ_fov_metadata.columns:
+                    continue
+                if organ_fov_metadata[target].isna().all():
+                    continue
+
+                # Filter to eligible population (GVHD only vs GVHD + controls)
+                include_controls = CONTROLS_ELIGIBLE.get(target, True)
+                if not include_controls:
+                    gvhd_only_mask = ~organ_fov_metadata["Is_Control"].fillna(False).astype(bool)
+                    eligible_rule_features = organ_rule_features[gvhd_only_mask]
+                    eligible_fov_metadata = organ_fov_metadata[gvhd_only_mask]
+                else:
+                    eligible_rule_features = organ_rule_features
+                    eligible_fov_metadata = organ_fov_metadata
+
+                # Drop rare classes; skip only if still not viable after filtering
+                eligible_fov_metadata, note = filter_viable_stratum(eligible_fov_metadata, target)
+                if eligible_fov_metadata is None:
+                    logger.info(f"  Skipping {target} x {organ}: {note}")
+                    continue
+                if note:
+                    logger.info(f"  {target} x {organ}: {note}")
+                eligible_rule_features = eligible_rule_features.loc[eligible_fov_metadata.index]
+
+                # Encode labels
+                valid_mask = eligible_fov_metadata[target].notna()
+                target_rule_features = eligible_rule_features[valid_mask]
+                target_labels_raw = eligible_fov_metadata.loc[valid_mask, target]
+                biopsy_ids = eligible_fov_metadata.loc[valid_mask, "Biopsy_ID"]
+
+                label_encoder = LabelEncoder()
+                target_labels = pd.Series(
+                    label_encoder.fit_transform(target_labels_raw.astype(str)),
+                    index=target_labels_raw.index
+                )
+
+                if len(np.unique(target_labels)) < 2:
+                    logger.warning(f"   Target {target} x {organ} has less than 2 classes. Skipping.")
+                    continue
+                is_multiclass = len(np.unique(target_labels)) > 2
+
+                # Store full-feature data once per (organ, target) for bootstrap CI
+                bootstrap_data[(organ, target)] = (
+                    target_rule_features.values,
+                    target_labels.values,
+                    biopsy_ids.values,
+                    is_multiclass
+                )
+
+                for top_k in FEATURE_COUNTS:
+                    config_key = (organ, target, top_k)
+                    fold_accumulators[config_key] = {
+                        "biopsy_results": [],
+                        "rule_selection_counts": {},
+                        "label_encoder": label_encoder
+                    }
+
+                    logo = LeaveOneGroupOut()
+                    for fold_idx, (train_idx, test_idx) in enumerate(logo.split(target_rule_features, target_labels, biopsy_ids)):
+                        features_label = f"Top{top_k}" if top_k else "All"
+                        task_label = f"{method}-{organ}-{target}-{features_label}"
+                        test_biopsy_id = biopsy_ids.iloc[test_idx[0]]
+
+                        future = executor.submit(
+                            _process_single_fold,
+                            target_rule_features, target_labels, train_idx, test_idx,
+                            fold_idx, task_label, is_multiclass, top_k
+                        )
+                        fold_futures[future] = (organ, target, top_k, test_biopsy_id, label_encoder)
+
+        # Collect results as they complete
+        total_tasks = len(fold_futures)
+        logger.info(f"   >>> Processing {total_tasks} tasks (Organ x Target x Config x Folds)...")
+
+        for completed_count, future in enumerate(as_completed(fold_futures), 1):
+            if completed_count % 100 == 0:
+                logger.info(f"   ... Completed {completed_count}/{total_tasks} tasks")
+
+            organ, target, top_k, biopsy_id, label_encoder = fold_futures[future]
+            res = future.result()
+
+            if res["success"]:
+                accumulator = fold_accumulators[(organ, target, top_k)]
+                true_label = label_encoder.inverse_transform([int(res["true_val"])])[0]
+                pred_label = label_encoder.inverse_transform([int(res["pred_val"])])[0]
+
+                accumulator["biopsy_results"].append({
+                    "Biopsy_ID": biopsy_id,
+                    "True_Value": true_label,
+                    "Pred_Label": pred_label,
+                    "Prob_Pos": res["prob"]
+                })
+                for rule in res["selected_rules"]:
+                    accumulator["rule_selection_counts"][rule] = accumulator["rule_selection_counts"].get(rule, 0) + 1
+
+    return fold_accumulators, bootstrap_data
+
+def _save_method_results(fold_accumulators, method, output_dir):
+    """
+    Save prediction logs and rule-selection stats CSVs for all (organ, target, top_k) configs.
+    Returns list of leaderboard records for this method.
+    """
+    logger.info(f"   >>> Saving results for {method}...")
+    leaderboard_records = []
+
+    for (organ, target, top_k), accumulator in fold_accumulators.items():
+        if not accumulator["biopsy_results"]:
+            continue
+
+        df_predictions = pd.DataFrame(accumulator["biopsy_results"])
+        config_suffix = f"_Top{top_k}" if top_k else "_All"
+        file_label = f"{organ}_{target}{config_suffix}".replace(' ', '_')
+
+        preds_path = f"{output_dir}/preds_SIMPLE_{method}_{file_label}.csv"
+        df_predictions.to_csv(preds_path, index=False)
+
+        rule_counts = accumulator["rule_selection_counts"]
+        df_rules = pd.DataFrame(list(rule_counts.items()), columns=["Rule", "Count"])
+        df_rules["Frequency"] = df_rules["Count"] / len(accumulator["biopsy_results"])
+        df_rules = df_rules.sort_values("Count", ascending=False)
+        rules_path = f"{output_dir}/scores_SIMPLE_{method}_{file_label}.csv"
+        df_rules.to_csv(rules_path, index=False)
+
+        accuracy = (df_predictions["True_Value"] == df_predictions["Pred_Label"]).mean()
+        per_class_f1 = compute_per_class_metrics(
+            df_predictions["True_Value"].values,
+            df_predictions["Pred_Label"].values
+        )
+        leaderboard_records.append({
+            "Method": method,
+            "Organ": organ,
+            "Target": target,
+            "Num_Features": "All" if top_k is None else top_k,
+            "Type": "Simple_Stats",
+            "Accuracy": accuracy,
+            "Per_Class_F1": str(per_class_f1)
+        })
+        logger.info(f"Saved {organ} x {target} [{config_suffix.strip('_')}]: Acc={accuracy:.2%}")
+
+    return leaderboard_records
+
+def _attach_bootstrap_ci(bootstrap_data, method_leaderboard_records, method):
+    """
+    Run bootstrap CI in parallel across all (organ, target) combos and attach CI columns
+    to method_leaderboard_records in place.
+    """
+    if not bootstrap_data:
+        return
+
+    bootstrap_args = []
+    combo_order = []
+    for (organ, target), (feat_arr, label_arr, group_arr, is_multiclass) in bootstrap_data.items():
+        unique_groups = np.unique(group_arr)
+        for seed in range(N_BOOTSTRAP):
+            bootstrap_args.append((feat_arr, label_arr, group_arr, unique_groups, is_multiclass, seed))
+            combo_order.append((organ, target))
+
+    logger.info(f"   >>> Running bootstrap CI ({N_BOOTSTRAP} iters x {len(bootstrap_data)} combos in parallel)...")
+    with ProcessPoolExecutor() as executor:
+        boot_results = list(executor.map(bootstrap_single_iteration, bootstrap_args))
+
+    ci_scores = {}
+    for (organ, target), score in zip(combo_order, boot_results):
+        key = (organ, target)
+        if key not in ci_scores:
+            ci_scores[key] = []
+        if not np.isnan(score):
+            ci_scores[key].append(score)
+
+    for record in method_leaderboard_records:
+        key = (record["Organ"], record["Target"])
+        scores = ci_scores.get(key, [])
+        if len(scores) >= 10:
+            record["CI_Mean"] = round(float(np.mean(scores)), 4)
+            record["CI_Lower"] = round(float(np.percentile(scores, 2.5)), 4)
+            record["CI_Upper"] = round(float(np.percentile(scores, 97.5)), 4)
+        else:
+            record["CI_Mean"] = record["CI_Lower"] = record["CI_Upper"] = np.nan
+
+
 def run_pipeline(no_self=False):
     if not os.path.exists(BASE_INPUT_DIR):
         logger.error("CRITICAL: Input directory missing.")
         return
 
-    # Select Output Directory
     if no_self:
         output_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_SIMPLE_STATS_DATA_DIR_NO_SELF)
         logger.info(f"Running in NO_SELF mode. Output: {output_dir}")
@@ -232,135 +419,38 @@ def run_pipeline(no_self=False):
         logger.info(f"Running in STANDARD mode. Output: {output_dir}")
 
     os.makedirs(output_dir, exist_ok=True)
-    
-    leaderboard_data = []
+
+    biopsy_strat = load_stratified_biopsies().set_index("Biopsy_ID")
+    organs = sorted([o for o in biopsy_strat["Organ"].unique() if o != "Unknown"])
+
+    all_leaderboard_records = []
 
     for method in METHODS:
-        path = f"{BASE_INPUT_DIR}/results_{method}.csv"
-        if not os.path.exists(path): continue
-        
         logger.info(f"=== METHOD: {method} ===")
-        # Pass no_self flag to loader
-        X_raw, y_meta, _ = load_and_prep_data(path, no_self=no_self)
-        if X_raw is None: continue
-        
-        accumulators_map = {} # Key = (target, k_feat)
-        futures_map = {}
-        
-        with ProcessPoolExecutor() as executor:
-            
-            for target in TARGETS:
-                if target not in y_meta.columns: continue
-                if y_meta[target].isna().all(): continue
-                
-                # Prep Target
-                valid = y_meta[target].notna()
-                X_t = X_raw[valid]
-                y_t = y_meta.loc[valid, target]
-                groups = y_meta.loc[valid, "Biopsy_ID"]
-                
-                le = LabelEncoder()
-                y_enc = le.fit_transform(y_t.astype(str))
-                y_final = pd.Series(y_enc, index=y_t.index)
-                
-                classes = np.unique(y_final)
-                if len(classes) < 2: 
-                    logger.warning(f"   Target {target} has less than 2 classes after encoding. Skipping.")
-                    continue
-                is_multiclass = len(classes) > 2
+        loaded = _load_method_data(method, biopsy_strat, no_self)
+        if loaded is None:
+            continue
+        rule_lift_pivot, fov_metadata, _ = loaded
 
-                for k_feat in FEATURE_COUNTS:
-                    config_key = (target, k_feat)
-                    accumulators_map[config_key] = {
-                        "patient_results": [],
-                        "rule_stats": {} # For tracking stability of selected rules
-                    }
-                    
-                    # Submit Folds
-                    logo = LeaveOneGroupOut()
-                    
-                    for i, (train_idx, test_idx) in enumerate(logo.split(X_t, y_final, groups)):
-                        biopsy_id = groups.iloc[test_idx[0]]
-                        feat_label = f"Top{k_feat}" if k_feat else "All"
-                        task_label = f"{method}-{target}-{feat_label}"
-                        
-                        fut = executor.submit(process_single_fold, X_t, y_final, train_idx, test_idx, i, task_label, is_multiclass, k_feat)
-                        futures_map[fut] = (target, k_feat, biopsy_id, le)
-            
-            # Collect results
-            completed = 0
-            total_tasks = len(futures_map)
-            logger.info(f"   >>> Processing {total_tasks} tasks (Combinations of Target x Config x Folds)...")
+        fold_accumulators, bootstrap_data = _run_logo_cv(rule_lift_pivot, fov_metadata, organs, method)
 
-            for fut in as_completed(futures_map):
-                completed += 1
-                if completed % 100 == 0: 
-                    logger.info(f"   ... Completed {completed}/{total_tasks} tasks")
-                
-                target, k_feat, bio_id, le = futures_map[fut]
-                res = fut.result()
-                
-                if res["success"]:
-                    acc = accumulators_map[(target, k_feat)]
-                    
-                    true_label = le.inverse_transform([int(res["true_val"])])[0]
-                    pred_label = le.inverse_transform([int(res["pred_val"])])[0]
-                    
-                    acc["patient_results"].append({
-                        "Biopsy_ID": bio_id,
-                        "True_Value": true_label,
-                        "Pred_Label": pred_label,
-                        "Prob_Pos": res["prob"]
-                    })
-                    
-                    for r in res["selected_rules"]:
-                        acc["rule_stats"][r] = acc["rule_stats"].get(r, 0) + 1
-            
-            # Save all results
-            logger.info(f"   >>> Saving results for {method}...")
+        method_records = _save_method_results(fold_accumulators, method, output_dir)
+        _attach_bootstrap_ci(bootstrap_data, method_records, method)
+        all_leaderboard_records.extend(method_records)
 
-            for (target, k_feat), acc in accumulators_map.items():
-                if not acc["patient_results"]: continue
-                
-                df_res = pd.DataFrame(acc["patient_results"])
-                
-                # Suffix for filename
-                suffix = f"_Top{k_feat}" if k_feat else "_All"
-                target_with_suffix = f"{target}{suffix}"
-
-                fname_preds = f"{output_dir}/preds_SIMPLE_{method}_{target_with_suffix.replace(' ', '_')}.csv"
-                df_res.to_csv(fname_preds, index=False)
-                
-                r_counts = acc["rule_stats"]
-                df_rules = pd.DataFrame(list(r_counts.items()), columns=["Rule", "Count"])
-                df_rules["Frequency"] = df_rules["Count"] / len(acc["patient_results"])
-                df_rules = df_rules.sort_values("Count", ascending=False)
-                fname_scores = f"{output_dir}/scores_SIMPLE_{method}_{target_with_suffix.replace(' ', '_')}.csv"
-                df_rules.to_csv(fname_scores, index=False)
-                
-                accuracy = (df_res["True_Value"] == df_res["Pred_Label"]).mean()
-                leaderboard_data.append({
-                    "Method": method,
-                    "Target": target,
-                    "Num_Features": "All" if k_feat is None else k_feat,
-                    "Type": "Simple_Stats",
-                    "Accuracy": accuracy
-                })
-                logger.info(f"Saved {target} [{suffix.strip('_')}]: Acc={accuracy:.2%}")
-
-    # Final Leaderboard
-    if leaderboard_data:
-        lb_df = pd.DataFrame(leaderboard_data).sort_values(["Target", "Accuracy"], ascending=False)
+    if all_leaderboard_records:
+        lb_df = pd.DataFrame(all_leaderboard_records).sort_values(["Organ", "Target", "Accuracy"], ascending=False)
         lb_path = f"{output_dir}/leaderboard_simple.csv"
         lb_df.to_csv(lb_path, index=False)
         logger.info(f"DONE. Leaderboard (Simple) saved to {lb_path}")
-        
-        save_comparison_summary_simple(leaderboard_data, output_dir)
+        _save_comparison_summary_simple(all_leaderboard_records, output_dir)
+
     print("\nBenchmark Complete.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Robust Simple Stats Benchmark")
     parser.add_argument("--no_self", action="store_true", help="Exclude rules with any shared cell types (strict no-self).")
     args = parser.parse_args()
-    
+
     run_pipeline(no_self=args.no_self)

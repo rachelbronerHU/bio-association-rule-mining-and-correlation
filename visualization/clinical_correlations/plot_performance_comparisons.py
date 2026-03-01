@@ -40,7 +40,7 @@ def load_and_merge_leaderboards(no_self=False):
         if not df_ml.empty:
             # Melt ML individual model scores to long format
             df_ml_melted = df_ml.melt(
-                id_vars=["Method", "Target", "Num_Features"],
+                id_vars=["Method", "Organ", "Target", "Num_Features"],
                 value_vars=["RF_Mean", "XGB_Mean", "Lasso_Mean"],
                 var_name="Model",
                 value_name="Score"
@@ -72,9 +72,12 @@ def load_and_merge_leaderboards(no_self=False):
 
     # Combine all scores
     df_combined = pd.concat(all_scores, ignore_index=True)
+    df_combined["Organ_Features"] = df_combined["Organ"].fillna("?") + " | " + df_combined["Num_Features"].apply(
+        lambda x: "All" if pd.isna(x) or x == "All" else f"Top{int(x)}"
+    )
     df_combined["Num_Features_Str"] = df_combined["Num_Features"].apply(lambda x: "All" if pd.isna(x) or x == "All" else f"Top{int(x)}")
     df_combined["Num_Features_Sort"] = df_combined["Num_Features"].apply(lambda x: -1 if pd.isna(x) or x == "All" else int(x))
-    df_combined = df_combined.sort_values(by=["Method", "Target", "Num_Features_Sort", "Model"]).drop(columns=["Num_Features_Sort"])
+    df_combined = df_combined.sort_values(by=["Organ", "Method", "Target", "Num_Features_Sort", "Model"]).drop(columns=["Num_Features_Sort"])
 
     return df_combined
 
@@ -94,7 +97,7 @@ def generate_comparison_plots(no_self=False):
     # Using catplot for easier faceting and consistent plot styling across facets
     g = sns.catplot(
         data=df_combined, 
-        x="Num_Features_Str", 
+        x="Organ_Features", 
         y="Score", 
         hue="Model",      # Model (Random Forest, XGBoost, Lasso Regression, Simple Stats) as hue
         col="Method",     # Methods as columns
@@ -108,7 +111,7 @@ def generate_comparison_plots(no_self=False):
         # legend_out=True # Default is True, puts legend outside
     )
     
-    g.set_axis_labels("Feature Configuration (Number of Rules Used)", "Score") # More descriptive X-axis label
+    g.set_axis_labels("Organ | Feature Configuration", "Score") # More descriptive X-axis label
     g.set_titles("{col_name} | {row_name}")
     g.set_xticklabels(rotation=45, ha="right")
     

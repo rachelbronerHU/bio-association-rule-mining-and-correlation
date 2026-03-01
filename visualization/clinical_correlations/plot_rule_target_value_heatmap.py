@@ -60,13 +60,13 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         lb_ml = pd.read_csv(lb_ml_path)
         if not lb_ml.empty:
             lb_ml = lb_ml.rename(columns={"Grand_Score": "Score"}).assign(Approach="ML")
-            all_leaderboard_data.append(lb_ml[["Method", "Target", "Num_Features", "Score", "Approach"]])
+            all_leaderboard_data.append(lb_ml[["Method", "Organ", "Target", "Num_Features", "Score", "Approach"]])
             
     if os.path.exists(lb_simple_path):
         lb_simple = pd.read_csv(lb_simple_path)
         if not lb_simple.empty:
             lb_simple = lb_simple.rename(columns={"Accuracy": "Score"}).assign(Approach="Simple")
-            all_leaderboard_data.append(lb_simple[["Method", "Target", "Num_Features", "Score", "Approach"]])
+            all_leaderboard_data.append(lb_simple[["Method", "Organ", "Target", "Num_Features", "Score", "Approach"]])
 
     if not all_leaderboard_data:
         logger.error(f"No leaderboard files found in:\n  {ml_data_dir}\n  {simple_data_dir}")
@@ -81,9 +81,9 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             logger.warning(f"No strategies found for method '{method_filter}'.")
             return
 
-    # Sort & Deduplicate
+    # Sort & Deduplicate per (Method, Organ, Target)
     combined_lb = combined_lb.sort_values(by="Score", ascending=False)
-    combined_lb = combined_lb.drop_duplicates(subset=["Method", "Target"], keep="first")
+    combined_lb = combined_lb.drop_duplicates(subset=["Method", "Organ", "Target"], keep="first")
     
     combined_lb = combined_lb.head(num_best_strategies)
 
@@ -102,6 +102,7 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         # 3. Extract Top N Rules
         method = best_strategy["Method"]
         target = best_strategy["Target"]
+        organ = best_strategy["Organ"]
         num_features = best_strategy["Num_Features"] # Can be 'All' or a number
         approach = best_strategy["Approach"]
 
@@ -114,10 +115,11 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             config_suffix = f"_Top{int(num_features)}"
 
         target_for_filename = target.replace(" ", "_").replace("/", "-")
-        score_filename_base = f"scores_{method}_{target_for_filename}{config_suffix}"
+        organ_for_filename = organ.replace(" ", "_")
+        score_filename_base = f"scores_{method}_{organ_for_filename}_{target_for_filename}{config_suffix}"
         
         if approach == "Simple":
-            score_filename_base = f"scores_SIMPLE_{method}_{target_for_filename}{config_suffix}"
+            score_filename_base = f"scores_SIMPLE_{method}_{organ_for_filename}_{target_for_filename}{config_suffix}"
 
         score_file_path = os.path.join(score_file_dir, f"{score_filename_base}.csv")
 
@@ -164,10 +166,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         # The new pipeline saves subsetted raw data ('results_METHOD_TARGET.csv') in the OUTPUT dir.
         # So we should look for the TARGET-SPECIFIC raw data file in the score_file_dir.
         
-        # Construct target-specific results filename
-        results_filename = f"results_{method}_{target_for_filename}{config_suffix}.csv"
-        # For simple stats it might be prefixed differently? 
-        # In run_robust_simple_stats.py: f"results_{method_name}_{safe_target}.csv" (no SIMPLE prefix for results file)
+        # Construct target-specific results filename (includes organ)
+        results_filename = f"results_{method}_{organ_for_filename}_{target_for_filename}{config_suffix}.csv"
         
         # Let's try to find the specific subset file first
         target_results_path = os.path.join(score_file_dir, results_filename)
@@ -295,11 +295,10 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         for y in range(len(top_rules) + 1):
             ax_violin.axhline(y, color='gray', linewidth=0.5)
 
-        # Output Filename - include NO_SELF in name if active
         mode_str = "_NO_SELF" if no_self else ""
         plot_filename = os.path.join(
             PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR, 
-            f"heatmap_rules_{method}_{target_for_filename}{mode_str}.png"
+            f"heatmap_rules_{method}_{organ_for_filename}_{target_for_filename}{mode_str}.png"
         )
         plt.savefig(plot_filename, bbox_inches='tight')
         plt.close()

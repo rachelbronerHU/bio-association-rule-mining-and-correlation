@@ -26,6 +26,11 @@
 ##### RULE CORRELATION FLOW #####
 
 # Step no. 1: Run discovery:
+* *Dry Run (preview stratification plan)*: python check_rule_correlation_with_disease/run_correlation_pipeline.py --dry_run
+* *Both flows*: python check_rule_correlation_with_disease/run_correlation_pipeline.py [--no_self]
+* *Simple only*: python check_rule_correlation_with_disease/run_correlation_pipeline.py --only simple [--no_self]
+* *ML only*: python check_rule_correlation_with_disease/run_correlation_pipeline.py --only ml [--no_self]
+* *(or run individually — unchanged)*
 * *Simple Discovery*: python check_rule_correlation_with_disease/run_robust_simple_stats.py [--no_self]
 * *Advanced Discovery*: python check_rule_correlation_with_disease/advanced_discovery.py [--no_self]
 

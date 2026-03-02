@@ -91,8 +91,8 @@ def get_neighborhoods(coords, method, config):
         size = config["GRID_WINDOW_SIZE"]
 
         x_max, y_max = coords[:, 0].max(), coords[:, 1].max()
-        x_steps = int(x_max / step) + 1
-        y_steps = int(y_max / step) + 1
+        x_steps = int(x_max / size) + 1
+        y_steps = int(y_max / size) + 1
 
         for i in range(x_steps):
             for j in range(y_steps):

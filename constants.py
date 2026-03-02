@@ -3,6 +3,9 @@ DEBUG = False # Set to True for quick test
 DEBUG_FOVS_PER_GROUP = 10
 SAVE_RAW_RULES = True
 
+# Algorithm Selection: "fpgrowth" | "weighted_fpgrowth"
+ALGO = "fpgrowth"
+
 # Path Configuration
 DATA_DIR = 'data/'
 MIBI_GUT_DIR_PATH = DATA_DIR + 'MIBIGutCsv/'

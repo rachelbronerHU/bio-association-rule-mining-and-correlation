@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "script-rule-mining"
+version = "0.1.0"
+description = "Association Rule Mining for MIBI-TOF Data"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ipython",
+    "joblib",
+    "matplotlib",
+    "mlxtend",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "seaborn",
+    "statsmodels",
+    "xgboost"
+]
+
+[tool.setuptools]
+packages = ["check_rule_correlation_with_disease", "data_exploration", "result_exploration", "visualization"]
+py-modules = ["constants", "run_association_mining", "transactions", "worker_task"]

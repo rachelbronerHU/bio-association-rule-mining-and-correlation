@@ -169,3 +169,15 @@ Visualizing the top 3 ranked unique spatial rules (excluding self-referential ru
 ## 7. References
 
 <span id="ref1">1.</span> <span style="color: #808080; font-style: italic;">Bayardo Jr, R. J., Agrawal, R., & Gunopulos, D. (2000). Constraint-based rule mining in large, dense databases. Data mining and knowledge discovery, 4(2), 217-240. <a href="https://www.bayardo.org/ps/icde99.pdf">[PDF]</a></span>
+
+---
+
+## 8. Environment Setup
+
+This project uses `pyproject.toml` for dependency management. 
+
+Once you have created and activated your Python environment (either via Conda or `venv`), install the project and its dependencies by running:
+
+```bash
+pip install -e .
+```

@@ -7,7 +7,7 @@ import csv
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import fpgrowth, association_rules
 from statsmodels.stats.multitest import multipletests
-from constants import TRANSACTION_DATA_DIR
+from constants import RARE_FILTERING_STATS_DIR, TRANSACTION_DATA_DIR
 import transactions as tx
 
 # Setup Worker Logger
@@ -446,8 +446,7 @@ def _filter_redundant_rules(rules, config):
 
 def _save_rare_filtering_stats(sample_id, method, n_mined, n_rare_filtered, n_validated):
     """Save statistics about rare cell filtering to a CSV file"""
-    from constants import RESULTS_BASE_DIR
-    
+
     os.makedirs(RARE_FILTERING_STATS_DIR, exist_ok=True)
     
     stats_file = os.path.join(RARE_FILTERING_STATS_DIR, f"{method}_rare_filtering.csv")

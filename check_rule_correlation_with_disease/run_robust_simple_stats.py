@@ -20,7 +20,7 @@ import constants
 from data_exploration.check_data_bias import load_stratified_biopsies
 from check_rule_correlation_with_disease.stratified_utils import (
     CONTROLS_ELIGIBLE, TARGETS, parse_rule_items, load_and_prep_data,
-    filter_viable_stratum, compute_per_class_metrics, bootstrap_single_iteration
+    filter_viable_stratum, compute_per_class_metrics, run_bootstrap_ci
 )
 
 # --- CONFIGURATION ---
@@ -29,7 +29,6 @@ BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
 
 FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS = ["BAG", "CN", "KNN_R"] 
-N_BOOTSTRAP = 200
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -372,38 +371,7 @@ def _attach_bootstrap_ci(bootstrap_data, method_leaderboard_records, method):
     Run bootstrap CI in parallel across all (organ, target) combos and attach CI columns
     to method_leaderboard_records in place.
     """
-    if not bootstrap_data:
-        return
-
-    bootstrap_args = []
-    combo_order = []
-    for (organ, target), (feat_arr, label_arr, group_arr, is_multiclass) in bootstrap_data.items():
-        unique_groups = np.unique(group_arr)
-        for seed in range(N_BOOTSTRAP):
-            bootstrap_args.append((feat_arr, label_arr, group_arr, unique_groups, is_multiclass, seed))
-            combo_order.append((organ, target))
-
-    logger.info(f"   >>> Running bootstrap CI ({N_BOOTSTRAP} iters x {len(bootstrap_data)} combos in parallel)...")
-    with ProcessPoolExecutor() as executor:
-        boot_results = list(executor.map(bootstrap_single_iteration, bootstrap_args))
-
-    ci_scores = {}
-    for (organ, target), score in zip(combo_order, boot_results):
-        key = (organ, target)
-        if key not in ci_scores:
-            ci_scores[key] = []
-        if not np.isnan(score):
-            ci_scores[key].append(score)
-
-    for record in method_leaderboard_records:
-        key = (record["Organ"], record["Target"])
-        scores = ci_scores.get(key, [])
-        if len(scores) >= 10:
-            record["CI_Mean"] = round(float(np.mean(scores)), 4)
-            record["CI_Lower"] = round(float(np.percentile(scores, 2.5)), 4)
-            record["CI_Upper"] = round(float(np.percentile(scores, 97.5)), 4)
-        else:
-            record["CI_Mean"] = record["CI_Lower"] = record["CI_Upper"] = np.nan
+    run_bootstrap_ci(bootstrap_data, method_leaderboard_records)
 
 
 def run_pipeline(no_self=False):

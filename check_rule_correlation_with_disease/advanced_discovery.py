@@ -13,7 +13,6 @@ from sklearn.model_selection import LeaveOneGroupOut
 import xgboost as xgb
 from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 from sklearn.metrics import f1_score, r2_score
-from sklearn.feature_selection import SelectFromModel
 # Silence Sklearn Warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -26,7 +25,7 @@ import constants
 from data_exploration.check_data_bias import load_stratified_biopsies
 from check_rule_correlation_with_disease.stratified_utils import (
     CONTROLS_ELIGIBLE, TARGETS, parse_rule_items, load_and_prep_data,
-    filter_viable_stratum, compute_per_class_metrics, bootstrap_single_iteration
+    filter_viable_stratum, compute_per_class_metrics, run_bootstrap_ci
 )
 
 # --- CONFIGURATION ---
@@ -35,8 +34,6 @@ BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
 
 FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS_TO_ANALYZE = ["BAG", "CN", "KNN_R"] 
-N_BOOTSTRAP = 200
-
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -90,111 +87,120 @@ def _get_xgb_sample_weights(y_train):
     from sklearn.utils.class_weight import compute_sample_weight
     return compute_sample_weight('balanced', y_train)
 
-def _process_fold_task(rule_features, labels, train_idx, test_idx, fold_id, task_label, is_classification, top_k):
-
+def _process_fold_task(rule_features, labels, train_idx, test_idx, fold_id, task_label, is_classification, feature_counts):
+    """
+    Process one LOGO fold across ALL top_k configs.
+    Trains the embedding RF once to rank features, then for each top_k slices,
+    scales, trains RF+XGB+Lasso, and collects scores/predictions/importances.
+    Returns a dict keyed by top_k.
+    """
     pid = os.getpid()
     start_t = time.time()
-    log_prefix = f"[{task_label}] Fold {fold_id+1} (PID {pid}) K-Feat {top_k}-"
+    log_prefix = f"[{task_label}] Fold {fold_id+1} (PID {pid})"
 
     X_train = rule_features.iloc[train_idx]
-    
+    X_test = rule_features.iloc[test_idx]
+
     if hasattr(labels, 'iloc'):
         y_train = labels.iloc[train_idx]
         y_test = labels.iloc[test_idx]
     else:
         y_train = labels[train_idx]
         y_test = labels[test_idx]
-        
-    X_test = rule_features.iloc[test_idx]
 
     if len(np.unique(y_train)) < 2:
         logger.warning(f"{log_prefix} Skipped (<2 classes)")
         return {"success": False, "fold_id": fold_id, "msg": "Skipped (<2 classes)"}
-    
+
     try:
-        # --- Feature Selection ---
         n_features_in = X_train.shape[1]
-        
-        if top_k is not None and top_k < n_features_in:
-            if is_classification:
-                embed_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=1)
-            else:
-                embed_model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=1)
 
-            selector = SelectFromModel(embed_model, max_features=top_k, threshold=-np.inf)
-            selector.fit(X_train, y_train)
-            
-            selected_rule_indices = selector.get_support(indices=True)
-            X_train_selected = selector.transform(X_train)
-            X_test_selected = selector.transform(X_test)
-        else:
-            selected_rule_indices = np.arange(n_features_in)
-            X_train_selected = X_train.values
-            X_test_selected = X_test.values
-
-        # --- Scaling (critical for Lasso) ---
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train_selected)
-        X_test_scaled = scaler.transform(X_test_selected)
-
-        # --- Model Training ---
+        # --- Feature ranking (once per fold) ---
         if is_classification:
-            models = {
-                "RF": RandomForestClassifier(n_estimators=50, max_depth=5, class_weight='balanced', random_state=42, n_jobs=1),
-                "XGB": xgb.XGBClassifier(eval_metric='logloss', max_depth=3, random_state=42, n_jobs=1),
-                "Lasso": LogisticRegression(penalty='l1', solver='saga', C=0.5, class_weight='balanced', random_state=42, max_iter=5000)
-                }
+            embed_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=1)
         else:
-            models = {
-                "RF": RandomForestRegressor(n_estimators=50, max_depth=5, random_state=42, n_jobs=1),
-                "XGB": xgb.XGBRegressor(max_depth=3, random_state=42, n_jobs=1),
-                "Lasso": Lasso(alpha=0.01, random_state=42)
-            }
-       
-        fold_predictions = {}
-        fold_scores = {}
-        
-        for name, model in models.items():
-            if name == "XGB":
-                model.fit(X_train_scaled, y_train, sample_weight=_get_xgb_sample_weights(y_train))
+            embed_model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=1)
+        embed_model.fit(X_train, y_train)
+        ranked_indices = np.argsort(embed_model.feature_importances_)[::-1]  # best → worst
+
+        results_per_topk = {}
+
+        for top_k in feature_counts:
+            # --- Feature selection by slicing ranked indices ---
+            if top_k is not None and top_k < n_features_in:
+                selected_rule_indices = ranked_indices[:top_k]
             else:
-                model.fit(X_train_scaled, y_train)
-            pred = model.predict(X_test_scaled)
-            
-            fold_predictions[name] = pred[0]
-            
+                selected_rule_indices = np.arange(n_features_in)
+
+            X_train_selected = X_train.values[:, selected_rule_indices]
+            X_test_selected = X_test.values[:, selected_rule_indices]
+
+            # --- Scaling (critical for Lasso) ---
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train_selected)
+            X_test_scaled = scaler.transform(X_test_selected)
+
+            # --- Model Training ---
             if is_classification:
-                fold_scores[name] = f1_score(y_test, pred, average='macro')
+                models = {
+                    "RF": RandomForestClassifier(n_estimators=50, max_depth=5, class_weight='balanced', random_state=42, n_jobs=1),
+                    "XGB": xgb.XGBClassifier(eval_metric='logloss', max_depth=3, random_state=42, n_jobs=1),
+                    "Lasso": LogisticRegression(penalty='l1', solver='saga', C=0.5, class_weight='balanced', random_state=42, max_iter=5000)
+                }
             else:
-                fold_scores[name] = r2_score(y_test, pred)
+                models = {
+                    "RF": RandomForestRegressor(n_estimators=50, max_depth=5, random_state=42, n_jobs=1),
+                    "XGB": xgb.XGBRegressor(max_depth=3, random_state=42, n_jobs=1),
+                    "Lasso": Lasso(alpha=0.01, random_state=42)
+                }
 
-        # --- Feature Importances ---
-        rf_importance = models["RF"].feature_importances_
-        xgb_importance = models["XGB"].feature_importances_
-        lasso_model = models["Lasso"]
-        lasso_importance = np.abs(lasso_model.coef_).flatten()
-        if lasso_model.coef_.ndim > 1:
-            lasso_importance = np.mean(np.abs(lasso_model.coef_), axis=0)
-            
-        importances = {"RF": rf_importance, "XGB": xgb_importance, "Lasso": lasso_importance}
+            fold_predictions = {}
+            fold_scores = {}
 
-        # Normalize importances to [0, 1]
-        for name in importances:
-            arr = importances[name]
-            if arr.max() > 0:
-                importances[name] = arr / arr.max()
-        
+            for name, model in models.items():
+                if name == "XGB":
+                    model.fit(X_train_scaled, y_train, sample_weight=_get_xgb_sample_weights(y_train))
+                else:
+                    model.fit(X_train_scaled, y_train)
+                pred = model.predict(X_test_scaled)
+
+                fold_predictions[name] = pred[0]
+                if is_classification:
+                    fold_scores[name] = f1_score(y_test, pred, average='macro')
+                else:
+                    fold_scores[name] = r2_score(y_test, pred)
+
+            # --- Feature Importances ---
+            lasso_model = models["Lasso"]
+            lasso_importance = np.abs(lasso_model.coef_).flatten()
+            if lasso_model.coef_.ndim > 1:
+                lasso_importance = np.mean(np.abs(lasso_model.coef_), axis=0)
+
+            importances = {
+                "RF": models["RF"].feature_importances_,
+                "XGB": models["XGB"].feature_importances_,
+                "Lasso": lasso_importance
+            }
+            for name in importances:
+                arr = importances[name]
+                if arr.max() > 0:
+                    importances[name] = arr / arr.max()
+
+            results_per_topk[top_k] = {
+                "scores": fold_scores,
+                "predictions": fold_predictions,
+                "selected_rule_indices": selected_rule_indices,
+                "importances": importances
+            }
+
         duration = time.time() - start_t
-        logger.info(f"{log_prefix} Completed in {duration:.1f}s - Scores: {fold_scores}")
+        logger.info(f"{log_prefix} Completed in {duration:.1f}s")
 
         return {
             "success": True,
             "fold_id": fold_id,
-            "scores": fold_scores,
-            "predictions": fold_predictions,
-            "true_value": y_test.iloc[0],
-            "selected_rule_indices": selected_rule_indices,
-            "importances": importances 
+            "true_value": y_test.iloc[0] if hasattr(y_test, 'iloc') else y_test[0],
+            "results_per_topk": results_per_topk
         }
 
     except Exception as e:
@@ -397,7 +403,6 @@ def _run_logo_cv(rule_features, fov_metadata, organs, method):
 
                 for top_k in FEATURE_COUNTS:
                     config_key = (organ, target, top_k)
-
                     fold_accumulators[config_key] = {
                         "meta": {"label_encoder": label_encoder, "is_classification": is_classification, "n_folds_completed": 0},
                         "rule_selection_counts": np.zeros(n_rules),
@@ -406,26 +411,25 @@ def _run_logo_cv(rule_features, fov_metadata, organs, method):
                         "model_scores": {"RF": [], "XGB": [], "Lasso": []}
                     }
 
-                    logo = LeaveOneGroupOut()
-                    for fold_idx, (train_idx, test_idx) in enumerate(logo.split(target_rule_features, target_labels, groups=biopsy_ids)):
-                        features_label = f"Top{top_k}" if top_k else "All"
-                        task_label = f"{method}-{organ}-{target}-{features_label}"
-                        test_biopsy_id = biopsy_ids.iloc[test_idx[0]]
-                        fold_key = (organ, target, top_k, fold_idx, test_biopsy_id)
+                logo = LeaveOneGroupOut()
+                for fold_idx, (train_idx, test_idx) in enumerate(logo.split(target_rule_features, target_labels, groups=biopsy_ids)):
+                    task_label = f"{method}-{organ}-{target}"
+                    test_biopsy_id = biopsy_ids.iloc[test_idx[0]]
+                    fold_key = (organ, target, fold_idx, test_biopsy_id)
 
-                        future = executor.submit(
-                            _process_fold_task, target_rule_features, target_labels,
-                            train_idx, test_idx, fold_idx, task_label, is_classification, top_k
-                        )
-                        fold_futures[future] = fold_key
+                    future = executor.submit(
+                        _process_fold_task, target_rule_features, target_labels,
+                        train_idx, test_idx, fold_idx, task_label, is_classification, FEATURE_COUNTS
+                    )
+                    fold_futures[future] = fold_key
 
         # --- Collect results as they complete ---
         total_tasks = len(fold_futures)
-        logger.info(f"   >>> Processing {total_tasks} tasks (Organ x Target x Config x Folds)...")
+        logger.info(f"   >>> Processing {total_tasks} tasks (Organ x Target x Folds)...")
 
         completed_count = 0
         for future in as_completed(fold_futures):
-            organ_name, target_name, top_k, fold_id, biopsy_id = fold_futures[future]
+            organ_name, target_name, fold_id, biopsy_id = fold_futures[future]
             res = future.result()
 
             completed_count += 1
@@ -433,25 +437,26 @@ def _run_logo_cv(rule_features, fov_metadata, organs, method):
                 logger.info(f"   ... Completed {completed_count}/{total_tasks} tasks")
 
             if res["success"]:
-                accumulator = fold_accumulators[(organ_name, target_name, top_k)]
-                accumulator["meta"]["n_folds_completed"] += 1
+                for top_k, top_k_res in res["results_per_topk"].items():
+                    accumulator = fold_accumulators[(organ_name, target_name, top_k)]
+                    accumulator["meta"]["n_folds_completed"] += 1
 
-                for model_name, score in res["scores"].items():
-                    accumulator["model_scores"][model_name].append(score)
+                    for model_name, score in top_k_res["scores"].items():
+                        accumulator["model_scores"][model_name].append(score)
 
-                selected_rule_indices = res["selected_rule_indices"]
-                accumulator["rule_selection_counts"][selected_rule_indices] += 1
-                for model_name in ["RF", "XGB", "Lasso"]:
-                    accumulator["rule_imp_sums"][model_name][selected_rule_indices] += res["importances"][model_name]
+                    selected_rule_indices = top_k_res["selected_rule_indices"]
+                    accumulator["rule_selection_counts"][selected_rule_indices] += 1
+                    for model_name in ["RF", "XGB", "Lasso"]:
+                        accumulator["rule_imp_sums"][model_name][selected_rule_indices] += top_k_res["importances"][model_name]
 
-                fold_prediction = {
-                    "Biopsy_ID": biopsy_id,
-                    "True_Value": res["true_value"],
-                    "Pred_RF": res["predictions"]["RF"],
-                    "Pred_XGB": res["predictions"]["XGB"],
-                    "Pred_Lasso": res["predictions"]["Lasso"]
-                }
-                accumulator["biopsy_predictions"].append(fold_prediction)
+                    fold_prediction = {
+                        "Biopsy_ID": biopsy_id,
+                        "True_Value": res["true_value"],
+                        "Pred_RF": top_k_res["predictions"]["RF"],
+                        "Pred_XGB": top_k_res["predictions"]["XGB"],
+                        "Pred_Lasso": top_k_res["predictions"]["Lasso"]
+                    }
+                    accumulator["biopsy_predictions"].append(fold_prediction)
 
     return fold_accumulators, bootstrap_data
 
@@ -494,42 +499,6 @@ def _save_method_results(fold_accumulators, raw_rules, rule_names, method, outpu
     return method_leaderboard_records
 
 
-def _attach_bootstrap_ci(bootstrap_data, method_leaderboard_records, method):
-    """
-    Run bootstrap CI in parallel across all (organ, target) combos and attach CI columns
-    to method_leaderboard_records in place.
-    """
-    if not bootstrap_data:
-        return
-
-    bootstrap_tasks = []
-    bootstrap_combo_index = []
-    for (organ, target), (feat_arr, label_arr, group_arr, is_classification) in bootstrap_data.items():
-        unique_biopsies = np.unique(group_arr)
-        for seed in range(N_BOOTSTRAP):
-            bootstrap_tasks.append((feat_arr, label_arr, group_arr, unique_biopsies, is_classification, seed))
-            bootstrap_combo_index.append((organ, target))
-
-    logger.info(f"   >>> Running bootstrap CI ({N_BOOTSTRAP} iters x {len(bootstrap_data)} combos in parallel)...")
-    with ProcessPoolExecutor() as executor:
-        bootstrap_scores = list(executor.map(bootstrap_single_iteration, bootstrap_tasks))
-
-    ci_scores_per_combo = {}
-    for (organ, target), score in zip(bootstrap_combo_index, bootstrap_scores):
-        key = (organ, target)
-        if key not in ci_scores_per_combo:
-            ci_scores_per_combo[key] = []
-        if not np.isnan(score):
-            ci_scores_per_combo[key].append(score)
-
-    for record in method_leaderboard_records:
-        combo_scores = ci_scores_per_combo.get((record["Organ"], record["Target"]), [])
-        if len(combo_scores) >= 10:
-            record["CI_Mean"] = round(float(np.mean(combo_scores)), 4)
-            record["CI_Lower"] = round(float(np.percentile(combo_scores, 2.5)), 4)
-            record["CI_Upper"] = round(float(np.percentile(combo_scores, 97.5)), 4)
-        else:
-            record["CI_Mean"] = record["CI_Lower"] = record["CI_Upper"] = np.nan
 
 
 def run_pipeline(no_self=False):
@@ -565,7 +534,7 @@ def run_pipeline(no_self=False):
 
         fold_accumulators, bootstrap_data = _run_logo_cv(rule_features, fov_metadata, organs, method)
         method_records = _save_method_results(fold_accumulators, raw_rules, rule_names, method, output_dir)
-        _attach_bootstrap_ci(bootstrap_data, method_records, method)
+        run_bootstrap_ci(bootstrap_data, method_records)
         leaderboard_records.extend(method_records)
 
     if leaderboard_records:

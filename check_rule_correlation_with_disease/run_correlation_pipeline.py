@@ -108,10 +108,11 @@ if __name__ == "__main__":
         run_dry_run()
         sys.exit(0)
 
+    if args.only in (None, "ml"):
+        print("=== Running ML (Advanced Discovery) flow ===")
+        advanced_discovery.run_pipeline(no_self=args.no_self)
+        
     if args.only in (None, "simple"):
         print("=== Running Simple Stats flow ===")
         run_robust_simple_stats.run_pipeline(no_self=args.no_self)
 
-    if args.only in (None, "ml"):
-        print("=== Running ML (Advanced Discovery) flow ===")
-        advanced_discovery.run_pipeline(no_self=args.no_self)

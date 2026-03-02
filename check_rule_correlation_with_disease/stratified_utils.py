@@ -1,5 +1,6 @@
 import ast
 import os
+from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
 from sklearn.metrics import classification_report
 import numpy as np
@@ -148,44 +149,96 @@ def compute_per_class_metrics(true_labels, pred_labels, label_encoder=None):
 
 # ── Bootstrap CI ───────────────────────────────────────────────────────────────
 
-def bootstrap_single_iteration(args):
+def bootstrap_batch_iteration(args):
     """
-    One bootstrap iteration — top-level function for ProcessPoolExecutor pickling.
-    Resamples biopsies with replacement, runs LOGO CV with a lightweight RF.
-    Returns macro-F1 (categorical) or R2 (regression), or np.nan on failure.
+    Batched bootstrap iteration — top-level function for ProcessPoolExecutor pickling.
+    Runs BATCH_SIZE seeds per worker call to amortize pickling cost of large arrays.
+    Returns list of macro-F1 (categorical) or R2 (regression) scores, or np.nan on failure.
     """
 
-    X_arr, y_arr, g_arr, unique_groups, is_categorical, seed = args
-    rng = np.random.RandomState(seed)
+    X_arr, y_arr, g_arr, unique_groups, is_categorical, seeds = args
+    results = []
+    
+    for seed in seeds:
+        rng = np.random.RandomState(seed)
 
-    boot = rng.choice(unique_groups, size=len(unique_groups), replace=True)
-    mask = np.isin(g_arr, np.unique(boot))
-    X_b, y_b, g_b = X_arr[mask], y_arr[mask], g_arr[mask]
+        boot = rng.choice(unique_groups, size=len(unique_groups), replace=True)
+        mask = np.isin(g_arr, np.unique(boot))
+        X_b, y_b, g_b = X_arr[mask], y_arr[mask], g_arr[mask]
 
-    if len(np.unique(y_b)) < 2 or len(np.unique(g_b)) < 2:
-        return np.nan
+        if len(np.unique(y_b)) < 2 or len(np.unique(g_b)) < 2:
+            results.append(np.nan)
+            continue
 
-    logo = LeaveOneGroupOut()
-    y_true_all, y_pred_all = [], []
-    try:
-        for train_idx, test_idx in logo.split(X_b, y_b, g_b):
-            if len(np.unique(y_b[train_idx])) < 2:
-                continue
-            if is_categorical:
-                m = RandomForestClassifier(n_estimators=30, max_depth=5, class_weight='balanced', random_state=seed, n_jobs=1)
-            else:
-                m = RandomForestRegressor(n_estimators=30, max_depth=5, random_state=seed, n_jobs=1)
-            m.fit(X_b[train_idx], y_b[train_idx])
-            y_true_all.extend(y_b[test_idx])
-            y_pred_all.extend(m.predict(X_b[test_idx]))
-    except Exception:
-        return np.nan
+        logo = LeaveOneGroupOut()
+        y_true_all, y_pred_all = [], []
+        try:
+            for train_idx, test_idx in logo.split(X_b, y_b, g_b):
+                if len(np.unique(y_b[train_idx])) < 2:
+                    continue
+                if is_categorical:
+                    m = RandomForestClassifier(n_estimators=30, max_depth=5, class_weight='balanced', random_state=seed, n_jobs=1)
+                else:
+                    m = RandomForestRegressor(n_estimators=30, max_depth=5, random_state=seed, n_jobs=1)
+                m.fit(X_b[train_idx], y_b[train_idx])
+                y_true_all.extend(y_b[test_idx])
+                y_pred_all.extend(m.predict(X_b[test_idx]))
+        except Exception:
+            results.append(np.nan)
+            continue
 
-    if not y_true_all:
-        return np.nan
+        if not y_true_all:
+            results.append(np.nan)
+            continue
 
-    y_t, y_p = np.array(y_true_all), np.array(y_pred_all)
-    if is_categorical:
-        return float(f1_score(y_t, y_p, average='macro', zero_division=0))
-    else:
-        return float(r2_score(y_t, y_p))
+        y_t, y_p = np.array(y_true_all), np.array(y_pred_all)
+        if is_categorical:
+            results.append(float(f1_score(y_t, y_p, average='macro', zero_division=0)))
+        else:
+            results.append(float(r2_score(y_t, y_p)))
+
+    return results
+
+
+def run_bootstrap_ci(bootstrap_data, leaderboard_records):
+    """
+    Run bootstrap CI for all (organ, target) combos and attach CI_Mean/CI_Lower/CI_Upper
+    to each record in leaderboard_records in place.
+    bootstrap_data: dict of (organ, target) -> (feat_arr, label_arr, group_arr, is_categorical)
+    """
+    if not bootstrap_data:
+        return
+
+    batch_size = 20
+    n_bootstrap = 200
+
+    tasks = []
+    combo_index = []
+    for (organ, target), (feat_arr, label_arr, group_arr, is_categorical) in bootstrap_data.items():
+        unique_groups = np.unique(group_arr)
+        for batch_start in range(0, n_bootstrap, batch_size):
+            seed_batch = list(range(batch_start, min(batch_start + batch_size, n_bootstrap)))
+            tasks.append((feat_arr, label_arr, group_arr, unique_groups, is_categorical, seed_batch))
+            combo_index.append((organ, target))
+
+    logger.info(f"   >>> Running bootstrap CI ({n_bootstrap} iters batched into {len(tasks)} tasks)...")
+    with ProcessPoolExecutor() as executor:
+        batch_results = list(executor.map(bootstrap_batch_iteration, tasks))
+
+    ci_scores = {}
+    for (organ, target), batch_scores in zip(combo_index, batch_results):
+        key = (organ, target)
+        if key not in ci_scores:
+            ci_scores[key] = []
+        for score in batch_scores:
+            if not np.isnan(score):
+                ci_scores[key].append(score)
+
+    for record in leaderboard_records:
+        scores = ci_scores.get((record["Organ"], record["Target"]), [])
+        if len(scores) >= 10:
+            record["CI_Mean"] = round(float(np.mean(scores)), 4)
+            record["CI_Lower"] = round(float(np.percentile(scores, 2.5)), 4)
+            record["CI_Upper"] = round(float(np.percentile(scores, 97.5)), 4)
+        else:
+            record["CI_Mean"] = record["CI_Lower"] = record["CI_Upper"] = np.nan

@@ -148,9 +148,10 @@ class WeightedFPTree:
     """
     FP-Tree that accumulates float weights instead of integer counts.
 
-    Header table: {item: [total_weight, gmaxw, first_node]}
+    Header table: {item: [total_weight, max_weight, first_node]}
       - total_weight: sum of item's weights across all transactions (weighted support)
-      - gmaxw:        max weight of this item in any single transaction (Global Max Weight)
+      - max_weight:   max weight of this item in any single transaction
+                      (global when built from full data; local when built from conditional patterns)
       - first_node:   head of the linked list of nodes for this item
     """
 
@@ -159,7 +160,7 @@ class WeightedFPTree:
         self.header = {}
 
     def first_pass(self, transactions):
-        """Scan transactions to compute header weights and GMAXW."""
+        """Scan transactions to compute per-item total weight and max weight."""
         for trans in transactions:
             for item, w in trans.items():
                 if item not in self.header:

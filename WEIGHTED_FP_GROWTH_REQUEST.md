@@ -36,9 +36,9 @@ Why it's required: Tissues are highly heterogeneous. A very dense FOV might yiel
 ## ✅ Phase C: Mining Logic & The Downward Closure Problem (CRITICAL)
 Agent Attention Required: Introducing weights breaks the Downward Closure Property (Anti-monotone property). In standard FP-growth, if item {A} is infrequent, {A, B} is also infrequent, allowing early branch pruning. With weights, a combination {A, B} might pass the threshold even if {A} alone does not.
 
-* ✅ MUST-HAVE: Global Maximum Weight Bound (GMAXW) for Pruning
-Action: Do NOT prune a branch simply because its current real weight is below the min_support. Instead, record the Global Maximum Weight (GMAXW) an item has across the entire dataset. Multiply the node's accumulated weight by this max possible weight. Only prune if this upper bound is still < min_support.
-Why it's required (The Compromise): Standard pruning will silently drop valid, high-weight biological rules. Implementing a "Local Max Weight" per branch is extremely complex. The Global Max Weight (GMAXW) is the perfect compromise: it keeps the algorithm mathematically correct (no lost rules) and is simple to implement. Evaluate true weighted support only at the final rule-extraction stage.
+* ✅ MUST-HAVE: Upper Bound Pruning (Local Max Weight) for Pruning
+Action: Do NOT prune a branch simply because its current real weight is below the min_support. Instead, after calling first_pass on the conditional patterns, use the local max weight (v[1] in the header) to form an upper bound: total_weight * local_max_weight. Only prune if this upper bound is still < min_support.
+Why it's required (The Compromise): Standard pruning will silently drop valid, high-weight biological rules due to the broken downward closure property. Using the local max weight (computed per conditional context by first_pass) gives a tighter and correct upper bound than the global max — items that dominate the full dataset may be rare in a specific conditional sub-context. Crucially, this is not complex: first_pass already computes v[1] as part of its normal scan, so no extra computation is needed.
 
 
 5. ** OPTIONAL IMPROVEMENTS (For Future Iterations) ** 
@@ -68,7 +68,7 @@ Keep the spatial distance calculations (Phase A) in Python using vectorized NumP
 ✅ The system accepts transactions containing float weights representing distance-decay.
 ✅ Transactions are correctly normalized before tree insertion.
 ✅ The custom FP-Tree accumulates float weights instead of integer counts.
-✅ Pruning logic uses an Upper Bound (GMAXW) to prevent the accidental dropping of itemsets due to the broken downward closure property.
+✅ Pruning logic uses a local upper bound (total_weight * local_max_weight per conditional context) to prevent the accidental dropping of itemsets due to the broken downward closure property.
 ✅ The output successfully integrates back into the existing Python post-processing pipeline (Lift calculation, FDR, redundancy pruning). [Pipeline dispatch + shared post-processing utils are ready]
 
 2. **Technical Explanation: Distance-Decay (Diffusion) Calculation:** 

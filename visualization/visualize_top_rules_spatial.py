@@ -17,7 +17,7 @@ import constants
 CELL_TABLE_PATH = os.path.join(constants.MIBI_GUT_DIR_PATH, 'cell_table.csv')
 RESULTS_DIR = constants.RESULTS_DATA_DIR
 OUTPUT_DIR = os.path.join(constants.RESULTS_PLOTS_DIR, 'top_rules_spatial')
-METHODS = ["BAG", "CN", "KNN_R"]
+METHODS = constants.METHODS
 
 # Boolean columns for tissue compartments
 TISSUE_BOOLEAN_COLS = [

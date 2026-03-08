@@ -12,7 +12,7 @@ import constants
 # --- Configuration ---
 RESULTS_DIR = constants.RESULTS_DATA_DIR
 OUTPUT_DIR = os.path.join(constants.RESULTS_PLOTS_DIR, 'raw_rules_report')
-METHODS = ["BAG", "CN", "KNN_R"]
+METHODS = constants.METHODS
 
 sns.set_theme(style="whitegrid")
 

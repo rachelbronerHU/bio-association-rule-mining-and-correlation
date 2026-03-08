@@ -3,8 +3,10 @@ import os
 import sys
 import re
 
-DATA_DIR = "results/full_run/data"
-METHODS = ["BAG", "CN", "KNN_R"]
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from constants import RESULTS_DATA_DIR, METHODS
+
+DATA_DIR = RESULTS_DATA_DIR
 README_PATH = "README.md"
 
 def get_top_rules_markdown(style="blockquote"):

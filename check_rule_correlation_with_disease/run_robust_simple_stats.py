@@ -17,6 +17,7 @@ warnings.filterwarnings('ignore')
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
+from utils.logging_setup import setup_logging
 from data_exploration.check_data_bias import load_stratified_biopsies
 from check_rule_correlation_with_disease.stratified_utils import (
     CONTROLS_ELIGIBLE, TARGETS, parse_rule_items, load_and_prep_data,
@@ -28,10 +29,9 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
 
 FEATURE_COUNTS = [None, 20, 50, 100]
-METHODS = ["BAG", "CN", "KNN_R"] 
+METHODS = constants.METHODS
 
-# Setup Logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+setup_logging("run_robust_simple_stats")
 logger = logging.getLogger("SimpleStats")
 
 # ── Fold computation ───────────────────────────────────────────────────────────

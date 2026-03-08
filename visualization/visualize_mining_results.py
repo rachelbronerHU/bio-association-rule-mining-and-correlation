@@ -11,11 +11,9 @@ import ast
 
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR
+from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS
 
 sns.set_theme(style="whitegrid")
-
-METHODS = ["BAG", "CN", "KNN_R"]
 
 def load_data():
     """Loads results CSVs and Stats JSONs."""

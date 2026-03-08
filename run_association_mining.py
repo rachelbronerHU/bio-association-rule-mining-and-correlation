@@ -7,17 +7,10 @@ import os
 import json
 from concurrent.futures import ProcessPoolExecutor
 from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES, TRANSACTION_DATA_DIR, ALGO, CONFIG, METHODS
+from utils.logging_setup import setup_logging
 import worker_task
 
-# Setup Logging
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(os.getcwd(), "run_association_mining.log"))
-    ],
-    force=True
-)
+setup_logging(f"run_association_mining_{ALGO}")
 logger = logging.getLogger("manager")
 warnings.filterwarnings('ignore')
 
@@ -256,7 +249,7 @@ def run_pipeline():
         results_collection = []
         stats_collection = {"sizes": [], "orig_counts": [], "kept_counts": [], "redundant_removed": []}
         
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(initializer=setup_logging, initargs=(f"run_association_mining_{ALGO}",)) as executor:
             # Map returns iterator in order
             # Note: df_sample pickling might be slow if huge, but here it's small per FOV.
             futures = [executor.submit(worker_task.process_single_sample, *t) for t in tasks]
@@ -286,7 +279,10 @@ def run_pipeline():
         with open(f"{out_dir}/stats_{method}.json", "w") as f:
             json.dump(stats_collection, f)
             
-    logger.info(f"Total Suite Time: {time.time() - start_time:.2f}s")
+    elapsed = time.time() - start_time
+    h, rem = divmod(int(elapsed), 3600)
+    m, s = divmod(rem, 60)
+    logger.info(f"Total Suite Time: {h}h {m}m {s}s")
 
 if __name__ == "__main__":
     run_pipeline()

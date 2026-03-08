@@ -8,11 +8,10 @@ import argparse
 # Add parent directory to path to allow importing constants
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from constants import CONSENSUS_RESULTS_EXPLORATION_DIR, RESULTS_DATA_DIR
+from constants import CONSENSUS_RESULTS_EXPLORATION_DIR, RESULTS_DATA_DIR, METHODS
 
 # Import organ stratification loader
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data_exploration'))
-from check_data_bias import load_stratified_biopsies
+from data_exploration.check_data_bias import load_stratified_biopsies
 
 def load_bias_flags():
     """
@@ -44,7 +43,6 @@ def load_bias_flags():
     
     return bias_map
 
-METHODS = ["BAG", "CN", "KNN_R"]
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INPUT_DIR = RESULTS_DATA_DIR
 OUTPUT_DIR = CONSENSUS_RESULTS_EXPLORATION_DIR

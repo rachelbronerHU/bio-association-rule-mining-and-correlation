@@ -14,13 +14,6 @@ from utils.rules import (
 from algos import fpgrowth as fpgrowth_algo
 from algos import weighted_fpgrowth as wfpg_algo
 
-# Setup Worker Logger
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s',
-    handlers=[logging.FileHandler(os.path.join(os.getcwd(), "run_association_mining.log"))],
-    force=True
-)
 logger = logging.getLogger("worker")
 
 

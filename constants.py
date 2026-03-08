@@ -1,10 +1,14 @@
+import os as _os
+
 # Debugging Configurations
-DEBUG = True # Set to True for quick test
+DEBUG = False # Set to True for quick test
 DEBUG_FOVS_PER_GROUP = 10
 SAVE_RAW_RULES = True
 
 # Algorithm Selection: "fpgrowth" | "weighted_fpgrowth"
-ALGO = "weighted_fpgrowth"
+# Change _DEFAULT_ALGO to switch default. Override per-run via: ALGO=weighted_fpgrowth python ...
+_DEFAULT_ALGO = "fpgrowth"
+ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
 
 # Path Configuration
 DATA_DIR = 'data/'
@@ -51,9 +55,9 @@ if ALGO == "weighted_fpgrowth":
         "BANDWIDTH": 15.0,          # Gaussian decay (µm). At d=BANDWIDTH weight ≈ 0.6. Defaults to RADIUS if absent.
         "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
         "MIN_CONFIDENCE": 0.7,      # Same as binary — weighted confidence already requires intensity match, not just presence
-        "MIN_LIFT": 1.5,            # Slightly stricter to compensate for finer-grained support scale
+        "MIN_LIFT": 1.3,            # Slightly stricter to compensate for finer-grained support scale
         "MIN_LEVERAGE": 0.005,
-        "MIN_CONVICTION": 1.0,
+        "MIN_CONVICTION": 1.5,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
         "MAX_NEGATIVE_LIFT": 0.7,
         "MAX_RULE_LENGTH": 4,
@@ -70,11 +74,11 @@ else:
         "K_NEIGHBORS": 30,
         "GRID_WINDOW_SIZE": 30.0,
         "WINDOW_STEP_FRACTION": 0.5,
-        "MIN_SUPPORT": 0.01,
+        "MIN_SUPPORT": 0.05,
         "MIN_CONFIDENCE": 0.7,
-        "MIN_LIFT": 1.2,
+        "MIN_LIFT": 1.3,
         "MIN_LEVERAGE": 0.005,
-        "MIN_CONVICTION": 1.0,
+        "MIN_CONVICTION": 1.5,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
         "MAX_NEGATIVE_LIFT": 0.7,
         "MAX_RULE_LENGTH": 4,

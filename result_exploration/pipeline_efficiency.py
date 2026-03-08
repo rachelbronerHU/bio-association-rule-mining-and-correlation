@@ -1,12 +1,15 @@
 import pandas as pd
 import os
 import warnings
+import sys
 
 # Suppress DtypeWarning for large mixed-type datasets
 warnings.simplefilter(action='ignore', category=pd.errors.DtypeWarning)
 
-DATA_DIR = "results/full_run/data"
-METHODS = ["BAG", "CN", "KNN_R"]
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from constants import RESULTS_DATA_DIR, METHODS
+
+DATA_DIR = RESULTS_DATA_DIR
 
 def calculate_summary_stats():
     print("\n=== PIPELINE EFFICIENCY REPORT (Raw vs Final) ===\n")
@@ -14,9 +17,6 @@ def calculate_summary_stats():
     header = f"{'METHOD':<8} | {'RAW Count':<9} | {'FINAL Count':<11} | {'RETENTION %':<11} | {'RAW/FOV':<7} | {'FINAL/FOV':<9} | {'AVG LIFT':<10} | {'SIG (FDR<0.01)':<18} | {'SIG (P<0.01)':<18}"
     print(header)
     print("-" * len(header))
-
-    METHODS = ["BAG", "CN", "KNN_R"]
-    DATA_DIR = "results/full_run/data"
 
     for method in METHODS:
         final_path = os.path.join(DATA_DIR, f"results_{method}.csv")

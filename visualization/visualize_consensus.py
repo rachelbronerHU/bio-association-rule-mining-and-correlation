@@ -10,14 +10,12 @@ import ast
 # Add project root to sys.path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(PROJECT_ROOT)
-from constants import RESULTS_PLOTS_DIR, CONSENSUS_RESULTS_EXPLORATION_DIR
+from constants import RESULTS_PLOTS_DIR, CONSENSUS_RESULTS_EXPLORATION_DIR, METHODS
 
 # Input Directory from where we just saved the consensus tables
 CONSENSUS_DIR = os.path.join(PROJECT_ROOT, CONSENSUS_RESULTS_EXPLORATION_DIR)
 # Output Directory for plots
 PLOTS_DIR = os.path.join(PROJECT_ROOT, RESULTS_PLOTS_DIR, "consensus_report")
-
-METHODS = ["BAG", "CN", "KNN_R"]
 
 sns.set_theme(style="whitegrid")
 

@@ -12,7 +12,7 @@ import constants
 # --- Configuration ---
 TRANSACTION_DATA_DIR = constants.TRANSACTION_DATA_DIR
 OUTPUT_DIR = os.path.join(constants.RESULTS_PLOTS_DIR, 'transaction_distributions')
-METHODS = ["BAG", "CN", "KNN_R"]
+METHODS = constants.METHODS
 
 def load_transaction_data(method):
     """

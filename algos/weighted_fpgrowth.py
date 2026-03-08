@@ -337,47 +337,80 @@ def _itemsets_to_rules(itemsets, support_map, config):
 # Validation
 # ---------------------------------------------------------------------------
 
-def _check_rule(rule_row, transactions, config):
+def _build_weight_matrix(transactions):
     """
-    Checks if a rule passes thresholds in weighted transactions.
+    Converts a list of weighted transaction dicts into a dense NumPy matrix.
 
-    Weighted support of an itemset I in transaction T:
-        = min(weight of each item in I) if all items present, else 0
-    This rewards itemsets where ALL items have high diffusion weight.
+    Returns:
+        W:        float32 array of shape (N_transactions, N_unique_items)
+                  W[t, j] = weight of item j in transaction t (0 if absent)
+        item_idx: dict mapping item label -> column index in W
+    """
+    all_items = sorted({item for trans in transactions for item in trans})
+    item_idx = {item: i for i, item in enumerate(all_items)}
+    W = np.zeros((len(transactions), len(all_items)), dtype=np.float64)
+    for t_idx, trans in enumerate(transactions):
+        for item, w in trans.items():
+            W[t_idx, item_idx[item]] = w
+    return W, item_idx
+
+
+def _batch_check_rules(rules_df, transactions, config):
+    """
+    Vectorized check of all rules against a transaction list.
+
+    Builds a weight matrix W once, then for each rule uses NumPy slice
+    operations to compute weighted support without any Python loops over
+    transactions. Returns a boolean array of shape (len(rules_df),).
+
+    Weighted support semantics:
+        support(I, T) = min(W[T, i] for i in I)  if all items present, else 0
+    This is the same definition used in _check_rule.
     """
     if not transactions:
-        return False
+        return np.zeros(len(rules_df), dtype=bool)
 
     N = len(transactions)
-    antecedents = set(rule_row["antecedents"])
-    consequents = set(rule_row["consequents"])
-    rule_items = antecedents | consequents
+    W, item_idx = _build_weight_matrix(transactions)
+    results = np.zeros(len(rules_df), dtype=bool)
 
-    sum_both = sum_ant = sum_con = 0.0
+    for r_idx, (_, row) in enumerate(rules_df.iterrows()):
+        antecedents = list(row["antecedents"])
+        consequents = list(row["consequents"])
 
-    for trans in transactions:
-        has_ant = antecedents.issubset(trans)
-        has_con = consequents.issubset(trans)
-        if has_ant:
-            sum_ant += min(trans[i] for i in antecedents)
-        if has_con:
-            sum_con += min(trans[i] for i in consequents)
-        if has_ant and has_con:
-            sum_both += min(trans[i] for i in rule_items)
+        # If any item never appears in any transaction, skip immediately
+        ant_cols = [item_idx[i] for i in antecedents if i in item_idx]
+        con_cols = [item_idx[i] for i in consequents if i in item_idx]
+        if len(ant_cols) < len(antecedents) or len(con_cols) < len(consequents):
+            continue
 
-    support_both = sum_both / N
-    support_ant = sum_ant / N
-    support_con = sum_con / N
+        ant_W = W[:, ant_cols]           # (N, len_ant)
+        con_W = W[:, con_cols]           # (N, len_con)
+        all_W = W[:, ant_cols + con_cols]  # (N, len_ant+len_con)
 
-    if support_both < config["MIN_SUPPORT"] or support_ant == 0 or support_con == 0:
-        return False
+        has_ant = np.all(ant_W > 0, axis=1)
+        has_con = np.all(con_W > 0, axis=1)
+        has_both = has_ant & has_con
 
-    confidence = support_both / support_ant
-    lift = confidence / support_con
-    leverage = support_both - support_ant * support_con
-    conviction = float("inf") if confidence >= 1.0 else (1 - support_con) / (1 - confidence)
+        sum_ant = float(ant_W[has_ant].min(axis=1).sum()) if has_ant.any() else 0.0
+        sum_con = float(con_W[has_con].min(axis=1).sum()) if has_con.any() else 0.0
+        sum_both = float(all_W[has_both].min(axis=1).sum()) if has_both.any() else 0.0
 
-    return filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
+        support_both = sum_both / N
+        support_ant = sum_ant / N
+        support_con = sum_con / N
+
+        if support_both < config["MIN_SUPPORT"] or support_ant == 0 or support_con == 0:
+            continue
+
+        confidence = support_both / support_ant
+        lift = confidence / support_con
+        leverage = support_both - support_ant * support_con
+        conviction = float("inf") if confidence >= 1.0 else (1 - support_con) / (1 - confidence)
+
+        results[r_idx] = filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
+
+    return results
 
 
 def _validate_rules(geo_cache, cell_types, rules_df, config):
@@ -387,6 +420,9 @@ def _validate_rules(geo_cache, cell_types, rules_df, config):
     Geometry (neighbor indices, Gaussian weights) is already cached — each
     permutation only shuffles cell type labels and does a fast label-lookup
     rebuild via _build_transactions_from_cache.
+
+    Uses _batch_check_rules (vectorized) so all rules are evaluated against
+    each permutation's weight matrix with NumPy operations, not Python loops.
     """
     if rules_df.empty:
         return rules_df
@@ -395,7 +431,8 @@ def _validate_rules(geo_cache, cell_types, rules_df, config):
         trans, _, _ = _build_transactions_from_cache(geo_cache, shuffled_types)
         return trans
 
-    def check_fn(rule_row, transactions):
-        return _check_rule(rule_row, transactions, config)
+    def batch_check_fn(rdf, transactions):
+        return _batch_check_rules(rdf, transactions, config)
 
-    return run_permutation_test(rules_df, cell_types, config["N_PERMUTATIONS"], build_fn, check_fn)
+    return run_permutation_test(rules_df, cell_types, config["N_PERMUTATIONS"], build_fn,
+                                check_fn=None, batch_check_fn=batch_check_fn)

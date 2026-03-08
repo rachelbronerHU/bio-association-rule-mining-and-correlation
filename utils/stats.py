@@ -13,18 +13,22 @@ def apply_fdr_correction(p_values):
     return pvals_corrected
 
 
-def run_permutation_test(rules_df, cell_types, n_perms, build_fn, check_fn):
+def run_permutation_test(rules_df, cell_types, n_perms, build_fn, check_fn,
+                         batch_check_fn=None):
     """
     Generic permutation test for validating association rules.
 
     Args:
-        rules_df:   DataFrame of rules to validate (must not be empty)
-        cell_types: Array of cell type labels for the sample
-        n_perms:    Number of permutations (0 = skip, assign p_value=1.0)
-        build_fn:   build_fn(shuffled_cell_types) -> transactions
-                    Caller is responsible for format (sets, dicts, etc.)
-        check_fn:   check_fn(rule_row, transactions) -> bool
-                    Returns True if the rule would be "discovered" in this permutation
+        rules_df:        DataFrame of rules to validate (must not be empty)
+        cell_types:      Array of cell type labels for the sample
+        n_perms:         Number of permutations (0 = skip, assign p_value=1.0)
+        build_fn:        build_fn(shuffled_cell_types) -> transactions
+                         Caller is responsible for format (sets, dicts, etc.)
+        check_fn:        check_fn(rule_row, transactions) -> bool
+                         Per-rule check. Used when batch_check_fn is None.
+        batch_check_fn:  Optional batch_check_fn(rules_df, transactions) -> bool ndarray
+                         Checks all rules at once per permutation (vectorized path).
+                         When provided, check_fn is not called.
 
     Returns:
         rules_df with added columns: p_value, p_value_adj
@@ -42,9 +46,12 @@ def run_permutation_test(rules_df, cell_types, n_perms, build_fn, check_fn):
         shuffled_types = np.random.permutation(cell_types)
         perm_trans = build_fn(shuffled_types)
 
-        for idx, (_, row) in enumerate(rules_df.iterrows()):
-            if check_fn(row, perm_trans):
-                better_counts[idx] += 1
+        if batch_check_fn is not None:
+            better_counts += batch_check_fn(rules_df, perm_trans).astype(float)
+        else:
+            for idx, (_, row) in enumerate(rules_df.iterrows()):
+                if check_fn(row, perm_trans):
+                    better_counts[idx] += 1
 
     p_values = (better_counts + 1) / (n_perms + 1)
     rules_df["p_value"] = p_values

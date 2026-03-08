@@ -206,8 +206,12 @@ def _mine(transactions, config):
         return pd.DataFrame()
 
     N = len(transactions)
-    # MIN_SUPPORT is a fraction [0,1]; scale to raw sum for tree operations
-    min_support_raw = config["MIN_SUPPORT"] * N
+    # Effective raw support threshold: whichever is stricter — the relative
+    # fraction (MIN_SUPPORT * N) or the absolute floor (MIN_ABS_SUPPORT).
+    min_support_raw = max(
+        config["MIN_SUPPORT"] * N,
+        config.get("MIN_ABS_SUPPORT", 0),
+    )
 
     tree = WeightedFPTree()
     tree.first_pass(transactions)
@@ -373,6 +377,11 @@ def _batch_check_rules(rules_df, transactions, config):
     N = len(transactions)
     W, item_idx = _build_weight_matrix(transactions)
     results = np.zeros(len(rules_df), dtype=bool)
+    # Mirror the same effective threshold used during mining
+    effective_min_support = max(
+        config["MIN_SUPPORT"],
+        config.get("MIN_ABS_SUPPORT", 0) / N,
+    )
 
     for r_idx, (_, row) in enumerate(rules_df.iterrows()):
         antecedents = list(row["antecedents"])
@@ -400,7 +409,7 @@ def _batch_check_rules(rules_df, transactions, config):
         support_ant = sum_ant / N
         support_con = sum_con / N
 
-        if support_both < config["MIN_SUPPORT"] or support_ant == 0 or support_con == 0:
+        if support_both < effective_min_support or support_ant == 0 or support_con == 0:
             continue
 
         confidence = support_both / support_ant

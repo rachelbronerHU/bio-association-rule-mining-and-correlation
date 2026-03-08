@@ -220,8 +220,7 @@ def _mine(transactions, config):
     for trans in transactions:
         tree.insert(trans)
 
-    gmaxw = {item: v[1] for item, v in tree.header.items()}
-    itemsets_raw = _mine_tree(tree, min_support_raw, [], gmaxw)
+    itemsets_raw = _mine_tree(tree, min_support_raw, [])
 
     if not itemsets_raw:
         return pd.DataFrame()
@@ -232,16 +231,13 @@ def _mine(transactions, config):
     return _itemsets_to_rules(itemsets, support_map, config)
 
 
-def _mine_tree(tree, min_support, prefix, gmaxw):
+def _mine_tree(tree, min_support, prefix):
     """
     Recursively mine the FP-tree via conditional pattern bases.
 
-    GMAXW pruning (Phase C requirement):
-    In conditional contexts, item Y's accumulated weight is bounded by X's
-    weights in the prefix paths. We only prune Y if:
-        conditional_weight(Y) * gmaxw[Y] < min_support
-    This prevents dropping itemsets where Y is low in this context but
-    high-weight globally — keeping the algorithm mathematically conservative.
+    Pruning: item i is skipped if its total conditional weight * its local max
+    weight (both from first_pass on the conditional patterns) cannot reach
+    min_support. Using the local max gives a tighter bound than the global max.
     """
     frequent = []
 
@@ -268,18 +264,20 @@ def _mine_tree(tree, min_support, prefix, gmaxw):
         if not cond_patterns:
             continue
 
-        # Build conditional FP-tree with GMAXW-safe pruning
+        # Build conditional FP-tree. Use the local max weight (v[1], computed by
+        # first_pass from conditional patterns only) instead of the global gmaxw —
+        # the global max overestimates what items can contribute in this sub-context.
         cond_tree = WeightedFPTree()
         cond_tree.first_pass(cond_patterns)
         cond_tree.header = {
             i: v for i, v in cond_tree.header.items()
-            if v[0] * gmaxw.get(i, 1.0) >= min_support
+            if v[0] * v[1] >= min_support
         }
 
         for pattern in cond_patterns:
             cond_tree.insert(pattern)
 
-        frequent.extend(_mine_tree(cond_tree, min_support, new_prefix, gmaxw))
+        frequent.extend(_mine_tree(cond_tree, min_support, new_prefix))
 
     return frequent
 

@@ -7,7 +7,8 @@ The codebase has been refactored to support multiple mining algorithms:
 - `utils/rules.py` — shared post-processing (filtering, redundancy, scoring)
 - `utils/stats.py` — shared permutation test skeleton (run_permutation_test with injectable build_fn/check_fn)
 - `algos/fpgrowth.py` — standard binary FP-Growth isolated as a self-contained algo module
-- `worker_task.py` — dispatches via `config["ALGO"]` to any algo's `run()` entry point
+- `worker_task.py` — dispatches via `constants.ALGO` to any algo's `run()` entry point
+- `algos/weighted_fpgrowth.py` — Gaussian distance-decay weighted FP-Growth (CN/KNN_R only; raises ValueError for other methods)
 ---
 
 1. Problem Definition (The Need)
@@ -18,24 +19,24 @@ Transition the core mining algorithm from binary FP-Growth to Weighted Frequent 
 3. Step-by-Step Implementation & MUST-HAVE Design Directives
 The following steps contain critical requirements that must be implemented in the MVP to ensure biological validity and algorithmic correctness: 
 
-## ⬜ Phase A : Spatial Preprocessing & Weight Calculation (Python)
+## ✅ Phase A : Spatial Preprocessing & Weight Calculation (Python)
 ✅ Retain spatial neighborhood logic: Keep the existing spatial search methods (e.g., KNN_R).
-⬜ Implement Distance-Decay Function: For a given center cell A and its neighbors of type T, calculate the weight: Weight(T) = Sum( decay_function(distance(A, T_i)) ) for all i in neighbors of type T. Use an exponential decay or inverse square law.
-⬜ Transaction Formatting: Convert the output to dictionaries of floats representing the diffusion weight (e.g., {'T_cell': 2.45, 'B_cell': 0.8}).
-⬜ MUST-HAVE: Transaction Weight Normalization
+✅ Implement Distance-Decay Function: For a given center cell A and its neighbors of type T, calculate the weight: Weight(T) = Sum( decay_function(distance(A, T_i)) ) for all i in neighbors of type T. Use an exponential decay or inverse square law.
+✅ Transaction Formatting: Convert the output to dictionaries of floats representing the diffusion weight (e.g., {'T_cell': 2.45, 'B_cell': 0.8}).
+✅ MUST-HAVE: Transaction Weight Normalization
 Action: Normalize the weights within each transaction so they sum to 1 (or divide by the max weight in the local window).
 Why it's required: Tissues are highly heterogeneous. A very dense FOV might yield massive absolute diffusion scores (e.g., sum=20) while a sparse FOV yields tiny scores (e.g., sum=1.5). Without normalization, a single dense area will completely skew the global support threshold, creating false-positive global rules.
 
-## ⬜ Phase B: Custom Weighted FP-Tree Construction
-⬜ Standard libraries (like mlxtend) do not support floating-point weights. You must implement a custom tree.
-⬜ Node Structure: Replace the standard integer count variable with a floating-point weight variable.
-⬜ Header Table: Accumulate total float weights across the dataset for each item, rather than absolute counts.
-⬜ Tree Insertion: When inserting a transaction, increment the nodes by the specific weight of the item in that transaction.
+## ✅ Phase B: Custom Weighted FP-Tree Construction
+✅ Standard libraries (like mlxtend) do not support floating-point weights. You must implement a custom tree.
+✅ Node Structure: Replace the standard integer count variable with a floating-point weight variable.
+✅ Header Table: Accumulate total float weights across the dataset for each item, rather than absolute counts.
+✅ Tree Insertion: When inserting a transaction, increment the nodes by the specific weight of the item in that transaction.
 
-## ⬜ Phase C: Mining Logic & The Downward Closure Problem (CRITICAL)
+## ✅ Phase C: Mining Logic & The Downward Closure Problem (CRITICAL)
 Agent Attention Required: Introducing weights breaks the Downward Closure Property (Anti-monotone property). In standard FP-growth, if item {A} is infrequent, {A, B} is also infrequent, allowing early branch pruning. With weights, a combination {A, B} might pass the threshold even if {A} alone does not.
 
-* ⬜ MUST-HAVE: Global Maximum Weight Bound (GMAXW) for Pruning
+* ✅ MUST-HAVE: Global Maximum Weight Bound (GMAXW) for Pruning
 Action: Do NOT prune a branch simply because its current real weight is below the min_support. Instead, record the Global Maximum Weight (GMAXW) an item has across the entire dataset. Multiply the node's accumulated weight by this max possible weight. Only prune if this upper bound is still < min_support.
 Why it's required (The Compromise): Standard pruning will silently drop valid, high-weight biological rules. Implementing a "Local Max Weight" per branch is extremely complex. The Global Max Weight (GMAXW) is the perfect compromise: it keeps the algorithm mathematically correct (no lost rules) and is simple to implement. Evaluate true weighted support only at the final rule-extraction stage.
 
@@ -64,10 +65,10 @@ Rust Caveat: Do not use standard pointers/references (Rc<RefCell<T>>) for the tr
 Keep the spatial distance calculations (Phase A) in Python using vectorized NumPy/SciPy, passing only the final normalized dictionaries to Rust.
 
 6. Acceptance Criteria for MVP
-⬜ The system accepts transactions containing float weights representing distance-decay.
-⬜ Transactions are correctly normalized before tree insertion.
-⬜ The custom FP-Tree accumulates float weights instead of integer counts.
-⬜ Pruning logic uses an Upper Bound (GMAXW) to prevent the accidental dropping of itemsets due to the broken downward closure property.
+✅ The system accepts transactions containing float weights representing distance-decay.
+✅ Transactions are correctly normalized before tree insertion.
+✅ The custom FP-Tree accumulates float weights instead of integer counts.
+✅ Pruning logic uses an Upper Bound (GMAXW) to prevent the accidental dropping of itemsets due to the broken downward closure property.
 ✅ The output successfully integrates back into the existing Python post-processing pipeline (Lift calculation, FDR, redundancy pruning). [Pipeline dispatch + shared post-processing utils are ready]
 
 2. **Technical Explanation: Distance-Decay (Diffusion) Calculation:** 

@@ -1,5 +1,19 @@
 ##### MINING FLOW #####
 
+# --- Algorithm Selection ---
+# Switch algorithm by editing constants.py:
+#   ALGO = "fpgrowth"           → runs on BAG, CN, KNN_R  → output: results/<run>/data/
+#   ALGO = "weighted_fpgrowth"  → runs on CN, KNN_R only  → output: results/<run>/weighted_data/
+# CONFIG and METHODS are set automatically in constants.py based on ALGO.
+# run_type = "debug_run" (DEBUG=True) or "full_run" (DEBUG=False)
+
+# --- Output Files (per method) ---
+# results/<run_type>/[weighted_]data/results_<METHOD>.csv         — final rules with metadata
+# results/<run_type>/[weighted_]data/results_<METHOD>_RAW.csv     — raw rules before filtering (if SAVE_RAW_RULES=True)
+# results/<run_type>/[weighted_]data/stats_<METHOD>.json          — transaction statistics
+# results/<run_type>/[weighted_]data/transaction_data/            — per-FOV transaction distributions
+# results/<run_type>/[weighted_]data/rare_filtering_stats/        — rare cell filtering logs
+
 # Step no. 1:
 * python data_exploration/check_data_bias.py (results/full_run/plots/data_bias_report)
 

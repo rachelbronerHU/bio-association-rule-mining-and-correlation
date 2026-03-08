@@ -30,8 +30,8 @@ Iterate Through FOVs (Field of Views)
   ├──► [ FOV Processing Pipeline ]
   │       │
   │       ├── 1. Determine Neighborhoods (Method Dependent)
-  │       ├── 2. Construct Transaction Sets (All Cell Types Included)
-  │       ├── 3. Extract Rules (FP-Growth Algorithm)
+  │       ├── 2. Construct Transactions (binary presence / Gaussian-weighted float)
+  │       ├── 3. Extract Rules (FP-Growth | Weighted FP-Growth)
   │       ├── 4. Filter Rules (Min Lift, Confidence, Conviction)
   │       ├── 5. Filter Rare Cell Rules (Post-Mining) <a href="#rare-cell-filter">[*]</a>
   │       ├── 6. Select Top N Rules (Ranked by Lift)
@@ -44,6 +44,21 @@ Iterate Through FOVs (Field of Views)
 </pre>
 
 <span id="rare-cell-filter">**[*] Post-Mining Rare Cell Filtering:**</span> After mining, rules containing cell types below an adaptive threshold (max(5 cells, 1% of FOV)) are filtered out **before validation**. This two-stage approach ensures: (1) accurate support/lift calculations during mining (preserves full spatial context), (2) computational efficiency (rare-cell rules skip expensive 1000-permutation validation), and (3) cleaner final results (no single-cell artifacts).
+
+---
+
+## 1b. Algorithm Comparison: FP-Growth vs Weighted FP-Growth
+
+| Metric | FP-Growth formula | FP-Growth meaning | Weighted FP-Growth formula | Weighted FP-Growth meaning |
+| :--- | :--- | :--- | :--- | :--- |
+| **Transaction** | `{T_cell, B_cell, ...}` | Cell type is present (1) or absent (0) | `{T_cell: 0.6, B_cell: 0.2, ...}` | Gaussian diffusion weight — closer cells score higher |
+| **Support** | `count(A∪B) / N` | Fraction of neighborhoods containing all items | `Σ min(wᵢ for i∈A∪B) / N` | Avg intensity of weakest co-diffusing item across neighborhoods |
+| **Confidence** | `support(A∪B) / support(A)` | How often B is present when A is present | `support(A∪B) / support(A)` | How strongly B co-diffuses relative to A's intensity |
+| **Lift** | `confidence / support(B)` | Co-occurrence above random chance | `confidence / support(B)` | Same — but chance baseline uses diffusion weights |
+| **Leverage** | `support(A∪B) − support(A)·support(B)` | Excess co-occurrence beyond independence | `support(A∪B) − support(A)·support(B)` | Same — negative means diffusion signals repel |
+| **Conviction** | `(1 − support(B)) / (1 − confidence)` | How often A occurs without B (∞ = always together) | `(1 − support(B)) / (1 − confidence)` | Same interpretation, operating on diffusion-weighted supports |
+
+*Supported spatial methods — FP-Growth: BAG, CN, KNN_R, GRID, WINDOW. Weighted FP-Growth: CN, KNN_R (requires a defined center cell).*
 
 ---
 

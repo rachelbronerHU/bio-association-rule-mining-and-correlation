@@ -6,7 +6,7 @@ import logging
 import os
 import json
 from concurrent.futures import ProcessPoolExecutor
-from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES, TRANSACTION_DATA_DIR
+from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES, TRANSACTION_DATA_DIR, ALGO, CONFIG, METHODS
 import worker_task
 
 # Setup Logging
@@ -26,25 +26,7 @@ GROUP_COL = "Pathological stage"
 ID_COL = "fov"
 BIOPSY_COL = "Biopsy_ID"
 
-CONFIG = {
-    "RADIUS": 30.0,
-    "K_NEIGHBORS": 30,
-    "GRID_WINDOW_SIZE": 30.0,
-    "WINDOW_STEP_FRACTION": 0.5,
-    "MIN_SUPPORT": 0.01,
-    "MIN_CONFIDENCE": 0.7,
-    "MIN_LIFT": 1.2,
-    "MIN_LEVERAGE": 0.005,
-    "MIN_CONVICTION": 1.0,
-    "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
-    "MAX_NEGATIVE_LIFT": 0.7,
-    "MAX_RULE_LENGTH": 4,
-    "TARGET_CELLS": 30,
-    "MIN_CELLS_PER_PATCH": 2,
-    "N_PERMUTATIONS": 5 if DEBUG else 1000,
-    "N_TOP_RULES": 100 if DEBUG else 2000,
-    "MIN_CELL_TYPE_FREQUENCY": 5,  # Minimum absolute cell count (adaptive with MIN_SUPPORT)
-}
+# CONFIG and METHODS are imported from constants.py (algo-specific, set via ALGO)
 
 # --- 1. DATA LOADING ---
 def _normalize_coordinates(df):
@@ -251,16 +233,14 @@ def run_pipeline():
     start_time = time.time()
     df, df_biopsy, df_fovs = load_data()
     samples = get_samples_to_process(df)
-    
-    methods = ["BAG", "CN", "KNN_R"]
-    
+
     # Prepare Tasks
     # We group by Method loop to save intermediate results.
     
     # Multiprocessing Pool
     # We can reuse the pool or create one per method. One per method is safer for memory cleanup
     
-    for method in methods:
+    for method in METHODS:
         logger.info(f"=== STARTING METHOD: {method} ===")
         
         # Ensure Raw Rules Dir exists

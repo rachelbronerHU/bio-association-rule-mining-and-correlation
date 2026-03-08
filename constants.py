@@ -1,10 +1,10 @@
 # Debugging Configurations
-DEBUG = False # Set to True for quick test
+DEBUG = True # Set to True for quick test
 DEBUG_FOVS_PER_GROUP = 10
 SAVE_RAW_RULES = True
 
 # Algorithm Selection: "fpgrowth" | "weighted_fpgrowth"
-ALGO = "fpgrowth"
+ALGO = "weighted_fpgrowth"
 
 # Path Configuration
 DATA_DIR = 'data/'
@@ -16,8 +16,9 @@ if DEBUG:
 else:
     RESULTS_DIR = RESULTS_BASE_DIR + 'full_run/'
 
-RESULTS_DATA_DIR = RESULTS_DIR + 'data/'
-RESULTS_PLOTS_DIR = RESULTS_DIR + 'plots/'
+RESULTS_ALGO_DIR = RESULTS_DIR + ALGO + '/'
+RESULTS_DATA_DIR = RESULTS_ALGO_DIR + 'data/'
+RESULTS_PLOTS_DIR = RESULTS_ALGO_DIR + 'plots/'
 
 TRANSACTION_DATA_DIR = RESULTS_DATA_DIR + 'transaction_data/'
 RARE_FILTERING_STATS_DIR = RESULTS_DATA_DIR + 'rare_filtering_stats/'
@@ -38,3 +39,48 @@ RESULTS_CLINICAL_CORRELATION_PLOTS_DIR = RESULTS_PLOTS_DIR + 'clinical_correlati
 
 # Param Configuration
 MIN_P_VALUE = 0.05
+
+# --- Algorithm-specific Configuration ---
+# Switch ALGO above to change everything below automatically.
+
+if ALGO == "weighted_fpgrowth":
+    METHODS = ["CN", "KNN_R"]  # BAG has no center cell — not supported by weighted_fpgrowth
+    CONFIG = {
+        "RADIUS": 25.0,
+        "K_NEIGHBORS": 30,
+        "BANDWIDTH": 15.0,          # Gaussian decay (µm). At d=BANDWIDTH weight ≈ 0.6. Defaults to RADIUS if absent.
+        "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
+        "MIN_CONFIDENCE": 0.7,      # Same as binary — weighted confidence already requires intensity match, not just presence
+        "MIN_LIFT": 1.5,            # Slightly stricter to compensate for finer-grained support scale
+        "MIN_LEVERAGE": 0.005,
+        "MIN_CONVICTION": 1.0,
+        "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
+        "MAX_NEGATIVE_LIFT": 0.7,
+        "MAX_RULE_LENGTH": 4,
+        "TARGET_CELLS": 30,
+        "MIN_CELLS_PER_PATCH": 2,
+        "N_PERMUTATIONS": 5 if DEBUG else 1000,
+        "N_TOP_RULES": 100 if DEBUG else 2000,
+        "MIN_CELL_TYPE_FREQUENCY": 5,
+    }
+else:
+    METHODS = ["BAG", "CN", "KNN_R"]
+    CONFIG = {
+        "RADIUS": 25.0,
+        "K_NEIGHBORS": 30,
+        "GRID_WINDOW_SIZE": 30.0,
+        "WINDOW_STEP_FRACTION": 0.5,
+        "MIN_SUPPORT": 0.01,
+        "MIN_CONFIDENCE": 0.7,
+        "MIN_LIFT": 1.2,
+        "MIN_LEVERAGE": 0.005,
+        "MIN_CONVICTION": 1.0,
+        "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
+        "MAX_NEGATIVE_LIFT": 0.7,
+        "MAX_RULE_LENGTH": 4,
+        "TARGET_CELLS": 30,
+        "MIN_CELLS_PER_PATCH": 2,
+        "N_PERMUTATIONS": 5 if DEBUG else 1000,
+        "N_TOP_RULES": 100 if DEBUG else 2000,
+        "MIN_CELL_TYPE_FREQUENCY": 5,
+    }

@@ -12,6 +12,7 @@ from utils.rules import (
     filter_redundant_rules,
 )
 from algos import fpgrowth as fpgrowth_algo
+from algos import weighted_fpgrowth as wfpg_algo
 
 # Setup Worker Logger
 logging.basicConfig(
@@ -40,6 +41,8 @@ def process_single_sample(sample_id, df_sample, method, config):
 
     if ALGO == "fpgrowth":
         mined_rules, validate_fn, stats = fpgrowth_algo.run(neighborhoods, coords, cell_types, config, method)
+    elif ALGO == "weighted_fpgrowth":
+        mined_rules, validate_fn, stats = wfpg_algo.run(neighborhoods, coords, cell_types, config, method)
     else:
         raise ValueError(f"Unknown ALGO in constants.py: {ALGO!r}")
 

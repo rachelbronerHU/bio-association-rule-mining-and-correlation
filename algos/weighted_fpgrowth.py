@@ -26,11 +26,28 @@ def run(neighborhoods, coords, cell_types, config, method):
         validate_fn: Callable validate_fn(rules_df) -> rules_df with p_value columns
         stats:       Dict with transaction statistics (sizes, cell_counts, orig, kept)
     """
-    trans, stats = _build_transactions(neighborhoods, coords, cell_types, method, config)
+    if method not in ("CN", "KNN_R"):
+        raise ValueError(
+            f"weighted_fpgrowth only supports CN and KNN_R methods (got {method!r}). "
+            "Distance-decay requires a well-defined center cell. "
+            "Use method='CN' or 'KNN_R', or switch ALGO to 'fpgrowth'."
+        )
+
+    # Precompute geometry once — distances and Gaussian weights are fixed for this
+    # sample regardless of how many times cell type labels are shuffled.
+    geo_cache = _precompute_geometry(neighborhoods, coords, config)
+
+    trans, sizes, cell_counts = _build_transactions_from_cache(geo_cache, cell_types)
+    stats = {
+        "sizes": sizes,
+        "cell_counts": cell_counts,
+        "orig": len(neighborhoods),
+        "kept": len(trans),
+    }
     mined_rules = _mine(trans, config)
 
     def validate_fn(rules_df):
-        return _validate_rules(neighborhoods, coords, cell_types, rules_df, config, method)
+        return _validate_rules(geo_cache, cell_types, rules_df, config)
 
     return mined_rules, validate_fn, stats
 
@@ -39,54 +56,59 @@ def run(neighborhoods, coords, cell_types, config, method):
 # Phase A: Spatial Preprocessing & Weight Calculation
 # ---------------------------------------------------------------------------
 
-def _build_transactions(neighborhoods, coords, cell_types, method, config):
+def _precompute_geometry(neighborhoods, coords, config):
     """
-    Builds weighted transactions using Gaussian kernel distance-decay.
+    Pre-computes per-neighborhood geometry: neighbor indices and Gaussian weights.
 
-    For each neighborhood, computes per-cell-type diffusion weights:
-        w_i = exp(-0.5 * (d_i / b)^2)      (Gaussian kernel, b = bandwidth)
-        Weight(T) = sum(w_i) for all cells of type T in the neighborhood
-
-    Weights are normalized per transaction to sum to 1, removing density bias
-    across heterogeneous FOVs.
+    This is called once per sample. The results are reused across all permutation
+    iterations in _validate_rules — distances and decay weights are invariant to
+    cell type label shuffling, so there is no need to recompute them per permutation.
 
     Args:
-        b (bandwidth): defaults to config["BANDWIDTH"] or config["RADIUS"].
+        b (bandwidth): config["BANDWIDTH"] or config["RADIUS"].
                        At d=b, Gaussian weight = exp(-0.5) ≈ 0.6.
 
     Returns:
-        transactions: List[Dict[str, float]]  e.g. [{'T_cell': 0.6, 'B_cell': 0.4}]
-        stats:        Dict with sizes, cell_counts, orig, kept
+        List of (center_i, all_idxs_arr, neighbor_idxs_arr, gaussian_weights_arr)
+        Only neighborhoods that pass MIN_CELLS and have at least one neighbor are included.
     """
-    if method not in ("CN", "KNN_R"):
-        raise ValueError(
-            f"weighted_fpgrowth only supports CN and KNN_R methods (got {method!r}). "
-            "Distance-decay requires a well-defined center cell. "
-            "Use method='CN' or 'KNN_R', or switch ALGO to 'fpgrowth'."
-        )
-
     b = config.get("BANDWIDTH", config["RADIUS"])
+    cache = []
 
+    for center_i, idxs in neighborhoods:
+        if len(idxs) < MIN_CELLS:
+            continue
+
+        neighbor_idxs = np.array([n for n in idxs if n != center_i])
+        if len(neighbor_idxs) == 0:
+            continue
+
+        dists = np.linalg.norm(coords[neighbor_idxs] - coords[center_i], axis=1)
+        weights = np.exp(-0.5 * (dists / b) ** 2)
+        cache.append((center_i, np.array(idxs), neighbor_idxs, weights))
+
+    return cache
+
+
+def _build_transactions_from_cache(geo_cache, cell_types):
+    """
+    Builds weighted transactions using pre-computed geometry and current cell type labels.
+
+    Called once for the initial mining pass and once per permutation iteration,
+    but geometry (distances, weights) is never recomputed — only label lookups occur.
+
+    Weighted transaction format: {item_label: normalized_weight, ...}
+      - Neighbor items:  f"{cell_type}_NEIGHBOR", weight = Gaussian decay sum, normalized
+      - Center item:     f"{cell_type}_CENTER",   weight = 1.0 before normalization
+    """
     transactions = []
     sizes = []
     cell_counts = []
-    orig_count = len(neighborhoods)
 
-    for item in neighborhoods:
-        center_i, idxs = item
-        if len(idxs) < MIN_CELLS:
-            continue
-        raw_types = cell_types[idxs]
+    for center_i, all_idxs, neighbor_idxs, weights in geo_cache:
+        raw_types = cell_types[all_idxs]
         if is_dominated(raw_types):
             continue
-
-        neighbor_idxs = [n for n in idxs if n != center_i]
-        if not neighbor_idxs:
-            continue
-
-        # Gaussian weight for each neighbor based on distance from center
-        dists = np.linalg.norm(coords[neighbor_idxs] - coords[center_i], axis=1)
-        weights = np.exp(-0.5 * (dists / b) ** 2)
 
         trans = {}
         for n_idx, w in zip(neighbor_idxs, weights):
@@ -96,24 +118,15 @@ def _build_transactions(neighborhoods, coords, cell_types, method, config):
         # Center cell at distance 0 → Gaussian weight = 1.0
         trans[f"{cell_types[center_i]}_CENTER"] = 1.0
 
-        if not trans:
-            continue
-
         # Normalize weights to sum to 1 (removes FOV density bias)
         total = sum(trans.values())
         trans = {k: v / total for k, v in trans.items()}
 
         transactions.append(trans)
         sizes.append(len(trans))
-        cell_counts.append(len(idxs))
+        cell_counts.append(len(all_idxs))
 
-    stats = {
-        "sizes": sizes,
-        "cell_counts": cell_counts,
-        "orig": orig_count,
-        "kept": len(transactions),
-    }
-    return transactions, stats
+    return transactions, sizes, cell_counts
 
 
 # ---------------------------------------------------------------------------
@@ -367,13 +380,19 @@ def _check_rule(rule_row, transactions, config):
     return filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
 
 
-def _validate_rules(neighborhoods, coords, cell_types, rules_df, config, method):
-    """Validates rules via permutation test with weighted transaction rebuilding."""
+def _validate_rules(geo_cache, cell_types, rules_df, config):
+    """
+    Validates rules via permutation test.
+
+    Geometry (neighbor indices, Gaussian weights) is already cached — each
+    permutation only shuffles cell type labels and does a fast label-lookup
+    rebuild via _build_transactions_from_cache.
+    """
     if rules_df.empty:
         return rules_df
 
     def build_fn(shuffled_types):
-        trans, _ = _build_transactions(neighborhoods, coords, shuffled_types, method, config)
+        trans, _, _ = _build_transactions_from_cache(geo_cache, shuffled_types)
         return trans
 
     def check_fn(rule_row, transactions):

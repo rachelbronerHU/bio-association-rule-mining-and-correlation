@@ -8,6 +8,7 @@ import json
 from concurrent.futures import ProcessPoolExecutor
 from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES, TRANSACTION_DATA_DIR, ALGO, CONFIG, METHODS
 from utils.logging_setup import setup_logging
+from utils.config_validation import validate_config
 import worker_task
 
 setup_logging(f"run_association_mining_{ALGO}")
@@ -224,6 +225,7 @@ def run_pipeline():
     logger.info("========================================================================================================")
 
     start_time = time.time()
+    validate_config(CONFIG, ALGO, METHODS)
     df, df_biopsy, df_fovs = load_data()
     samples = get_samples_to_process(df)
 

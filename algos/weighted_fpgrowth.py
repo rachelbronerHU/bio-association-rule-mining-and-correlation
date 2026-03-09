@@ -148,10 +148,8 @@ class WeightedFPTree:
     """
     FP-Tree that accumulates float weights instead of integer counts.
 
-    Header table: {item: [total_weight, max_weight, first_node]}
+    Header table: {item: [total_weight, first_node]}
       - total_weight: sum of item's weights across all transactions (weighted support)
-      - max_weight:   max weight of this item in any single transaction
-                      (global when built from full data; local when built from conditional patterns)
       - first_node:   head of the linked list of nodes for this item
     """
 
@@ -160,14 +158,12 @@ class WeightedFPTree:
         self.header = {}
 
     def first_pass(self, transactions):
-        """Scan transactions to compute per-item total weight and max weight."""
+        """Scan transactions to compute per-item total weight."""
         for trans in transactions:
             for item, w in trans.items():
                 if item not in self.header:
-                    self.header[item] = [0.0, 0.0, None]
+                    self.header[item] = [0.0, None]
                 self.header[item][0] += w
-                if w > self.header[item][1]:
-                    self.header[item][1] = w  # update GMAXW
 
     def prune(self, min_support):
         """Remove items whose total weight is below min_support."""
@@ -192,14 +188,33 @@ class WeightedFPTree:
                 new_node.weight = w
                 node.children[item] = new_node
                 # Prepend to header linked list
-                new_node.link = self.header[item][2]
-                self.header[item][2] = new_node
+                new_node.link = self.header[item][1]
+                self.header[item][1] = new_node
             node = node.children[item]
 
 
 # ---------------------------------------------------------------------------
-# Phase C: Mining with GMAXW-safe pruning
+# Phase C: Mining with min-based weighted support
 # ---------------------------------------------------------------------------
+
+def _min_support(itemset, transactions):
+    """
+    Compute min-based weighted support for an itemset over raw transactions.
+
+    support(I) = (1/N) × Σ_t min(w_i_t for i in I)
+
+    This is the correct definition: co-occurrence strength is limited by the
+    weakest partner per transaction. It satisfies downward closure, so
+    support({A,B}) ≤ support({A}) always holds.
+    """
+    items = list(itemset)
+    N = len(transactions)
+    total = 0.0
+    for trans in transactions:
+        if all(item in trans for item in items):
+            total += min(trans[item] for item in items)
+    return total / N
+
 
 def _mine(transactions, config):
     """Build WeightedFPTree and mine frequent weighted itemsets → rules DataFrame."""
@@ -226,8 +241,19 @@ def _mine(transactions, config):
     if not itemsets_raw:
         return pd.DataFrame()
 
-    # Normalize support back to fraction to match MIN_SUPPORT semantics
-    itemsets = [(fs, sup / N) for fs, sup in itemsets_raw]
+    # Recompute support using min-based semantics: the FP-tree's accumulated
+    # weights are an upper bound on min-based support, not the exact value.
+    # Any itemset whose true min-based support falls below the threshold is discarded.
+    effective_min_support = min_support_raw / N
+    itemsets = []
+    for fs, _ in itemsets_raw:
+        sup = _min_support(fs, transactions)
+        if sup >= effective_min_support:
+            itemsets.append((fs, sup))
+
+    if not itemsets:
+        return pd.DataFrame()
+
     support_map = {fs: sup for fs, sup in itemsets}
     return _itemsets_to_rules(itemsets, support_map, config)
 
@@ -236,9 +262,9 @@ def _mine_tree(tree, min_support, prefix):
     """
     Recursively mine the FP-tree via conditional pattern bases.
 
-    Pruning: item i is skipped if its total conditional weight * its local max
-    weight (both from first_pass on the conditional patterns) cannot reach
-    min_support. Using the local max gives a tighter bound than the global max.
+    Pruning: item i is skipped if its accumulated conditional weight is below
+    min_support. Under min-based support, downward closure holds, so this is
+    an exact condition (not just an upper bound).
     """
     frequent = []
 
@@ -251,7 +277,7 @@ def _mine_tree(tree, min_support, prefix):
 
         # Collect conditional pattern base (prefix paths to each node of this item)
         cond_patterns = []
-        node = tree.header[item][2]
+        node = tree.header[item][1]
         while node is not None:
             path = {}
             parent = node.parent
@@ -265,15 +291,11 @@ def _mine_tree(tree, min_support, prefix):
         if not cond_patterns:
             continue
 
-        # Build conditional FP-tree. Use the local max weight (v[1], computed by
-        # first_pass from conditional patterns only) instead of the global gmaxw —
-        # the global max overestimates what items can contribute in this sub-context.
+        # Build conditional FP-tree. Under min-based support, downward closure
+        # holds (support({A,B}) ≤ support({A})), so standard pruning is exact.
         cond_tree = WeightedFPTree()
         cond_tree.first_pass(cond_patterns)
-        cond_tree.header = {
-            i: v for i, v in cond_tree.header.items()
-            if v[0] * v[1] >= min_support
-        }
+        cond_tree.prune(min_support)
 
         for pattern in cond_patterns:
             cond_tree.insert(pattern)

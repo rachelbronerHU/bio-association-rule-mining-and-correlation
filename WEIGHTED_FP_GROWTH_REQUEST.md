@@ -34,11 +34,24 @@ Why it's required: Tissues are highly heterogeneous. A very dense FOV might yiel
 ✅ Tree Insertion: When inserting a transaction, increment the nodes by the specific weight of the item in that transaction.
 
 ## ✅ Phase C: Mining Logic & The Downward Closure Problem (CRITICAL)
-Agent Attention Required: Introducing weights breaks the Downward Closure Property (Anti-monotone property). In standard FP-growth, if item {A} is infrequent, {A, B} is also infrequent, allowing early branch pruning. With weights, a combination {A, B} might pass the threshold even if {A} alone does not.
 
-* ✅ MUST-HAVE: Upper Bound Pruning (Local Max Weight) for Pruning
-Action: Do NOT prune a branch simply because its current real weight is below the min_support. Instead, after calling first_pass on the conditional patterns, use the local max weight (v[1] in the header) to form an upper bound: total_weight * local_max_weight. Only prune if this upper bound is still < min_support.
-Why it's required (The Compromise): Standard pruning will silently drop valid, high-weight biological rules due to the broken downward closure property. Using the local max weight (computed per conditional context by first_pass) gives a tighter and correct upper bound than the global max — items that dominate the full dataset may be rare in a specific conditional sub-context. Crucially, this is not complex: first_pass already computes v[1] as part of its normal scan, so no extra computation is needed.
+**The original implementation used tree-propagation support** (accumulating the *suffix* item's weight into ancestor prefix paths during conditional tree construction). This was incorrect: it made `support({A,B})` depend on traversal order (asymmetric), violated downward closure, and produced lift values inconsistent with the permutation test validation.
+
+**Correct support definition — min-based:**
+`support(I) = (1/N) × Σ_t min(w_i_t for i in I)`
+
+Co-occurrence strength is limited by the weakest partner per transaction. If B is distant (w_B=0.05) but A is central (w_A=0.8), the joint association is 0.05 — correctly reflecting that B barely participates. This definition is symmetric and biologically grounded.
+
+**Downward closure is restored under min-based support:**
+`support({A,B}) = Σ_t min(w_A, w_B) ≤ Σ_t w_A = support({A})`
+
+So if {A} is infrequent, {A,B} is guaranteed infrequent. Standard pruning (`total_weight >= min_support`) is an exact condition — no upper-bound approximation is needed.
+
+**GMAXW removed:**
+The previous workaround (`total_weight * local_max_weight >= min_support`) was introduced specifically because tree-propagation support broke downward closure. With min-based support, downward closure holds and the header table simplifies from `[total_weight, max_weight, first_node]` to `[total_weight, first_node]`.
+
+**Implementation note:**
+After `_mine_tree` identifies candidate frequent itemsets, support is recomputed from scratch using `_min_support(itemset, transactions)`. This is necessary because the FP-tree's accumulated conditional weights (`v[0]`) are still an upper bound on min-based support, not the exact value — the tree may retain itemsets that fall below the threshold once exact support is computed.
 
 
 5. ** OPTIONAL IMPROVEMENTS (For Future Iterations) ** 
@@ -68,7 +81,7 @@ Keep the spatial distance calculations (Phase A) in Python using vectorized NumP
 ✅ The system accepts transactions containing float weights representing distance-decay.
 ✅ Transactions are correctly normalized before tree insertion.
 ✅ The custom FP-Tree accumulates float weights instead of integer counts.
-✅ Pruning logic uses a local upper bound (total_weight * local_max_weight per conditional context) to prevent the accidental dropping of itemsets due to the broken downward closure property.
+✅ Pruning logic uses exact standard pruning (`total_weight >= min_support`) — valid because min-based support restores downward closure. GMAXW upper-bound workaround removed.
 ✅ The output successfully integrates back into the existing Python post-processing pipeline (Lift calculation, FDR, redundancy pruning). [Pipeline dispatch + shared post-processing utils are ready]
 
 2. **Technical Explanation: Distance-Decay (Diffusion) Calculation:** 

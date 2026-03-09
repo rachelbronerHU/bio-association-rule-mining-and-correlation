@@ -53,7 +53,8 @@ def get_neighborhoods(coords, method, config):
     elif method == "KNN_R":
         k = config["K_NEIGHBORS"]
         radius = config["RADIUS"]
-        nn = NearestNeighbors(n_neighbors=k + 1, n_jobs=-1).fit(coords)
+        # Clamp to available points — crashes if n_neighbors > n_samples
+        nn = NearestNeighbors(n_neighbors=min(k + 1, len(coords)), n_jobs=-1).fit(coords)
         dists, indices = nn.kneighbors(coords)
 
         for center_i, (nbr_dists, nbr_idxs) in enumerate(zip(dists, indices)):

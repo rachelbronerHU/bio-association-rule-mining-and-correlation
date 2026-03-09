@@ -43,6 +43,7 @@
 ##### RULE CORRELATION FLOW #####
 
 # Step no. 1: Run discovery:
+# Each script logs to a file named after the script + algo (e.g. run_correlation_pipeline_fpgrowth.log).
 * *Dry Run (preview stratification plan)*: python check_rule_correlation_with_disease/run_correlation_pipeline.py --dry_run
 * *Both flows*: python check_rule_correlation_with_disease/run_correlation_pipeline.py [--no_self]
 * *Simple only*: python check_rule_correlation_with_disease/run_correlation_pipeline.py --only simple [--no_self]
@@ -50,6 +51,9 @@
 * *(or run individually — unchanged)*
 * *Simple Discovery*: python check_rule_correlation_with_disease/run_robust_simple_stats.py [--no_self]
 * *Advanced Discovery*: python check_rule_correlation_with_disease/advanced_discovery.py [--no_self]
+* *(parallel algos — run in separate terminals)*
+* *Linux/Mac*: ALGO=weighted_fpgrowth python check_rule_correlation_with_disease/run_correlation_pipeline.py [--only simple|ml] [--no_self]
+* *Windows*:   set ALGO=weighted_fpgrowth && python check_rule_correlation_with_disease/run_correlation_pipeline.py [--only simple|ml] [--no_self]
 
 # Step no. 2: Comparison
 * python visualization/clinical_correlations/plot_performance_comparisons.py (results/full_run/plots/clinical_correlation_report)

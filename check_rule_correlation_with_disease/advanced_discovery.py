@@ -21,6 +21,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
+from utils.logging_setup import setup_logging
 
 from data_exploration.check_data_bias import load_stratified_biopsies
 from check_rule_correlation_with_disease.stratified_utils import (
@@ -35,8 +36,6 @@ BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
 FEATURE_COUNTS = [None, 20, 50, 100]
 METHODS_TO_ANALYZE = ["BAG", "CN", "KNN_R"] 
 
-# Setup Logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("Robust_Discovery")
 
 # ── Data preparation helpers ───────────────────────────────────────────────────
@@ -547,8 +546,9 @@ def run_pipeline(no_self=False):
 
 
 if __name__ == "__main__":
+    setup_logging(f"run_advanced_discovery_{constants.ALGO}")
     parser = argparse.ArgumentParser(description="Run Advanced Discovery (ML) Benchmark")
     parser.add_argument("--no_self", action="store_true", help="Exclude rules with any shared cell types (strict no-self).")
     args = parser.parse_args()
-    
+
     run_pipeline(no_self=args.no_self)

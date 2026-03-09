@@ -4,7 +4,7 @@
     - full_run for the prod run (all data), debug_run for debug data (fraction of the data. you can find the flag in constants.py)
     - results/<run_type>/<algo>/data/ and /plots/ — algo is "fpgrowth" or "weighted_fpgrowth"
 * algos/ - mining algorithm implementations (fpgrowth.py, weighted_fpgrowth.py). each exposes a run() entry point
-* utils/ - shared utilities: spatial.py (neighborhoods), rules.py (filtering), stats.py (permutation test), config_validation.py
+* utils/ - shared utilities: spatial.py (neighborhoods), rules.py (filtering), stats.py (permutation test), config_validation.py, logging_setup.py - pay attention to use them if possible
 * data_explorations - scripts for exploring the data
 * results_explorations - some script for first exploration of the results
 * visualization - scripts for creating plots from the result data

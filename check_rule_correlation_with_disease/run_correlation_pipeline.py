@@ -18,6 +18,7 @@ import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
+from utils.logging_setup import setup_logging
 from data_exploration.check_data_bias import load_stratified_biopsies
 from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE, TARGETS, filter_viable_stratum
 
@@ -103,6 +104,9 @@ if __name__ == "__main__":
 
     # Ensure relative paths (e.g. in load_stratified_biopsies) resolve from project root
     os.chdir(PROJECT_ROOT)
+
+    if not args.dry_run:
+        setup_logging(f"run_correlation_pipeline_{constants.ALGO}")
 
     if args.dry_run:
         run_dry_run()

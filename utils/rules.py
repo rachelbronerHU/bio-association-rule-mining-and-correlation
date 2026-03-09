@@ -102,9 +102,23 @@ def filter_redundant_rules(rules, config):
             for j in range(i):
                 r_simple = rows[j]
                 if r_simple.ant_frozen < r_complex.ant_frozen:
-                    if r_complex.lift <= (r_simple.lift * threshold_factor):
-                        indices_to_drop.add(r_complex.Index)
-                        break
+                    is_neg_simple = r_simple.lift < 1.0
+                    is_neg_complex = r_complex.lift < 1.0
+                    if is_neg_simple != is_neg_complex:
+                        # Positive and negative rules are not comparable
+                        continue
+                    if is_neg_complex:
+                        # Negative rules: lower lift = stronger anti-association.
+                        # Complex is redundant if it is not sufficiently more negative.
+                        if r_complex.lift >= r_simple.lift / threshold_factor:
+                            indices_to_drop.add(r_complex.Index)
+                            break
+                    else:
+                        # Positive rules: higher lift = stronger association.
+                        # Complex is redundant if it is not sufficiently higher.
+                        if r_complex.lift <= r_simple.lift * threshold_factor:
+                            indices_to_drop.add(r_complex.Index)
+                            break
 
     count_removed = len(indices_to_drop)
     filtered_rules = rules.drop(index=list(indices_to_drop)).drop(columns=["ant_frozen"])

@@ -90,13 +90,16 @@ def get_neighborhoods(coords, method, config):
     elif method == "GRID":
         size = config["GRID_WINDOW_SIZE"]
 
+        x_min, y_min = coords[:, 0].min(), coords[:, 1].min()
         x_max, y_max = coords[:, 0].max(), coords[:, 1].max()
-        x_steps = int(x_max / size) + 1
-        y_steps = int(y_max / size) + 1
+        # Start grid at x_min/y_min, not 0 — handles negative coordinates and
+        # avoids iterating empty tiles when coordinates are far from the origin.
+        x_steps = int((x_max - x_min) / size) + 1
+        y_steps = int((y_max - y_min) / size) + 1
 
         for i in range(x_steps):
             for j in range(y_steps):
-                x_s, y_s = i * size, j * size
+                x_s, y_s = x_min + i * size, y_min + j * size
                 x_e, y_e = x_s + size, y_s + size
                 mask = (coords[:, 0] >= x_s) & (coords[:, 0] < x_e) & \
                        (coords[:, 1] >= y_s) & (coords[:, 1] < y_e)

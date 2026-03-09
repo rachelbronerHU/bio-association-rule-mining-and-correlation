@@ -135,5 +135,7 @@ def filter_redundant_rules(rules, config):
 def filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence):
     min_conv = config.get("MIN_CONVICTION", 1.0)
     is_positive = (lift >= config["MIN_LIFT"]) & (leverage >= config["MIN_LEVERAGE"]) & (conviction >= min_conv) & (confidence >= config["MIN_CONFIDENCE"])
-    is_negative = (lift <= config["MAX_NEGATIVE_LIFT"])
+    # Mirror the leverage gate: the co-occurrence deficit must be at least as large
+    # as the surplus required for positive rules. Lift alone can flag weak/trivial repulsions.
+    is_negative = (lift <= config["MAX_NEGATIVE_LIFT"]) & (leverage <= -abs(config["MIN_LEVERAGE"]))
     return is_positive | is_negative

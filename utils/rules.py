@@ -38,6 +38,10 @@ def filter_rules_by_rare_cells(rules, cell_type_counts, config, method):
     """
     Filter out rules where any cell type is rare (below threshold).
 
+    Threshold = max(MIN_CELL_TYPE_FREQUENCY, MIN_CELL_TYPE_PERCENTAGE * total_cells).
+    MIN_CELL_TYPE_FREQUENCY: absolute cell count floor (default 5).
+    MIN_CELL_TYPE_PERCENTAGE: fraction of all cells (0–1, default 0 = disabled).
+
     Returns:
         filtered_rules: DataFrame of rules without rare cell types
         n_filtered: Number of rules removed
@@ -47,7 +51,9 @@ def filter_rules_by_rare_cells(rules, cell_type_counts, config, method):
 
     n_cells = sum(cell_type_counts.values())
     min_absolute = config.get("MIN_CELL_TYPE_FREQUENCY", 5)
-    min_percentage = config.get("MIN_SUPPORT", 0.01)
+    # MIN_CELL_TYPE_PERCENTAGE is a fraction of total cells (0–1), distinct from
+    # MIN_SUPPORT which is a fraction of transactions. Defaults to 0 (disabled).
+    min_percentage = config.get("MIN_CELL_TYPE_PERCENTAGE", 0)
     threshold = max(min_absolute, int(min_percentage * n_cells))
 
     def get_cell_types_from_rule(row):

@@ -76,7 +76,7 @@ def _precompute_geometry(neighborhoods, coords, config):
     cache = []
 
     for center_i, idxs in neighborhoods:
-        if len(idxs) < MIN_CELLS:
+        if len(idxs) < config.get("MIN_CELLS_PER_PATCH", MIN_CELLS):
             continue
 
         neighbor_idxs = np.array([n for n in idxs if n != center_i])

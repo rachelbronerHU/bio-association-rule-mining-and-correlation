@@ -27,7 +27,7 @@ def run(neighborhoods, coords, cell_types, config, method):
         validate_fn: Callable validate_fn(rules_df) -> rules_df with p_value columns
         stats:       Dict with transaction statistics (sizes, cell_counts, orig, kept)
     """
-    trans, stats = _build_transactions(neighborhoods, cell_types, method)
+    trans, stats = _build_transactions(neighborhoods, cell_types, method, config)
     mined_rules = _mine(trans, config, method)
 
     def validate_fn(rules_df):
@@ -40,7 +40,7 @@ def run(neighborhoods, coords, cell_types, config, method):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_transactions(neighborhoods, cell_types, method):
+def _build_transactions(neighborhoods, cell_types, method, config):
     """
     Converts neighborhoods into binary transactions (list of item lists).
 
@@ -48,6 +48,7 @@ def _build_transactions(neighborhoods, cell_types, method):
         transactions: List[List[str]]
         stats:        Dict with sizes, cell_counts, orig, kept
     """
+    min_cells = config.get("MIN_CELLS_PER_PATCH", MIN_CELLS)
     transactions = []
     sizes = []
     cell_counts = []
@@ -56,7 +57,7 @@ def _build_transactions(neighborhoods, cell_types, method):
     for item in neighborhoods:
         if method in ["CN", "KNN_R"]:
             center_i, idxs = item
-            if len(idxs) < MIN_CELLS:
+            if len(idxs) < min_cells:
                 continue
             raw_types = cell_types[idxs]
             if is_dominated(raw_types):
@@ -66,7 +67,7 @@ def _build_transactions(neighborhoods, cell_types, method):
             trans = [center] + list(set(neighbors))
         else:
             idxs = item
-            if len(idxs) < MIN_CELLS:
+            if len(idxs) < min_cells:
                 continue
             raw_types = cell_types[idxs]
             if is_dominated(raw_types):
@@ -184,7 +185,7 @@ def _validate_rules(neighborhoods, cell_types, rules_df, config, method):
     n_perms = config["N_PERMUTATIONS"]
 
     def build_fn(shuffled_types):
-        trans, _ = _build_transactions(neighborhoods, shuffled_types, method)
+        trans, _ = _build_transactions(neighborhoods, shuffled_types, method, config)
         return [set(t) for t in trans]
 
     def check_fn(rule_row, transaction_sets):

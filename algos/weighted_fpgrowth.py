@@ -378,7 +378,7 @@ def _build_weight_matrix(transactions):
     Converts a list of weighted transaction dicts into a dense NumPy matrix.
 
     Returns:
-        W:        float32 array of shape (N_transactions, N_unique_items)
+        W:        float64 array of shape (N_transactions, N_unique_items)
                   W[t, j] = weight of item j in transaction t (0 if absent)
         item_idx: dict mapping item label -> column index in W
     """

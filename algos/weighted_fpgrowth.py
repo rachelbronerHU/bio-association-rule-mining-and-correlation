@@ -241,6 +241,15 @@ def _mine(transactions, config):
     if not itemsets_raw:
         return pd.DataFrame()
 
+    # Drop itemsets that are too large to produce any valid rule before the
+    # expensive O(N) per-itemset recomputation. MAX_RULE_LENGTH == itemset size
+    # because len(antecedents) + len(consequents) always equals the source itemset size.
+    max_itemset_size = config["MAX_RULE_LENGTH"]
+    itemsets_raw = [(fs, w) for fs, w in itemsets_raw if len(fs) <= max_itemset_size]
+
+    if not itemsets_raw:
+        return pd.DataFrame()
+
     # Recompute support using min-based semantics: the FP-tree's accumulated
     # weights are an upper bound on min-based support, not the exact value.
     # Any itemset whose true min-based support falls below the threshold is discarded.
@@ -269,6 +278,8 @@ def _mine_tree(tree, min_support, prefix):
     frequent = []
 
     for item in sorted(tree.header.keys(), key=lambda x: tree.header[x][0]):
+        # Callers invoke prune() before _mine_tree so this is typically always True,
+        # but kept as a defensive guard for direct callers that skip prune().
         if tree.header[item][0] < min_support:
             continue
 
@@ -350,7 +361,6 @@ def _itemsets_to_rules(itemsets, support_map, config):
     rules = pd.DataFrame(rows)
     rules["len_ant"] = rules["antecedents"].apply(len)
     rules["len_con"] = rules["consequents"].apply(len)
-    rules = rules[(rules["len_ant"] + rules["len_con"]) <= config["MAX_RULE_LENGTH"]]
 
     # weighted_fpgrowth always uses CN/KNN_R: antecedent must contain center cell
     rules = rules[rules["antecedents"].apply(lambda x: any("_CENTER" in i for i in x))]

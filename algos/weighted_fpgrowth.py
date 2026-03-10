@@ -332,8 +332,9 @@ def _itemsets_to_rules(itemsets, support_map, config):
                 s_ant = support_map.get(ant, 0)
                 s_con = support_map.get(con, 0)
 
-                if s_ant == 0 or s_con == 0 or s_both < config["MIN_SUPPORT"]:
-                    continue
+                assert s_ant > 0 and s_con > 0, (
+                    f"Downward closure violated: subset support is 0 for itemset {itemset}"
+                )
 
                 confidence = s_both / s_ant
                 lift = confidence / s_con

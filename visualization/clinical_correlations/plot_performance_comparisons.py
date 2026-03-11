@@ -14,6 +14,9 @@ import constants
 from data_exploration.check_data_bias import load_stratified_biopsies
 from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE, filter_viable_stratum
 
+from data_exploration.check_data_bias import load_stratified_biopsies
+from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE, filter_viable_stratum
+
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("ComparisonPlotter")

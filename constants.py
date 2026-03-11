@@ -7,7 +7,7 @@ SAVE_RAW_RULES = True
 
 # Algorithm Selection: "fpgrowth" | "weighted_fpgrowth"
 # Change _DEFAULT_ALGO to switch default. Override per-run via: ALGO=weighted_fpgrowth python ...
-_DEFAULT_ALGO = "fpgrowth"
+_DEFAULT_ALGO = "weighted_fpgrowth"
 ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
 
 # Path Configuration
@@ -67,6 +67,7 @@ if ALGO == "weighted_fpgrowth":
         "N_PERMUTATIONS": 5 if DEBUG else 1000,
         "N_TOP_RULES": 100 if DEBUG else 2000,
         "MIN_CELL_TYPE_FREQUENCY": 5,
+        "MIN_CELL_TYPE_PERCENTAGE": 0.01,
     }
 else:
     METHODS = ["BAG", "CN", "KNN_R"]
@@ -88,4 +89,5 @@ else:
         "N_PERMUTATIONS": 5 if DEBUG else 1000,
         "N_TOP_RULES": 100 if DEBUG else 2000,
         "MIN_CELL_TYPE_FREQUENCY": 5,
+        "MIN_CELL_TYPE_PERCENTAGE": 0.01,
     }

@@ -301,6 +301,12 @@ def visualize_method(method_name, cell_df, top_n, exclude_self_loops=False, excl
         
         rules_df = rules_df[~rules_df.apply(is_self_rule, axis=1)]
 
+    # 3. Filter by Significance (FDR or P-Value < 0.05)
+    if 'FDR' in rules_df.columns:
+        rules_df = rules_df[rules_df['FDR'] < 0.05]
+    elif 'P_Value' in rules_df.columns:
+        rules_df = rules_df[rules_df['P_Value'] < 0.05]
+
     # Sort by Lift descending
     rules_df = rules_df.sort_values(by="Lift", ascending=False)
     

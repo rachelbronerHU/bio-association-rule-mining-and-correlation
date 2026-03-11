@@ -11,6 +11,9 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))) # Adjust path for constants.py
 import constants
 
+from data_exploration.check_data_bias import load_stratified_biopsies
+from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE, filter_viable_stratum
+
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("ComparisonPlotter")
@@ -94,35 +97,77 @@ def generate_comparison_plots(no_self=False):
     # --- Plot 1: Overall Performance Comparison (Grouped Bar Charts with Models) ---
     logger.info("Generating Grouped Bar Charts for model-wise performance comparison...")
 
+    try:
+        df_biopsies = load_stratified_biopsies()
+    except Exception as e:
+        logger.error(f"Failed to load stratified biopsies: {e}")
+        df_biopsies = pd.DataFrame()
+
+    group_counts = {}
+
+    def get_group_count(organ, target):
+        if (organ, target) in group_counts:
+            return group_counts[(organ, target)]
+        
+        if df_biopsies.empty:
+            return "?"
+            
+        df_organ = df_biopsies[df_biopsies["Organ"] == organ]
+        include_controls = CONTROLS_ELIGIBLE.get(target, True)
+        df_t = df_organ if include_controls else df_organ[~df_organ["Is_Control"]]
+        df_filtered, note = filter_viable_stratum(df_t, target)
+        
+        if df_filtered is not None:
+            n_groups = df_filtered[df_filtered[target].notna()][target].nunique()
+            group_counts[(organ, target)] = n_groups
+        else:
+            group_counts[(organ, target)] = "?"
+        return group_counts[(organ, target)]
+
+    df_combined["Group_Count"] = df_combined.apply(lambda row: get_group_count(row["Organ"], row["Target"]), axis=1)
+    
+    def get_target_groups_str(target):
+        counts = set(df_combined[df_combined["Target"] == target]["Group_Count"].astype(str))
+        counts = {c for c in counts if c != "?"}
+        if len(counts) == 1:
+            return f"{list(counts)[0]} classes"
+        elif len(counts) > 1:
+            return f"classes: {','.join(sorted(counts))}"
+        return "unknown classes"
+
+    df_combined["Method_Target"] = df_combined.apply(lambda row: f"{row['Method']} | {row['Target']} ({get_target_groups_str(row['Target'])})", axis=1)
+
     # Using catplot for easier faceting and consistent plot styling across facets
     g = sns.catplot(
         data=df_combined, 
-        x="Organ_Features", 
+        x="Organ_Features", # Group count removed from x-axis 
         y="Score", 
         hue="Model",      # Model (Random Forest, XGBoost, Lasso Regression, Simple Stats) as hue
-        col="Method",     # Methods as columns
-        row="Target",     # Targets as rows
+        col="Method_Target", # Combined Method and Target
+        col_wrap=1,       # One plot per row
         kind="bar",       # Bar plot
-        height=3.5, aspect=1.8,  # Increased figure size for better readability
+        height=4.0, aspect=3.0,  # Full width per plot
         palette="tab10",  # Color palette for models
         errorbar=None,
-        sharey=True,       # Share Y-axis across plots
+        sharey=False,      # Don't share Y-axis
         sharex=False,      # Ensure x-axis labels appear for every subplot
-        # legend_out=True # Default is True, puts legend outside
     )
     
     g.set_axis_labels("Organ | Feature Configuration", "Score") # More descriptive X-axis label
-    g.set_titles("{col_name} | {row_name}")
+    g.set_titles("{col_name}")
     g.set_xticklabels(rotation=45, ha="right")
-    
-    # Determine safe Y limit
-    y_max = df_combined["Score"].max()
-    if pd.isna(y_max) or y_max <= 0:
-        y_max = 1.0
-    g.set(ylim=(0, y_max * 1.1)) 
     
     # Add annotations to bars
     for ax in g.axes.flat:
+        # Determine safe Y limit per axes since sharey=False
+        y_max = 0
+        for container in ax.containers:
+            for bar in container:
+                y_max = max(y_max, bar.get_height())
+        if pd.isna(y_max) or y_max <= 0:
+            y_max = 1.0
+        ax.set_ylim(0, y_max * 1.15)
+        
         for container in ax.containers:
             labels = []
             for bar in container:
@@ -131,20 +176,54 @@ def generate_comparison_plots(no_self=False):
                     labels.append(f'{height:.2f}')
                 else:
                     labels.append("")
-            ax.bar_label(container, labels=labels, label_type='edge', fontsize=7, padding=2)
+            ax.bar_label(container, labels=labels, label_type='edge', fontsize=8, padding=2)
+
+    def get_relevant_rules_subtitle():
+        df_fovs = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
+        df_biopsies_meta = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
+        df_fovs['Organ'] = df_fovs['Patient'].map(df_biopsies_meta.set_index('Biopsy_ID')['Localization'])
+        df_fovs['Organ'] = df_fovs['Organ'].fillna(df_fovs['Cohort'].apply(lambda x: 'Colon' if 'Colon' in str(x) else ('Duodenum' if 'Duodenum' in str(x) else 'Unknown')))
+        fov_organ_map = df_fovs.set_index('FOV')['Organ']
+
+        base_input_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
+        
+        rules_info = []
+        for method in constants.METHODS:
+            input_file = os.path.join(base_input_dir, f"results_{method}.csv")
+            if not os.path.exists(input_file): continue
+            df_rules = pd.read_csv(input_file)
+            if "Rule" not in df_rules.columns:
+                df_rules["Rule"] = df_rules["Antecedents"] + " -> " + df_rules["Consequents"]
+            
+            if no_self:
+                from check_rule_correlation_with_disease.stratified_utils import parse_rule_items
+                def has_overlap(row):
+                    return not parse_rule_items(row['Antecedents']).isdisjoint(parse_rule_items(row['Consequents']))
+                df_rules = df_rules[~df_rules.apply(has_overlap, axis=1)]
+                
+            if "FDR" in df_rules.columns:
+                df_rules = df_rules[df_rules["FDR"] < 0.05]
+                
+            df_rules['Organ'] = df_rules['FOV'].map(fov_organ_map)
+            counts = df_rules.groupby('Organ')['Rule'].nunique()
+            counts_str = ", ".join([f"{org}: {c}" for org, c in counts.items() if org != 'Unknown'])
+            rules_info.append(f"{method} [{counts_str}]")
+            
+        return "Relevant Rules (FDR < 0.05): " + " | ".join(rules_info)
 
     suffix_title = "(NO SELF)" if no_self else "(STANDARD)"
-    g.fig.suptitle(f"Model-wise Performance Comparison {suffix_title}", y=1.02) 
+    rules_subtitle = get_relevant_rules_subtitle()
+    g.fig.suptitle(f"Model-wise Performance Comparison {suffix_title}\n{rules_subtitle}", y=1.05, fontsize=11) 
     
     # Move the auto-generated legend to top-right
-    sns.move_legend(g, "upper right", bbox_to_anchor=(1, 1))
+    sns.move_legend(g, "upper right", bbox_to_anchor=(1, 1.05))
 
-    plt.tight_layout(rect=[0, 0, 0.85, 0.98]) 
+    plt.tight_layout() 
     
     mode_str = "_NO_SELF" if no_self else ""
     plot_filename_models_bars = os.path.join(PROJECT_ROOT, constants.RESULTS_CLINICAL_CORRELATION_PLOTS_DIR, f"performance_model_wise_bars{mode_str}.png")
     
-    plt.savefig(plot_filename_models_bars)
+    plt.savefig(plot_filename_models_bars, bbox_inches='tight')
     plt.close(g.fig) 
     logger.info(f"Model-wise Grouped Bar Charts saved to {plot_filename_models_bars}")
 

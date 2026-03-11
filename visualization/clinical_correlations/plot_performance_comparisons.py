@@ -148,20 +148,34 @@ def generate_comparison_plots(no_self=False):
         hue="Model",      # Model (Random Forest, XGBoost, Lasso Regression, Simple Stats) as hue
         col="Method_Target", # Combined Method and Target
         col_wrap=1,       # One plot per row
+        col="Method_Target", # Combined Method and Target
+        col_wrap=1,       # One plot per row
         kind="bar",       # Bar plot
+        height=4.0, aspect=3.0,  # Full width per plot
         height=4.0, aspect=3.0,  # Full width per plot
         palette="tab10",  # Color palette for models
         errorbar=None,
+        sharey=False,      # Don't share Y-axis
         sharey=False,      # Don't share Y-axis
         sharex=False,      # Ensure x-axis labels appear for every subplot
     )
     
     g.set_axis_labels("Organ | Feature Configuration", "Score") # More descriptive X-axis label
     g.set_titles("{col_name}")
+    g.set_titles("{col_name}")
     g.set_xticklabels(rotation=45, ha="right")
     
     # Add annotations to bars
     for ax in g.axes.flat:
+        # Determine safe Y limit per axes since sharey=False
+        y_max = 0
+        for container in ax.containers:
+            for bar in container:
+                y_max = max(y_max, bar.get_height())
+        if pd.isna(y_max) or y_max <= 0:
+            y_max = 1.0
+        ax.set_ylim(0, y_max * 1.15)
+        
         # Determine safe Y limit per axes since sharey=False
         y_max = 0
         for container in ax.containers:

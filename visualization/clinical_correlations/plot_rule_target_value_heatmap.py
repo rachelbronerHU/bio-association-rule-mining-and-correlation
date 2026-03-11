@@ -10,6 +10,8 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))) # Adjust path for constants.py
 import constants
 
+from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE
+
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("ClinicalCorrelationPlotter")
@@ -157,15 +159,6 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             continue
 
         # 4. Load Raw Data (filtered) for Heatmap Values
-        # Note: We load from the directory corresponding to the active mode (Standard or No Self)
-        # However, load_and_prep_data expects a base_input_dir.
-        # Since we have unified directories for data, we pass 'ml_data_dir' or 'simple_data_dir' ? 
-        # No, 'load_and_prep_data' looks for 'results_{method}.csv'.
-        # In the new design, 'results_{method}_{target}.csv' are saved in the data dir.
-        # But 'load_and_prep_data' in the original script looked for 'results_{method}.csv' in constants.RESULTS_DATA_DIR.
-        # The new pipeline saves subsetted raw data ('results_METHOD_TARGET.csv') in the OUTPUT dir.
-        # So we should look for the TARGET-SPECIFIC raw data file in the score_file_dir.
-        
         # Construct target-specific results filename (includes organ)
         results_filename = f"results_{method}_{organ_for_filename}_{target_for_filename}{config_suffix}.csv"
         
@@ -177,12 +170,7 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             if "Rule" not in df_raw.columns:
                 df_raw["Rule"] = df_raw["Antecedents"] + " -> " + df_raw["Consequents"]
         else:
-            # Fallback to general results file if specific one is missing (might be risky if filtering differs)
-            # But in NO_SELF mode, general file isn't pre-filtered? 
-            # Actually, the pipeline saves 'results_METHOD_TARGET.csv'. We should rely on that.
             logger.warning(f"Target-specific results file not found: {target_results_path}. Trying generic...")
-            # If we are in NO_SELF mode, we MUST NOT use the generic file from standard dir.
-            # We should probably fail if specific file is missing in NO_SELF mode.
             if no_self:
                 logger.error("In NO_SELF mode, target-specific filtered data is required but missing.")
                 continue
@@ -197,6 +185,21 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             continue
             
         unique_target_values = sorted(df_raw[target].dropna().unique().tolist())
+        
+        # Dynamic Control Filtering
+        if not CONTROLS_ELIGIBLE.get(target, True):
+            filtered_vals = []
+            for v in unique_target_values:
+                if str(v).lower() == "control":
+                    continue
+                try:
+                    if float(v) == 0.0:
+                        continue
+                except ValueError:
+                    pass
+                filtered_vals.append(v)
+            unique_target_values = filtered_vals
+
         if not unique_target_values:
             continue
 
@@ -216,7 +219,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                 else:
                     heatmap_data.loc[rule, target_value] = np.nan 
 
-        heatmap_data = heatmap_data.astype(float).fillna(0)
+        # Cast to float, but leave NaNs intact (no .fillna(0))
+        heatmap_data = heatmap_data.astype(float)
 
         # 6. Generate Layout
         fig_width = max(16, len(unique_target_values) * 1.5 + 6)
@@ -236,7 +240,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                     linewidths=.5, linecolor='gray',
                     cbar_ax=ax_cbar, cbar_kws={'label': 'Mean Lift'}, ax=ax_heatmap)
         
-        plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}"
+        suffix_title = " (NO SELF)" if no_self else ""
+        plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}{suffix_title}"
         ax_heatmap.set_title(plot_title, fontsize=12, pad=10)
         ax_heatmap.set_xlabel(f"{target} Value")
         ax_heatmap.set_ylabel("Rule")
@@ -289,7 +294,7 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         ax_violin.spines['top'].set_visible(False)
         ax_violin.spines['bottom'].set_visible(True)
         
-        ax_violin.set_title("Lift Distribution")
+        ax_violin.set_title("Distribution of FOV-level Lifts")
         ax_violin.set_xlabel("Lift")
         
         for y in range(len(top_rules) + 1):

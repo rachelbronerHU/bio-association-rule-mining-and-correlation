@@ -12,6 +12,8 @@ import constants
 
 from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE
 
+from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE
+
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("ClinicalCorrelationPlotter")
@@ -190,6 +192,21 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                 filtered_vals.append(v)
             unique_target_values = filtered_vals
 
+        
+        # Dynamic Control Filtering
+        if not CONTROLS_ELIGIBLE.get(target, True):
+            filtered_vals = []
+            for v in unique_target_values:
+                if str(v).lower() == "control":
+                    continue
+                try:
+                    if float(v) == 0.0:
+                        continue
+                except ValueError:
+                    pass
+                filtered_vals.append(v)
+            unique_target_values = filtered_vals
+
         if not unique_target_values:
             continue
 
@@ -209,6 +226,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                 else:
                     heatmap_data.loc[rule, target_value] = np.nan 
 
+        # Cast to float, but leave NaNs intact (no .fillna(0))
+        heatmap_data = heatmap_data.astype(float)
         # Cast to float, but leave NaNs intact (no .fillna(0))
         heatmap_data = heatmap_data.astype(float)
 
@@ -232,6 +251,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                     cbar_ax=ax_cbar, cbar_kws={'label': 'Mean Lift'}, ax=ax_heatmap,
                     mask=heatmap_data.isnull())
         
+        suffix_title = " (NO SELF)" if no_self else ""
+        plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}{suffix_title}"
         suffix_title = " (NO SELF)" if no_self else ""
         plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}{suffix_title}"
         ax_heatmap.set_title(plot_title, fontsize=12, pad=10)
@@ -286,6 +307,7 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         ax_violin.spines['top'].set_visible(False)
         ax_violin.spines['bottom'].set_visible(True)
         
+        ax_violin.set_title("Distribution of FOV-level Lifts")
         ax_violin.set_title("Distribution of FOV-level Lifts")
         ax_violin.set_xlabel("Lift")
         

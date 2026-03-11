@@ -27,7 +27,7 @@ def load_and_prep_data(method, base_input_dir):
     input_file = os.path.join(base_input_dir, f"results_{method}.csv")
     if not os.path.exists(input_file):
         logger.error(f"Input file not found: {input_file}")
-        return None, None
+        return None
     
     df = pd.read_csv(input_file)
     if "Rule" not in df.columns:
@@ -160,17 +160,31 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             logger.warning(f"No top rules found for best strategy {i+1}.")
             continue
 
-        # 4. Load Base Raw Data for Heatmap Values and restrict to selected rules.
-        # This avoids brittle target-specific file dependencies and keeps data lookup consistent.
-        df_raw = load_and_prep_data(method, os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR))
+        # 4. Load Raw Data for Heatmap Values.
+        # Prefer strategy-specific files (when available) and gracefully fall back to base results.
+        results_filename = f"results_{method}_{organ_for_filename}_{target_for_filename}{config_suffix}.csv"
+        target_results_path = os.path.join(score_file_dir, results_filename)
+
+        if os.path.exists(target_results_path):
+            df_raw = pd.read_csv(target_results_path)
+            if "Rule" not in df_raw.columns:
+                df_raw["Rule"] = df_raw["Antecedents"] + " -> " + df_raw["Consequents"]
+        else:
+            logger.warning(f"Target-specific results file not found: {target_results_path}. Falling back to base results.")
+            df_raw = load_and_prep_data(method, os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR))
 
         if df_raw is None:
             continue
 
-        df_raw = df_raw[df_raw["Rule"].isin(top_rules)].copy()
-        if df_raw.empty:
-            logger.warning(f"No raw rows found for selected top rules (strategy {i+1}).")
-            continue
+        # Restrict to selected rules when possible; if formatting differs, continue with full data.
+        filtered_df_raw = df_raw[df_raw["Rule"].isin(top_rules)].copy()
+        if not filtered_df_raw.empty:
+            df_raw = filtered_df_raw
+        else:
+            logger.warning(
+                f"No exact Rule-string overlap for selected top rules (strategy {i+1}); "
+                "continuing with unfiltered raw data."
+            )
         
         if target not in df_raw.columns or df_raw[target].isna().all():
             logger.warning(f"No raw rows found for selected target (strategy {i+1}).")

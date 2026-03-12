@@ -400,7 +400,23 @@ def _run_logo_cv(rule_features, fov_metadata, organs, method):
                     is_classification
                 )
 
+                # Deduplicate feature counts: any top_k >= n_rules is identical to "All".
+                # Keep only distinct effective configs to avoid redundant computation and
+                # misleading duplicate bars in the visualisation.
+                effective_feature_counts = []
+                has_all = False
                 for top_k in FEATURE_COUNTS:
+                    if top_k is None or top_k >= n_rules:
+                        if not has_all:
+                            effective_feature_counts.append(None)  # normalise to "All"
+                            has_all = True
+                    else:
+                        effective_feature_counts.append(top_k)
+                skipped = set(FEATURE_COUNTS) - set(effective_feature_counts)
+                if skipped:
+                    logger.info(f"   [{organ} x {target}] Skipping redundant configs {skipped} (only {n_rules} rules available)")
+
+                for top_k in effective_feature_counts:
                     config_key = (organ, target, top_k)
                     fold_accumulators[config_key] = {
                         "meta": {"label_encoder": label_encoder, "is_classification": is_classification, "n_folds_completed": 0},
@@ -418,7 +434,7 @@ def _run_logo_cv(rule_features, fov_metadata, organs, method):
 
                     future = executor.submit(
                         _process_fold_task, target_rule_features, target_labels,
-                        train_idx, test_idx, fold_idx, task_label, is_classification, FEATURE_COUNTS
+                        train_idx, test_idx, fold_idx, task_label, is_classification, effective_feature_counts
                     )
                     fold_futures[future] = fold_key
 

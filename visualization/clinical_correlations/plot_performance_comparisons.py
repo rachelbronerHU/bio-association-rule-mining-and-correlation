@@ -23,6 +23,53 @@ logger = logging.getLogger("ComparisonPlotter")
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
+def _build_organ_rule_counts(no_self=False):
+    """
+    Returns {(method, organ): n_rules} — FDR-significant rules that actually
+    appear in each organ's FOVs (per-organ count, not global pool size).
+    """
+    try:
+        df_fovs = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
+        df_biopsies_meta = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
+        df_fovs["Organ"] = df_fovs["Patient"].map(df_biopsies_meta.set_index("Biopsy_ID")["Localization"])
+        df_fovs["Organ"] = df_fovs["Organ"].fillna(
+            df_fovs["Cohort"].apply(
+                lambda x: "Colon" if "Colon" in str(x) else ("Duodenum" if "Duodenum" in str(x) else None)
+            )
+        )
+        fov_organ_map = df_fovs.set_index("FOV")["Organ"].dropna()
+    except Exception as e:
+        logger.warning(f"Could not build organ rule counts: {e}")
+        return {}
+
+    base_input_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
+    counts = {}
+    for method in constants.METHODS:
+        input_file = os.path.join(base_input_dir, f"results_{method}.csv")
+        if not os.path.exists(input_file):
+            continue
+        df_rules = pd.read_csv(input_file)
+        if "Rule" not in df_rules.columns:
+            df_rules["Rule"] = df_rules["Antecedents"] + " -> " + df_rules["Consequents"]
+
+        if no_self:
+            from check_rule_correlation_with_disease.stratified_utils import parse_rule_items
+            def _has_overlap(row):
+                return not parse_rule_items(row["Antecedents"]).isdisjoint(parse_rule_items(row["Consequents"]))
+            df_rules = df_rules[~df_rules.apply(_has_overlap, axis=1)]
+
+        if "FDR" in df_rules.columns:
+            df_rules = df_rules[df_rules["FDR"] < 0.05]
+
+        df_rules["Organ"] = df_rules["FOV"].map(fov_organ_map)
+        for organ, grp in df_rules.groupby("Organ"):
+            if pd.isna(organ) or organ == "Unknown":
+                continue
+            counts[(method, str(organ))] = int(grp["Rule"].nunique())
+
+    return counts
+
+
 def load_and_merge_leaderboards(no_self=False):
     """
     Loads ML and Simple leaderboards from the appropriate directories based on no_self flag.
@@ -84,6 +131,25 @@ def load_and_merge_leaderboards(no_self=False):
     df_combined["Num_Features_Str"] = df_combined["Num_Features"].apply(lambda x: "All" if pd.isna(x) or x == "All" else f"Top{int(x)}")
     df_combined["Num_Features_Sort"] = df_combined["Num_Features"].apply(lambda x: -1 if pd.isna(x) or x == "All" else int(x))
     df_combined = df_combined.sort_values(by=["Organ", "Method", "Target", "Num_Features_Sort", "Model"]).drop(columns=["Num_Features_Sort"])
+
+    # Attach per-organ rule counts so the subtitle shows why Top50/All produce identical
+    # scores (both use the same N organ-specific rules when fewer than 50 exist).
+    # N_Rules = min(top_k, n_organ_rules) — the actual number of features the model could use.
+    organ_rule_counts = _build_organ_rule_counts(no_self=no_self)
+
+    def _lookup_n_rules(row):
+        n_organ = organ_rule_counts.get((str(row["Method"]), str(row["Organ"])))
+        if n_organ is None:
+            return None
+        top_k = row["Num_Features"]
+        if pd.isna(top_k) or top_k == "All":
+            return n_organ
+        return min(int(top_k), n_organ)
+
+    config_cols = ["Method", "Organ", "Target", "Num_Features", "Approach"]
+    unique_configs = df_combined[config_cols].drop_duplicates()
+    unique_configs["N_Rules"] = unique_configs.apply(_lookup_n_rules, axis=1)
+    df_combined = df_combined.merge(unique_configs, on=config_cols, how="left")
 
     return df_combined
 
@@ -181,38 +247,33 @@ def generate_comparison_plots(no_self=False):
                     labels.append("")
             ax.bar_label(container, labels=labels, label_type='edge', fontsize=8, padding=2)
 
-    def get_relevant_rules_subtitle():
-        df_fovs = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
-        df_biopsies_meta = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
-        df_fovs['Organ'] = df_fovs['Patient'].map(df_biopsies_meta.set_index('Biopsy_ID')['Localization'])
-        df_fovs['Organ'] = df_fovs['Organ'].fillna(df_fovs['Cohort'].apply(lambda x: 'Colon' if 'Colon' in str(x) else ('Duodenum' if 'Duodenum' in str(x) else 'Unknown')))
-        fov_organ_map = df_fovs.set_index('FOV')['Organ']
+        # Subtitle: show the actual number of rules used per x-group so it is immediately
+        # clear when Top50/Top100/All are identical because fewer rules exist than the cutoff.
+        ax_method_target = ax.get_title()
+        x_labels = [t.get_text() for t in ax.get_xticklabels() if t.get_text()]
+        if x_labels:
+            rule_count_parts = []
+            for lbl in x_labels:
+                # lbl is "Organ | TopK" or "Organ | All" — look it up in df_combined
+                match = df_combined[
+                    (df_combined["Method_Target"] == ax_method_target) &
+                    (df_combined["Organ_Features"] == lbl)
+                ]["N_Rules"]
+                n = int(match.iloc[0]) if not match.empty and pd.notna(match.iloc[0]) else "?"
+                rule_count_parts.append(f"{lbl}: {n}r")
+            ax.set_title(
+                f"{ax_method_target}\n"
+                + "Rules used — " + " | ".join(rule_count_parts),
+                fontsize=9
+            )
 
-        base_input_dir = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR)
-        
-        rules_info = []
-        for method in constants.METHODS:
-            input_file = os.path.join(base_input_dir, f"results_{method}.csv")
-            if not os.path.exists(input_file): continue
-            df_rules = pd.read_csv(input_file)
-            if "Rule" not in df_rules.columns:
-                df_rules["Rule"] = df_rules["Antecedents"] + " -> " + df_rules["Consequents"]
-            
-            if no_self:
-                from check_rule_correlation_with_disease.stratified_utils import parse_rule_items
-                def has_overlap(row):
-                    return not parse_rule_items(row['Antecedents']).isdisjoint(parse_rule_items(row['Consequents']))
-                df_rules = df_rules[~df_rules.apply(has_overlap, axis=1)]
-                
-            if "FDR" in df_rules.columns:
-                df_rules = df_rules[df_rules["FDR"] < 0.05]
-                
-            df_rules['Organ'] = df_rules['FOV'].map(fov_organ_map)
-            counts = df_rules.groupby('Organ')['Rule'].nunique()
-            counts_str = ", ".join([f"{org}: {c}" for org, c in counts.items() if org != 'Unknown'])
-            rules_info.append(f"{method} [{counts_str}]")
-            
-        return "Relevant Rules (FDR < 0.05): " + " | ".join(rules_info)
+    def get_relevant_rules_subtitle():
+        counts = _build_organ_rule_counts(no_self=no_self)
+        by_method = {}
+        for (method, organ), n in counts.items():
+            by_method.setdefault(method, []).append(f"{organ}: {n}")
+        parts = [f"{m} [{', '.join(sorted(organs))}]" for m, organs in sorted(by_method.items())]
+        return "Relevant Rules (FDR < 0.05): " + " | ".join(parts)
 
     suffix_title = "(NO SELF)" if no_self else "(STANDARD)"
     rules_subtitle = get_relevant_rules_subtitle()

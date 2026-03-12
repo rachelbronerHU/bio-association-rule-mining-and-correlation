@@ -132,121 +132,159 @@ def plot_tissue_backgrounds(ax, df_fov, alpha=0.15):
             # Skip if convex hull fails (e.g., collinear points)
             continue
 
-def plot_fov_full(ax, df_fov, color_map, show_tissue_background=False):
+def get_constant_scatter_size(ax, fig, cell_diam_um=10.0, fov_size_um=400.0, fov_size_px=1024.0):
+    """
+    Calculates the exact Matplotlib 's' parameter to render a cell of constant biological diameter.
+    """
+    fig.canvas.draw()
+    bbox = ax.get_window_extent()
+    ax_height_display_px = bbox.height
+    
+    # 1. Biological size to image pixels
+    px_per_um = fov_size_px / fov_size_um
+    cell_diam_px = cell_diam_um * px_per_um
+    
+    # 2. Image pixels to display points
+    y_min, y_max = ax.get_ylim()
+    data_height = abs(y_max - y_min)
+    if data_height == 0: data_height = fov_size_px
+        
+    display_px_per_data_px = ax_height_display_px / data_height
+    pts_per_data_px = display_px_per_data_px * (72.0 / fig.dpi)
+    
+    cell_diam_pts = cell_diam_px * pts_per_data_px
+    
+    # 3. Return Area in points^2
+    return cell_diam_pts ** 2
+
+
+def plot_fov_full(ax, fig, df_fov, color_map, show_tissue_background=False):
     """Plots the full FOV with all cell types colored."""
     
-    # Plot tissue backgrounds first (if enabled)
     if show_tissue_background:
-        plot_tissue_backgrounds(ax, df_fov, alpha=0.5)  # Increased from 0.35 to 0.5
+        plot_tissue_backgrounds(ax, df_fov, alpha=0.5)
     
-    # Plot cells
+    # Determine FOV size from data limits to establish scale
+    fov_max_x = df_fov['x'].max() if df_fov['x'].max() > 0 else 1024.0
+    fov_max_y = df_fov['y'].max() if df_fov['y'].max() > 0 else 1024.0
+    ax.set_xlim(0, fov_max_x)
+    ax.set_ylim(fov_max_y, 0) # Inverted Y-axis
+    ax.set_aspect('equal', adjustable='box')
+    
+    # Calculate a single, constant cell size for a 10um cell
+    # (Assuming standard 1024px = 400um ratio, scales automatically for 2048px/800um)
+    fov_size_um = 800.0 if fov_max_x > 1500 else 400.0
+    constant_size = get_constant_scatter_size(ax, fig, cell_diam_um=10.0, fov_size_um=fov_size_um, fov_size_px=fov_max_x)
+    
     df_shuffled = df_fov.sample(frac=1, random_state=42)
     
     for cell_type, group in df_shuffled.groupby('cell type'):
         ax.scatter(
-            group['x'],
-            group['y'],
+            group['x'], group['y'],
             label=cell_type,
             color=color_map.get(cell_type, 'gray'),
-            s=12,
+            s=constant_size,
             alpha=1.0,
             edgecolors='none',
-            zorder=2  # Draw on top of backgrounds
+            zorder=2
         )
     
     ax.set_title("Full Tissue Map", fontsize=10)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
-    ax.set_aspect('equal', adjustable='box')  # Preserve spatial aspect ratio
-    ax.invert_yaxis()
     
-    # Build legend
+    from matplotlib.ticker import MultipleLocator
+    radius_um = constants.CONFIG.get('RADIUS', 25)
+    pixel_per_um = fov_max_x / fov_size_um
+    grid_spacing = radius_um * pixel_per_um
+    
+    ax.xaxis.set_minor_locator(MultipleLocator(grid_spacing))
+    ax.yaxis.set_minor_locator(MultipleLocator(grid_spacing))
+    ax.grid(which='minor', color='gray', linestyle=':', linewidth=0.5, alpha=0.5)
+    
     handles, labels = ax.get_legend_handles_labels()
+    for handle in handles:
+        if hasattr(handle, 'set_sizes'):
+            handle.set_sizes([30])
     
     if show_tissue_background:
-        # Add tissue region legend items
         from matplotlib.patches import Patch
         tissue_handles = []
         tissue_labels = []
-        
         for tissue_col in TISSUE_BOOLEAN_COLS:
             if tissue_col in df_fov.columns and df_fov[tissue_col].any():
-                tissue_handles.append(Patch(facecolor=TISSUE_COLOR_MAP[tissue_col], 
-                                           edgecolor='black', linewidth=1, alpha=0.7))  # Increased to 0.7, added border
+                tissue_handles.append(Patch(facecolor=TISSUE_COLOR_MAP[tissue_col], edgecolor='black', linewidth=1, alpha=0.7))
                 tissue_labels.append(TISSUE_DISPLAY_NAMES[tissue_col])
-        
-        # Combine: tissue regions first, then cell types
         if tissue_handles:
             handles = tissue_handles + handles
             labels = tissue_labels + labels
     
-    # Position legend outside plot
-    ax.legend(handles, labels, bbox_to_anchor=(-0.15, 1), loc='upper right', 
-             fontsize='x-small', markerscale=2, title="Regions & Cell Types")
+    ax.legend(handles, labels, bbox_to_anchor=(-0.15, 1), loc='upper right', fontsize='x-small', title="Regions & Cell Types")
+    return constant_size
 
-def plot_fov_rule_highlight(ax, df_fov, antecedents, consequents, color_map):
+def plot_fov_rule_highlight(ax, fig, df_fov, antecedents, consequents, color_map, constant_size):
     """
-    Plots the FOV highlighting only the rule's cells using their original colors.
-    Adds a legend showing only the rule cell types.
+    Plots the FOV highlighting only the rule's cells.
+    Receives exact constant_size from left plot to guarantee perfectly identical rendering.
     """
     COLOR_OTHER = "lightgray"
 
+    fov_max_x = df_fov['x'].max() if df_fov['x'].max() > 0 else 1024.0
+    fov_max_y = df_fov['y'].max() if df_fov['y'].max() > 0 else 1024.0
+    ax.set_xlim(0, fov_max_x)
+    ax.set_ylim(fov_max_y, 0)
+    ax.set_aspect('equal', adjustable='box')
+
     def assign_category(row_type):
-        if row_type in antecedents:
-            return 2 
-        elif row_type in consequents:
-            return 2 
-        else:
-            return 0 
+        if row_type in antecedents: return 2 
+        elif row_type in consequents: return 2 
+        else: return 0 
 
     df_fov = df_fov.copy()
     df_fov['plot_order'] = df_fov['cell type'].apply(assign_category)
     df_fov = df_fov.sort_values('plot_order')
 
-    # Background
     mask_other = df_fov['plot_order'] == 0
-    ax.scatter(df_fov[mask_other]['x'], df_fov[mask_other]['y'], 
-              c=COLOR_OTHER, s=5, alpha=0.2, label='Other')
+    if mask_other.any():
+        other_cells = df_fov[mask_other]
+        ax.scatter(other_cells['x'], other_cells['y'], c=COLOR_OTHER, s=constant_size, alpha=0.2, label='Other')
     
-    # Active Rule Cells (Antecedents & Consequents)
     mask_active = df_fov['plot_order'] == 2
-    
     rule_types = []
     if mask_active.any():
         active_cells = df_fov[mask_active]
-        # Plot each type individually to get correct color from map
         for cell_type, group in active_cells.groupby('cell type'):
             ax.scatter(
-                group['x'], 
-                group['y'], 
+                group['x'], group['y'], 
                 c=[color_map.get(cell_type, 'black')], 
-                s=15, 
-                alpha=0.9, 
-                edgecolors='none',
-                label=cell_type
+                s=constant_size, alpha=0.9, edgecolors='none', label=cell_type
             )
             rule_types.append(cell_type)
 
     ax.set_title("Rule Interaction Highlight", fontsize=10)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
-    ax.set_aspect('equal', adjustable='box')  # Preserve spatial aspect ratio
-    ax.invert_yaxis()
     
-    # Add legend with only rule types (outside plot area)
+    from matplotlib.ticker import MultipleLocator
+    fov_size_um = 800.0 if fov_max_x > 1500 else 400.0
+    radius_um = constants.CONFIG.get('RADIUS', 25)
+    pixel_per_um = fov_max_x / fov_size_um
+    grid_spacing = radius_um * pixel_per_um
+    
+    ax.xaxis.set_minor_locator(MultipleLocator(grid_spacing))
+    ax.yaxis.set_minor_locator(MultipleLocator(grid_spacing))
+    ax.grid(which='minor', color='gray', linestyle=':', linewidth=0.5, alpha=0.5)
+    
     if rule_types:
         handles, labels = ax.get_legend_handles_labels()
-        # Filter to only rule types (exclude 'Other')
         filtered_handles = []
         filtered_labels = []
         for h, l in zip(handles, labels):
             if l != 'Other':
+                if hasattr(h, 'set_sizes'): h.set_sizes([40])
                 filtered_handles.append(h)
                 filtered_labels.append(l)
-        
-        ax.legend(filtered_handles, filtered_labels, 
-                 bbox_to_anchor=(1.15, 1), loc='upper left',
-                 fontsize='small', markerscale=2, title="Rule Types")
+        ax.legend(filtered_handles, filtered_labels, bbox_to_anchor=(1.15, 1), loc='upper left', fontsize='small', title="Rule Types")
 
 def _save_individual_plot(method_name, idx, df_fov, ants, cons, color_map, title_str, show_tissue_background=False):
     """Saves a separate plot for a single rule (for README/Reports)."""
@@ -255,8 +293,8 @@ def _save_individual_plot(method_name, idx, df_fov, ants, cons, color_map, title
     
     fig_single, axes_single = plt.subplots(1, 2, figsize=(24, 8))  # Increased from (18, 6)
     
-    plot_fov_full(axes_single[0], df_fov, color_map, show_tissue_background)
-    plot_fov_rule_highlight(axes_single[1], df_fov, ants, cons, color_map)
+    constant_size = plot_fov_full(axes_single[0], fig_single, df_fov, color_map, show_tissue_background)
+    plot_fov_rule_highlight(axes_single[1], fig_single, df_fov, ants, cons, color_map, constant_size)
     
     fig_single.suptitle(title_str, fontsize=14, fontweight='bold', y=0.98)  # Increased font from 12 to 14
     
@@ -345,7 +383,7 @@ def visualize_method(method_name, cell_df, top_n, exclude_self_loops=False, excl
         fdr_val = row.get('FDR', np.nan)
         pval_val = row.get('P_Value', np.nan)
 
-        df_fov = cell_df[cell_df['fov'] == fov_id]
+        df_fov = cell_df[cell_df['fov'] == fov_id].copy() # Copy to avoid SettingWithCopyWarning
         
         ax_full = axes[idx][0]
         ax_rule = axes[idx][1]
@@ -356,13 +394,18 @@ def visualize_method(method_name, cell_df, top_n, exclude_self_loops=False, excl
             ax_rule.axis('off')
             continue
 
+        # Ensure x and y columns exist (sometimes it's centroid_x, centroid_y depending on load_cell_data)
+        if 'x' not in df_fov.columns and 'centroid_x' in df_fov.columns:
+            df_fov['x'] = df_fov['centroid_x']
+            df_fov['y'] = df_fov['centroid_y']
+
         # Create FOV-specific color map
         fov_cell_types = df_fov['cell type'].unique()
         color_map = get_color_map(fov_cell_types)
 
         # Plotting
-        plot_fov_full(ax_full, df_fov, color_map, show_tissue_background)
-        plot_fov_rule_highlight(ax_rule, df_fov, ants, cons, color_map)
+        constant_size = plot_fov_full(ax_full, fig, df_fov, color_map, show_tissue_background)
+        plot_fov_rule_highlight(ax_rule, fig, df_fov, ants, cons, color_map, constant_size)
         
         # --- Row Title with Metrics ---
         # Formatting metrics nicely

@@ -12,8 +12,6 @@ import constants
 
 from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE
 
-from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE
-
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("ClinicalCorrelationPlotter")
@@ -141,15 +139,15 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                  logger.error(f"Score file missing Rule column: {score_file_path}")
                  continue
 
-        # No filtering needed here! Data is already filtered in the source directory.
-
         # Calculate Ranking Score
         if approach == "ML":
             rule_scores_df["Rank_Score"] = rule_scores_df[["Mean_Imp_RF", "Mean_Imp_XGB", "Mean_Imp_Lasso"]].mean(axis=1)
             score_col_name = "Avg_Imp"
+            approach_label = "ML Ensemble"
         else: # Simple Stats
             rule_scores_df["Rank_Score"] = rule_scores_df["Frequency"]
-            score_col_name = "Freq"
+            score_col_name = "CV Stability"
+            approach_label = "Simple Stats"
 
         # Select Top N
         top_rules_df = rule_scores_df.sort_values("Rank_Score", ascending=False).head(top_n_rules)
@@ -159,9 +157,35 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         if not top_rules:
             logger.warning(f"No top rules found for best strategy {i+1}.")
             continue
+            
+        # 3.5 Calculate True Pool Size (matching the pipeline exactly)
+        from check_rule_correlation_with_disease.stratified_utils import load_and_prep_data as flow_prep
+        from check_rule_correlation_with_disease.stratified_utils import filter_viable_stratum
+
+        base_results_path = os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR, f"results_{method}.csv")
+        total_rules_for_group = "?"
+        if os.path.exists(base_results_path):
+            try:
+                # Flow prep naturally handles FDR < 0.05 and no_self logic
+                rule_lift_pivot, fov_metadata, _ = flow_prep(base_results_path, no_self=no_self)
+                if rule_lift_pivot is not None:
+                    # Filter FOVs to current Organ
+                    df_fovs_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
+                    df_biopsies_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
+                    df_fovs_tmp['Organ'] = df_fovs_tmp['Patient'].map(df_biopsies_tmp.set_index('Biopsy_ID')['Localization'])
+                    df_fovs_tmp['Organ'] = df_fovs_tmp['Organ'].fillna(df_fovs_tmp['Cohort'].apply(lambda x: 'Colon' if 'Colon' in str(x) else ('Duodenum' if 'Duodenum' in str(x) else 'Unknown')))
+                    fov_to_organ = df_fovs_tmp.set_index('FOV')['Organ']
+                    
+                    organ_mask = rule_lift_pivot.index.map(fov_to_organ) == organ
+                    organ_pivot = rule_lift_pivot[organ_mask]
+                    
+                    # Number of columns (rules) that are not uniformly NaN for this organ
+                    valid_cols = [c for c in organ_pivot.columns if not organ_pivot[c].isna().all()]
+                    total_rules_for_group = len(valid_cols)
+            except Exception as e:
+                logger.warning(f"Failed to calculate true pool size: {e}")
 
         # 4. Load Raw Data for Heatmap Values.
-        # Prefer strategy-specific files (when available) and gracefully fall back to base results.
         results_filename = f"results_{method}_{organ_for_filename}_{target_for_filename}{config_suffix}.csv"
         target_results_path = os.path.join(score_file_dir, results_filename)
 
@@ -172,11 +196,21 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         else:
             logger.warning(f"Target-specific results file not found: {target_results_path}. Falling back to base results.")
             df_raw = load_and_prep_data(method, os.path.join(PROJECT_ROOT, constants.RESULTS_DATA_DIR))
+            
+            # Since this is the generic file, it has all organs. We must filter it to the current strategy's Organ
+            if df_raw is not None:
+                df_fovs_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
+                df_biopsies_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
+                df_fovs_tmp['Organ'] = df_fovs_tmp['Patient'].map(df_biopsies_tmp.set_index('Biopsy_ID')['Localization'])
+                df_fovs_tmp['Organ'] = df_fovs_tmp['Organ'].fillna(df_fovs_tmp['Cohort'].apply(lambda x: 'Colon' if 'Colon' in str(x) else ('Duodenum' if 'Duodenum' in str(x) else 'Unknown')))
+                fov_to_organ = df_fovs_tmp.set_index('FOV')['Organ']
+                df_raw['Organ'] = df_raw['FOV'].map(fov_to_organ)
+                df_raw = df_raw[df_raw['Organ'] == organ]
 
         if df_raw is None:
             continue
 
-        # Restrict to selected rules when possible; if formatting differs, continue with full data.
+        # Restrict to selected rules
         filtered_df_raw = df_raw[df_raw["Rule"].isin(top_rules)].copy()
         if not filtered_df_raw.empty:
             df_raw = filtered_df_raw
@@ -190,22 +224,23 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             logger.warning(f"No raw rows found for selected target (strategy {i+1}).")
             continue
             
-        unique_target_values = sorted(df_raw[target].dropna().unique().tolist())
-        
-        # Dynamic Control Filtering
-        if not CONTROLS_ELIGIBLE.get(target, True):
-            filtered_vals = []
-            for v in unique_target_values:
-                if str(v).lower() == "control":
-                    continue
-                try:
-                    if float(v) == 0.0:
-                        continue
-                except ValueError:
-                    pass
-                filtered_vals.append(v)
-            unique_target_values = filtered_vals
+        # Ensure we have Biopsy_ID for stratification filtering
+        if "Biopsy_ID" not in df_raw.columns:
+            df_fovs_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
+            df_raw = df_raw.merge(df_fovs_tmp[['FOV', 'Biopsy_ID']], on='FOV', how='left')
 
+        # Filter out rare classes exactly as the flow does
+        meta_subset = df_raw[['FOV', 'Biopsy_ID', target]].drop_duplicates()
+        filtered_meta, note = filter_viable_stratum(meta_subset, target)
+        
+        if filtered_meta is None:
+            logger.warning(f"Strategy {i+1} no longer viable after strict stratification filter: {note}")
+            continue
+            
+        # Restrict the raw data to only the valid biopsies/classes that survived the filter
+        df_raw = df_raw[df_raw['Biopsy_ID'].isin(filtered_meta['Biopsy_ID'])]
+            
+        unique_target_values = sorted(df_raw[target].dropna().unique().tolist())
         
         # Dynamic Control Filtering
         if not CONTROLS_ELIGIBLE.get(target, True):
@@ -224,39 +259,65 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         if not unique_target_values:
             continue
 
-        # 5. Calculate Cell Values: Mean Lift
+        # 5. Calculate Cell Values: Mean Lift and FOV counts
         heatmap_data = pd.DataFrame(index=top_rules, columns=unique_target_values)
+        fov_counts_str = []
+        
+        # Calculate total valid FOVs per target value for the denominator
+        target_fov_totals = {
+            val: df_raw[df_raw[target] == val]["FOV"].nunique()
+            for val in unique_target_values
+        }
 
         for rule in top_rules:
+            # Breakdown of FOVs per class for this rule
+            rule_class_counts = []
+            for val in unique_target_values:
+                count = df_raw[(df_raw["Rule"] == rule) & (df_raw[target] == val)]["FOV"].nunique()
+                total = target_fov_totals[val]
+                rule_class_counts.append(f"{count}/{total}")
+            
+            fov_counts_str.append(" | ".join(rule_class_counts))
+            
             for target_value in unique_target_values:
+                total_fovs_for_class = target_fov_totals[target_value]
+                
+                if total_fovs_for_class == 0:
+                    heatmap_data.loc[rule, target_value] = np.nan
+                    continue
+                    
                 rule_data_for_target_value = df_raw[
                     (df_raw["Rule"] == rule) & 
                     (df_raw[target] == target_value)
                 ]
                 
+                # Calculate the Marginal Mean (treating missing FOVs as a lift of 0.0)
                 if not rule_data_for_target_value.empty and "Lift" in rule_data_for_target_value.columns:
-                    mean_lift = rule_data_for_target_value["Lift"].mean()
-                    heatmap_data.loc[rule, target_value] = mean_lift
+                    sum_lift = rule_data_for_target_value["Lift"].sum()
+                    marginal_mean_lift = sum_lift / total_fovs_for_class
+                    heatmap_data.loc[rule, target_value] = marginal_mean_lift
                 else:
-                    heatmap_data.loc[rule, target_value] = np.nan 
+                    # The rule wasn't found in any FOV for this class, so the marginal mean is exactly 0.0
+                    heatmap_data.loc[rule, target_value] = 0.0 
 
-        # Cast to float, but leave NaNs intact (no .fillna(0))
-        heatmap_data = heatmap_data.astype(float)
-        # Cast to float, but leave NaNs intact (no .fillna(0))
+        # Cast to float
         heatmap_data = heatmap_data.astype(float)
 
         # 6. Generate Layout
-        fig_width = max(16, len(unique_target_values) * 1.5 + 6)
+        # Increase width of figure and FOV column to accommodate long text strings
+        fig_width = max(20, len(unique_target_values) * 1.5 + 10)
         fig_height = max(8, len(top_rules) * 0.5)
         
         fig = plt.figure(figsize=(fig_width, fig_height))
         
-        gs = fig.add_gridspec(1, 4, width_ratios=[len(unique_target_values), 1, 2, 0.2], wspace=0.05)
+        # Increase the relative width of the FOV column (index 2)
+        gs = fig.add_gridspec(1, 5, width_ratios=[len(unique_target_values), 1, 2.5, 2, 0.2], wspace=0.1)
         
         ax_heatmap = fig.add_subplot(gs[0, 0])
         ax_score = fig.add_subplot(gs[0, 1])
-        ax_violin = fig.add_subplot(gs[0, 2])
-        ax_cbar = fig.add_subplot(gs[0, 3])
+        ax_fov = fig.add_subplot(gs[0, 2])
+        ax_violin = fig.add_subplot(gs[0, 3])
+        ax_cbar = fig.add_subplot(gs[0, 4])
 
         # Plot Heatmap
         ax_heatmap.set_facecolor('lightgrey')
@@ -266,9 +327,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                     mask=heatmap_data.isnull())
         
         suffix_title = " (NO SELF)" if no_self else ""
-        plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}{suffix_title}"
-        suffix_title = " (NO SELF)" if no_self else ""
-        plot_title = f"Strategy {i+1} | {method} | Target: {target} | Score: {best_strategy['Score']:.3f}{suffix_title}"
+        plot_title = f"{method} ({approach_label}) | Target: {target} | Score: {best_strategy['Score']:.3f}{suffix_title}\nTotal Valid Rules in Pool: {total_rules_for_group}"
+        
         ax_heatmap.set_title(plot_title, fontsize=12, pad=10)
         ax_heatmap.set_xlabel(f"{target} Value")
         ax_heatmap.set_ylabel("Rule")
@@ -284,6 +344,17 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                           ha='center', va='center', fontsize=10)
             ax_score.axhline(idx, color='gray', linewidth=0.5)
             ax_score.axhline(idx + 1, color='gray', linewidth=0.5)
+
+        # Plot FOVs Column
+        ax_fov.set_ylim(len(top_rules), 0)
+        ax_fov.set_xlim(0, 1)
+        ax_fov.axis('off')
+        ax_fov.set_title("FOVs")
+        
+        for idx, fov_str in enumerate(fov_counts_str):
+            ax_fov.text(0.5, idx + 0.5, fov_str, ha='center', va='center', fontsize=10)
+            ax_fov.axhline(idx, color='gray', linewidth=0.5)
+            ax_fov.axhline(idx + 1, color='gray', linewidth=0.5)
 
         # Prepare Violin Data
         violin_data = []
@@ -321,7 +392,6 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
         ax_violin.spines['top'].set_visible(False)
         ax_violin.spines['bottom'].set_visible(True)
         
-        ax_violin.set_title("Distribution of FOV-level Lifts")
         ax_violin.set_title("Distribution of FOV-level Lifts")
         ax_violin.set_xlabel("Lift")
         

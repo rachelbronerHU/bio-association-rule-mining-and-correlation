@@ -15,3 +15,7 @@ results/full_run/rare_filtering_stats
 
 # Reference of different code
 references/
+
+# temp
+results/full_run/weighted_fpgrowth
+results/full_run/fpgrowth

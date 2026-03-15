@@ -97,9 +97,9 @@ def _build_transactions_from_cache(geo_cache, cell_types):
     Called once for the initial mining pass and once per permutation iteration,
     but geometry (distances, weights) is never recomputed — only label lookups occur.
 
-    Weighted transaction format: {item_label: normalized_weight, ...}
-      - Neighbor items:  f"{cell_type}_NEIGHBOR", weight = Gaussian decay sum, normalized
-      - Center item:     f"{cell_type}_CENTER",   weight = 1.0 before normalization
+    Weighted transaction format: {item_label: capped_weight, ...}
+      - Neighbor items:  f"{cell_type}_NEIGHBOR", weight = min(Gaussian decay sum, 1.0)
+      - Center item:     f"{cell_type}_CENTER",   weight = 1.0
     """
     transactions = []
     sizes = []
@@ -118,9 +118,10 @@ def _build_transactions_from_cache(geo_cache, cell_types):
         # Center cell at distance 0 → Gaussian weight = 1.0
         trans[f"{cell_types[center_i]}_CENTER"] = 1.0
 
-        # Normalize weights to sum to 1 (removes FOV density bias)
-        total = sum(trans.values())
-        trans = {k: v / total for k, v in trans.items()}
+        # Cap each neighbor weight at 1.0 (receptor saturation model):
+        # once a neighborhood has ~1 unit of a cell type nearby, adding more
+        # cells doesn't increase the interaction signal. CENTER is always 1.0.
+        trans = {k: min(v, 1.0) for k, v in trans.items()}
 
         transactions.append(trans)
         sizes.append(len(trans))

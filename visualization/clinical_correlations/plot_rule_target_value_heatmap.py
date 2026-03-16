@@ -171,9 +171,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
                 if rule_lift_pivot is not None:
                     # Filter FOVs to current Organ
                     df_fovs_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
-                    df_biopsies_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
-                    df_fovs_tmp['Organ'] = df_fovs_tmp['Patient'].map(df_biopsies_tmp.set_index('Biopsy_ID')['Localization'])
-                    df_fovs_tmp['Organ'] = df_fovs_tmp['Organ'].fillna(df_fovs_tmp['Cohort'].apply(lambda x: 'Colon' if 'Colon' in str(x) else ('Duodenum' if 'Duodenum' in str(x) else 'Unknown')))
+                    from visualization.utils.visualization_util import add_organ_column
+                    df_fovs_tmp = add_organ_column(df_fovs_tmp, os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH))
                     fov_to_organ = df_fovs_tmp.set_index('FOV')['Organ']
                     
                     organ_mask = rule_lift_pivot.index.map(fov_to_organ) == organ
@@ -200,9 +199,8 @@ def generate_rule_target_value_heatmap(top_n_rules=20, num_best_strategies=1,
             # Since this is the generic file, it has all organs. We must filter it to the current strategy's Organ
             if df_raw is not None:
                 df_fovs_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
-                df_biopsies_tmp = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
-                df_fovs_tmp['Organ'] = df_fovs_tmp['Patient'].map(df_biopsies_tmp.set_index('Biopsy_ID')['Localization'])
-                df_fovs_tmp['Organ'] = df_fovs_tmp['Organ'].fillna(df_fovs_tmp['Cohort'].apply(lambda x: 'Colon' if 'Colon' in str(x) else ('Duodenum' if 'Duodenum' in str(x) else 'Unknown')))
+                from visualization.utils.visualization_util import add_organ_column
+                df_fovs_tmp = add_organ_column(df_fovs_tmp, os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH))
                 fov_to_organ = df_fovs_tmp.set_index('FOV')['Organ']
                 df_raw['Organ'] = df_raw['FOV'].map(fov_to_organ)
                 df_raw = df_raw[df_raw['Organ'] == organ]

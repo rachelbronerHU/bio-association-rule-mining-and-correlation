@@ -13,7 +13,7 @@ from sklearn.decomposition import PCA
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS, MIBI_GUT_DIR_PATH
-from visualization.utils.metadata_util import add_organ_column
+from visualization.utils.visualization_util import add_organ_column
 
 sns.set_theme(style="whitegrid")
 

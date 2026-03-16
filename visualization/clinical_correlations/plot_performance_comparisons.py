@@ -30,13 +30,8 @@ def _build_organ_rule_counts(no_self=False):
     """
     try:
         df_fovs = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "fovs_metadata.csv"))
-        df_biopsies_meta = pd.read_csv(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH, "biopsy_metadata.csv"))
-        df_fovs["Organ"] = df_fovs["Patient"].map(df_biopsies_meta.set_index("Biopsy_ID")["Localization"])
-        df_fovs["Organ"] = df_fovs["Organ"].fillna(
-            df_fovs["Cohort"].apply(
-                lambda x: "Colon" if "Colon" in str(x) else ("Duodenum" if "Duodenum" in str(x) else None)
-            )
-        )
+        from visualization.utils.visualization_util import add_organ_column
+        df_fovs = add_organ_column(df_fovs, os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH))
         fov_organ_map = df_fovs.set_index("FOV")["Organ"].dropna()
     except Exception as e:
         logger.warning(f"Could not build organ rule counts: {e}")

@@ -8,10 +8,12 @@ import json
 import sys
 
 import ast
+from sklearn.decomposition import PCA
 
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS
+from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS, MIBI_GUT_DIR_PATH
+from visualization.utils.metadata_util import add_organ_column
 
 sns.set_theme(style="whitegrid")
 
@@ -312,6 +314,79 @@ def plot_rules_per_fov_per_method(dfs, output_dir):
         plt.savefig(f"{output_dir}/rules_per_fov_{m}.png")
         plt.close()
 
+def plot_pca_rules(dfs, output_dir):
+    """PCA of FOV x Rules matrix based on Lift."""
+    print("Generating PCA Plots...")
+    
+    for m, df in dfs.items():
+        if df.empty or "FOV" not in df.columns:
+            continue
+            
+        # Extract necessary columns (now using standard helper)
+        if "Organ" not in df.columns:
+            df = add_organ_column(df, MIBI_GUT_DIR_PATH)
+        
+        hue_stage = "Pathological stage" if "Pathological stage" in df.columns else "Group"
+        hue_organ = "Organ"
+        
+        # Create Pivot Table (FOV x Rule), values=Lift, fillna=0
+        pivot_df = df.pivot_table(index="FOV", columns="Rule", values="Lift", fill_value=0)
+        
+        if len(pivot_df) < 3 or len(pivot_df.columns) < 2:
+            print(f"Not enough data for PCA in method {m}.")
+            continue
+            
+        # Extract FOV metadata mapping
+        meta_cols = ["FOV", hue_stage, hue_organ]
+        meta_cols = [c for c in meta_cols if c in df.columns]
+        meta_df = df[meta_cols].drop_duplicates(subset=["FOV"]).set_index("FOV")
+        
+        # Align meta_df with pivot_df index
+        meta_df = meta_df.loc[pivot_df.index]
+        
+        # Run PCA
+        pca = PCA(n_components=2)
+        pcs = pca.fit_transform(pivot_df)
+        
+        # Create Plotting DataFrame
+        plot_df = pd.DataFrame(data=pcs, columns=['PC1', 'PC2'], index=pivot_df.index)
+        plot_df = plot_df.join(meta_df)
+        
+        # Ensure categorical variables for hue
+        if hue_stage in plot_df.columns:
+            plot_df[hue_stage] = plot_df[hue_stage].fillna(-1).astype(int).astype(str)
+            plot_df[hue_stage] = plot_df[hue_stage].replace('-1', 'Unknown')
+        
+        # 1. Plot by Organ/Location
+        plt.figure(figsize=(10, 8))
+        if hue_organ in plot_df.columns:
+            sns.scatterplot(data=plot_df, x="PC1", y="PC2", hue=hue_organ, palette="Set1", s=100, alpha=0.7)
+            plt.legend(title="Organ/Location", bbox_to_anchor=(1.05, 1), loc='upper left')
+        else:
+            sns.scatterplot(data=plot_df, x="PC1", y="PC2", s=100, alpha=0.7)
+            
+        plt.title(f"PCA of Rules x FOV (Method: {m}) - Colored by Location")
+        plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%} variance)")
+        plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%} variance)")
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/pca_organ_{m}.png")
+        plt.close()
+        
+        # 2. Plot by Stage
+        plt.figure(figsize=(10, 8))
+        if hue_stage in plot_df.columns:
+            sns.scatterplot(data=plot_df, x="PC1", y="PC2", hue=hue_stage, palette="viridis", s=100, alpha=0.7)
+            plt.legend(title="Stage", bbox_to_anchor=(1.05, 1), loc='upper left')
+        else:
+            sns.scatterplot(data=plot_df, x="PC1", y="PC2", s=100, alpha=0.7)
+            
+        plt.title(f"PCA of Rules x FOV (Method: {m}) - Colored by Stage")
+        plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%} variance)")
+        plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%} variance)")
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/pca_stage_{m}.png")
+        plt.close()
+
 def main():
     # Setup Output Dir
     out_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
@@ -330,6 +405,7 @@ def main():
     plot_complexity(dfs, out_dir)
     plot_overlap(dfs, out_dir)
     plot_rules_per_fov_per_method(dfs, out_dir)
+    plot_pca_rules(dfs, out_dir)
     
     print("Visualization Complete.")
 

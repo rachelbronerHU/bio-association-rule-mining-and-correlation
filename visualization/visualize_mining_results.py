@@ -387,6 +387,132 @@ def plot_pca_rules(dfs, output_dir):
         plt.savefig(f"{output_dir}/pca_stage_{m}.png")
         plt.close()
 
+def plot_pca_rule_families(dfs, output_dir):
+    """PCA of Rules x Cell Types matrix to find rule families, colored by clinical metadata."""
+    print("Generating Rule Families PCA Plots...")
+    
+    for m, df in dfs.items():
+        if df.empty or "Rule" not in df.columns:
+            continue
+            
+        # Extract necessary columns
+        if "Organ" not in df.columns:
+            df = add_organ_column(df, MIBI_GUT_DIR_PATH)
+            
+        # Parse items to create Rule x Cell Types matrix
+        rule_items = {}
+        for _, row in df.drop_duplicates(subset=["Rule"]).iterrows():
+            items = []
+            try:
+                ant = ast.literal_eval(row["Antecedents"])
+                con = ast.literal_eval(row["Consequents"])
+                items.extend(ant)
+                items.extend(con)
+            except:
+                pass
+            rule_items[row["Rule"]] = items
+            
+        if not rule_items:
+            continue
+            
+        # Create a list of all unique cell type items
+        all_items = sorted(list(set(item for items in rule_items.values() for item in items)))
+        
+        # Build binary matrix: Rules (rows) x Items (cols)
+        matrix = []
+        rules_list = list(rule_items.keys())
+        for rule in rules_list:
+            row_data = {item: 1 if item in rule_items[rule] else 0 for item in all_items}
+            matrix.append(row_data)
+            
+        rule_item_df = pd.DataFrame(matrix, index=rules_list)
+        
+        # Drop columns with zero variance
+        rule_item_df = rule_item_df.loc[:, (rule_item_df != rule_item_df.iloc[0]).any()] 
+        
+        if len(rule_item_df) < 3 or len(rule_item_df.columns) < 2:
+            print(f"Not enough variance in rules for PCA in method {m}.")
+            continue
+            
+        # PCA
+        pca = PCA(n_components=2)
+        pcs = pca.fit_transform(rule_item_df)
+        plot_df = pd.DataFrame(data=pcs, columns=['PC1', 'PC2'], index=rules_list)
+        
+        # Calculate Clinical Metadata per Rule
+        stage_col = "Pathological stage" if "Pathological stage" in df.columns else "Group"
+        
+        rule_meta = []
+        for rule in rules_list:
+            rule_df = df[df["Rule"] == rule]
+            
+            # Average stage
+            avg_stage = np.nan
+            if stage_col in rule_df.columns:
+                stages = pd.to_numeric(rule_df[stage_col], errors='coerce').dropna()
+                if not stages.empty:
+                    avg_stage = stages.mean()
+                    
+            # Organ enrichment (% Colon)
+            pct_colon = np.nan
+            if "Organ" in rule_df.columns:
+                organs = rule_df["Organ"].dropna()
+                colon_count = (organs == "Colon").sum()
+                duodenum_count = (organs == "Duodenum").sum()
+                total = colon_count + duodenum_count
+                if total > 0:
+                    pct_colon = colon_count / total
+                    
+            rule_meta.append({
+                "Rule": rule,
+                "Avg_Stage": avg_stage,
+                "Pct_Colon": pct_colon
+            })
+            
+        meta_df = pd.DataFrame(rule_meta).set_index("Rule")
+        plot_df = plot_df.join(meta_df)
+        
+        # Plot 1: Colored by Continuous Stage
+        plt.figure(figsize=(10, 8))
+        scatter = sns.scatterplot(data=plot_df, x="PC1", y="PC2", hue="Avg_Stage", palette="viridis", s=80, alpha=0.8, edgecolor="w")
+        plt.title(f"Rule Families PCA (Method: {m}) - Colored by Average Stage")
+        plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%} variance)")
+        plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%} variance)")
+        
+        # Colorbar
+        if scatter.get_legend():
+            scatter.get_legend().remove()
+        
+        valid_stages = plot_df["Avg_Stage"].dropna()
+        if not valid_stages.empty:
+            norm = plt.Normalize(valid_stages.min(), valid_stages.max())
+            sm = plt.cm.ScalarMappable(cmap="viridis", norm=norm)
+            sm.set_array([])
+            plt.colorbar(sm, ax=plt.gca(), label=f"Average {stage_col} (0=Control, 4=Severe)")
+        
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/pca_rule_families_stage_{m}.png")
+        plt.close()
+        
+        # Plot 2: Colored by Organ Enrichment
+        plt.figure(figsize=(10, 8))
+        scatter = sns.scatterplot(data=plot_df, x="PC1", y="PC2", hue="Pct_Colon", palette="coolwarm", s=80, alpha=0.8, edgecolor="w")
+        plt.title(f"Rule Families PCA (Method: {m}) - Colored by Organ Enrichment")
+        plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%} variance)")
+        plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%} variance)")
+        
+        if scatter.get_legend():
+            scatter.get_legend().remove()
+            
+        norm = plt.Normalize(0, 1)
+        sm = plt.cm.ScalarMappable(cmap="coolwarm", norm=norm)
+        sm.set_array([])
+        plt.colorbar(sm, ax=plt.gca(), label="Organ Enrichment (0 = Duodenum, 1 = Colon)")
+        
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/pca_rule_families_organ_{m}.png")
+        plt.close()
+
 def main():
     # Setup Output Dir
     out_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
@@ -406,6 +532,7 @@ def main():
     plot_overlap(dfs, out_dir)
     plot_rules_per_fov_per_method(dfs, out_dir)
     plot_pca_rules(dfs, out_dir)
+    plot_pca_rule_families(dfs, out_dir)
     
     print("Visualization Complete.")
 

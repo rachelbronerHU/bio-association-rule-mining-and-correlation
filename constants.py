@@ -56,7 +56,7 @@ if ALGO == "weighted_fpgrowth":
         "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
         "MIN_ABS_SUPPORT": 10,      # Rule must hold in at least this many transactions (absolute floor)
         "MIN_CONFIDENCE": 0.7,      # Same as binary — weighted confidence already requires intensity match, not just presence
-        "MIN_LIFT": 1.3,            # Slightly stricter to compensate for finer-grained support scale
+        "MIN_LIFT": 1.2,            # Slightly stricter to compensate for finer-grained support scale
         "MIN_LEVERAGE": 0.005,
         "MIN_CONVICTION": 1.5,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
@@ -78,7 +78,7 @@ else:
         "WINDOW_STEP_FRACTION": 0.5,
         "MIN_SUPPORT": 0.05,
         "MIN_CONFIDENCE": 0.7,
-        "MIN_LIFT": 1.3,
+        "MIN_LIFT": 1.2,
         "MIN_LEVERAGE": 0.005,
         "MIN_CONVICTION": 1.5,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,

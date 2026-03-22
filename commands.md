@@ -30,6 +30,7 @@
 # Step no. 4: Result Visualization
 * python visualization\visualize_mining_results.py (results/full_run/plots/mining_report)
 * python visualization\visualize_raw_rules.py (results/full_run/plots/raw_rules_report)
+* python visualization\visualize_stage_marker_rules.py [--top_n 10] [--no_self] (results/full_run/plots/mining_report)
 * python visualization\visualize_top_rules_spatial.py [--top_n 20] [--exclude_shared_items / --exclude_self_loops] [--show_tissue_background] (results/full_run/plots/top_rules_spatial)
 * python visualization\visualize_transaction_distributions.py (results/full_run/plots/transaction_distributions)
 

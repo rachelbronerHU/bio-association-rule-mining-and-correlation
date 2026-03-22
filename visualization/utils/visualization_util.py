@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 
+import ast
+
 def add_organ_column(df, mibi_gut_dir_path):
     """
     Standardized helper to add an 'Organ' column to a dataframe.
@@ -45,3 +47,43 @@ def add_organ_column(df, mibi_gut_dir_path):
     df['Organ'] = df['Organ'].fillna('Unknown')
     
     return df
+
+def filter_no_self_rules(df):
+    """
+    Removes rules where Antecedents and Consequents have overlapping items.
+    Example: ['A', 'B'] -> ['B'] should be removed.
+    Also handles suffixes like _CENTER and _NEIGHBOR.
+    
+    Args:
+        df (pd.DataFrame): DataFrame containing 'Antecedents' and 'Consequents' columns.
+        
+    Returns:
+        pd.DataFrame: Filtered DataFrame without self-loops.
+    """
+    def clean_item(item):
+        return item.replace("_CENTER", "").replace("_NEIGHBOR", "")
+
+    def has_overlap(row):
+        try:
+            # Parse strings to lists if necessary
+            ant = row["Antecedents"]
+            con = row["Consequents"]
+            
+            if isinstance(ant, str):
+                ant = ast.literal_eval(ant)
+            if isinstance(con, str):
+                con = ast.literal_eval(con)
+            
+            ant_clean = {clean_item(x) for x in ant}
+            con_clean = {clean_item(x) for x in con}
+            
+            return not ant_clean.isdisjoint(con_clean)
+        except Exception:
+            return False # Keep if parse fails (safety)
+
+    if 'Antecedents' not in df.columns or 'Consequents' not in df.columns:
+        print("Warning: Antecedents or Consequents column missing. Cannot filter no_self.")
+        return df
+
+    mask = df.apply(has_overlap, axis=1)
+    return df[~mask].copy()

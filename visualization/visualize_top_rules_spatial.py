@@ -321,13 +321,8 @@ def visualize_method(method_name, cell_df, top_n, exclude_self_loops=False, excl
 
     # 1. Filter: Exclude Shared Items (Stricter)
     if exclude_shared_items:
-        # Check intersection: if any item is in both antecedent and consequent
-        def has_overlap(row):
-            ants = parse_rule_list(row['Antecedents'])
-            cons = parse_rule_list(row['Consequents'])
-            return not set(ants).isdisjoint(set(cons))
-        
-        rules_df = rules_df[~rules_df.apply(has_overlap, axis=1)]
+        from visualization.utils.visualization_util import filter_no_self_rules
+        rules_df = filter_no_self_rules(rules_df)
         
     # 2. Filter: Exclude Exact Self Loops (Simpler)
     # Only run if strict filter wasn't applied (since strict covers simple)

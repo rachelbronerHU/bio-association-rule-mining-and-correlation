@@ -82,28 +82,9 @@ def load_data(method):
 def filter_no_self(df):
     """
     Removes rules where Antecedents and Consequents have overlapping items.
-    Example: ['A', 'B'] -> ['B'] should be removed.
-    Also handles suffixes like _CENTER and _NEIGHBOR.
     """
-    def clean_item(item):
-        return item.replace("_CENTER", "").replace("_NEIGHBOR", "")
-
-    def has_overlap(row):
-        try:
-            ant_raw = ast.literal_eval(row["Antecedents"])
-            con_raw = ast.literal_eval(row["Consequents"])
-            
-            ant_clean = {clean_item(x) for x in ant_raw}
-            con_clean = {clean_item(x) for x in con_raw}
-            
-            return not ant_clean.isdisjoint(con_clean)
-        except:
-            return False # Keep if parse fails (safety)
-
-    # Filter
-    mask = df.apply(has_overlap, axis=1)
-    filtered_df = df[~mask]
-    return filtered_df
+    from visualization.utils.visualization_util import filter_no_self_rules
+    return filter_no_self_rules(df)
 
 def calculate_biopsy_consensus(df):
     """

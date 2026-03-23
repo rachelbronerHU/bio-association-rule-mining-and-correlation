@@ -65,46 +65,62 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
         pivot_k = pivot_k.reindex(index=all_method_rules, columns=valid_stages, fill_value=0)
         pivot_std = pivot_std.reindex(index=all_method_rules, columns=valid_stages, fill_value=0)
         
-        # 2) Calculate Bi-Directional Marker Score
-        eps = 1e-6
+        # 2) Calculate Interaction Strength Score
+        # Color (Red/Blue) determined by Lift > 1 or < 1
+        # Saturation determined by abs(log2(Lift)) * sqrt(Prevalence)
         score_df = pd.DataFrame(index=all_method_rules, columns=valid_stages)
         marker_rules = []
 
         for stage in valid_stages:
             n_stage = stage_fov_counts.get(stage, 1)
+            # Prevalence (k/N)
             p_target = pivot_k[stage] / n_stage
+            # Mean Lift in stage
             mu_target = pivot_mu[stage]
             
-            # Comparison against average of other stages
+            # Comparison for rule selection (still use relative markers to pick interesting rules)
             others = [s for s in valid_stages if s != stage]
             n_others = sum(stage_fov_counts.get(s, 0) for s in others)
             p_other = pivot_k[others].sum(axis=1) / max(1, n_others)
             mu_other = pivot_mu[others].mean(axis=1)
-
-            # Score logic: (Prevalence Difference) * ABS(Log2 Lift Ratio)
-            # Higher prevalence in stage -> Positive (Red)
-            # Lower prevalence in stage -> Negative (Blue)
+            
+            # Score for SELECTION (not for color)
+            eps = 1e-6
             prev_diff = p_target - p_other
             lift_ratio = np.log2((mu_target + eps) / (mu_other + eps)).clip(-3, 3)
-            
-            # Reliability weight (more samples = higher confidence)
             reliability = np.sqrt(pivot_k[stage] + pivot_k[others].sum(axis=1))
-            
-            stage_score = prev_diff * np.abs(lift_ratio) * reliability
-            score_df[stage] = stage_score
+            selection_score = prev_diff * np.abs(lift_ratio) * reliability
 
             # Pick Top N/2 Positive and Top N/2 Negative per stage
             n_each = max(1, rules_per_stage // 2)
-            top_pos = stage_score.nlargest(n_each).index.tolist()
-            top_neg = stage_score.nsmallest(n_each).index.tolist()
+            top_pos = selection_score.nlargest(n_each).index.tolist()
+            top_neg = selection_score.nsmallest(n_each).index.tolist()
             
             for r in top_pos + top_neg:
                 if r not in marker_rules: marker_rules.append(r)
+
+        # Calculate actual Plotting Score (Interaction Strength)
+        # Color (Hue): Red for Lift > 1, Blue for Lift < 1
+        # Saturation (Intensity): Only penalize if k < 3 FOVs
+        for stage in valid_stages:
+            n_stage = stage_fov_counts.get(stage, 1)
+            p_target = pivot_k[stage] / n_stage
+            mu_target = pivot_mu[stage]
+            k_target = pivot_k[stage]
+            
+            # Simple piecewise logic:
+            # < 3 FOVs: Lower saturation (k/3) to hide noise.
+            # >= 3 FOVs: Normal saturation (weight = 1.0).
+            weight = np.where(k_target < 3, k_target / 3.0, 1.0)
+            
+            # Core score is log2(Lift)
+            score_df[stage] = np.log2(mu_target + 1e-6) * weight
 
         if not marker_rules: continue
 
         # 3) Prep Plotting Data
         plot_score = score_df.loc[marker_rules, valid_stages].astype(float)
+        
         annot_data = pd.DataFrame(index=marker_rules, columns=valid_stages)
         for r in marker_rules:
             for s in valid_stages:
@@ -124,17 +140,19 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
 
         # 4) Plotting
         fig_height = max(10, len(ordered_rules) * 0.4)
-        fig = plt.figure(figsize=(22, fig_height))
-        # 4 columns: Heatmap, Violins, Summary, Colorbar
-        gs = fig.add_gridspec(1, 4, width_ratios=[len(valid_stages)*1.5, 3, 2, 0.2], wspace=0.1)
+        fig = plt.figure(figsize=(24, fig_height))
+        # 4 columns: Heatmap, Violins, Stage-wise Summary, Colorbar
+        gs = fig.add_gridspec(1, 4, width_ratios=[len(valid_stages)*1.5, 3, len(valid_stages)*1.1, 0.2], wspace=0.1)
         ax_hm = fig.add_subplot(gs[0, 0])
         ax_violin = fig.add_subplot(gs[0, 1])
         ax_sum = fig.add_subplot(gs[0, 2])
         ax_cb = fig.add_subplot(gs[0, 3])
 
-        # Heatmap
-        vmax = np.nanquantile(plot_score.abs(), 0.98)
-        if vmax == 0: vmax = 1.0
+        # Heatmap Normalization
+        # Use the actual maximum in the plotting data as the scale ceiling
+        # This ensures the gradient covers the full range from min lift to max lift.
+        vmax = np.nanmax(plot_score.abs().values)
+        if vmax < 0.5: vmax = 0.5
         
         # Mask out cells where FOV count is 0
         zero_mask = (pivot_k.loc[ordered_rules, valid_stages] == 0).values
@@ -145,8 +163,9 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
         
         # Color the background grey so masked cells show as grey
         ax_hm.set_facecolor("whitesmoke")
+        ax_hm.grid(False)
         
-        ax_hm.set_title(f"Marker Rules ({m})\nRed=Enriched, Blue=Depleted, Grey=Missing | Text=k/N", fontsize=14, pad=15)
+        ax_hm.set_title(f"Interaction Strength ({m})\nRed: Lift > 1, Blue: Lift < 1 | Saturation: log2(Lift) | Muted if k < 3", fontsize=14, pad=35)
         ax_hm.set_xticklabels([f"Stage {s}\n(N={stage_fov_counts.get(s, 0)})" for s in valid_stages], rotation=0)
         ax_hm.set_ylabel("Marker Rule")
 
@@ -172,25 +191,42 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
         ax_violin.set_ylim(len(ordered_rules), 0)
         ax_violin.set_yticks([]); ax_violin.set_yticklabels([])
         ax_violin.spines["left"].set_visible(False); ax_violin.spines["right"].set_visible(False); ax_violin.spines["top"].set_visible(False)
-        ax_violin.set_title("Global Lift Distribution", fontsize=12, pad=15)
+        ax_violin.set_title("Global Lift Distribution\n ", fontsize=14, pad=35)
         ax_violin.set_xlabel("Lift")
-        for y in range(len(ordered_rules) + 1):
-            ax_violin.axhline(y, color="lightgray", linewidth=0.5)
+        ax_violin.grid(False)
 
-        # Summary Panel
+        # Summary Panel (Stage Statistics)
         ax_sum.axis("off")
-        ax_sum.set_ylim(len(ordered_rules), -0.8)
-        # Move headers higher to avoid first line overlap
-        ax_sum.text(0.1, -0.6, "Peak Lift \u00b1 STD", fontweight="bold", fontsize=10)
-        ax_sum.axhline(-0.3, color="black", linewidth=1)
+        ax_sum.set_ylim(len(ordered_rules), 0)
+        ax_sum.set_xlim(0, len(valid_stages))
+        ax_sum.grid(False)
         
-        for i, r in enumerate(ordered_rules):
-            s = peak_stage.loc[r]
-            txt_stats = f"{pivot_mu.loc[r, s]:.2f} \u00b1 {pivot_std.loc[r, s]:.2f}"
-            ax_sum.text(0.1, i + 0.5, txt_stats, fontsize=10, va="center")
-            ax_sum.axhline(i + 1, color="lightgray", linewidth=0.5)
+        # Headers for Summary Panel columns
+        for j, s in enumerate(valid_stages):
+            ax_sum.text(j + 0.5, -0.1, f"Stage {s}\nMean \u00b1 STD", 
+                        fontweight="bold", fontsize=10, ha="center", va="bottom")
 
-        ax_sum.set_title("Peak Statistics", fontsize=12, pad=15)
+        for i, r in enumerate(ordered_rules):
+            for j, s in enumerate(valid_stages):
+                if pivot_k.loc[r, s] > 0:
+                    txt_stats = f"{pivot_mu.loc[r, s]:.2f}\n\u00b1{pivot_std.loc[r, s]:.2f}"
+                    ax_sum.text(j + 0.5, i + 0.5, txt_stats, fontsize=8, va="center", ha="center")
+
+        ax_sum.set_title("Stage Statistics\nMean Lift \u00b1 STD", fontsize=14, pad=35)
+
+        # Zebra striping and unified horizontal lines
+        for i in range(len(ordered_rules)):
+            if i % 2 == 1:
+                # Add light background for every second row to improve horizontal tracking
+                bg_rect = plt.Rectangle((0, i), len(valid_stages), 1, facecolor="whitesmoke", alpha=0.3, zorder=-1)
+                ax_hm.add_patch(plt.Rectangle((0, i), len(valid_stages), 1, facecolor="whitesmoke", alpha=0.3, zorder=-1))
+                ax_violin.axhspan(i, i+1, facecolor="whitesmoke", alpha=0.3, zorder=-1)
+                ax_sum.axhspan(i, i+1, facecolor="whitesmoke", alpha=0.3, zorder=-1)
+
+        for y in range(len(ordered_rules) + 1):
+            ax_hm.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
+            ax_violin.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
+            ax_sum.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
 
         no_self_suffix = "_no_self" if no_self else ""
         save_path = os.path.join(output_dir, f"heatmap_stage_marker_rules_{m}{no_self_suffix}.png")

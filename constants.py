@@ -58,9 +58,10 @@ if ALGO == "weighted_fpgrowth":
         "MIN_CONFIDENCE": 0.7,      # Same as binary — weighted confidence already requires intensity match, not just presence
         "MIN_LIFT": 1.2,            # Slightly stricter to compensate for finer-grained support scale
         "MIN_LEVERAGE": 0.005,
+        "MAX_NEGATIVE_LEVERAGE": -0.001,
         "MIN_CONVICTION": 1.3,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
-        "MAX_NEGATIVE_LIFT": 0.7,
+        "MAX_NEGATIVE_LIFT": 0.8,
         "MAX_RULE_LENGTH": 4,
         "TARGET_CELLS": 30,
         "MIN_CELLS_PER_PATCH": 2,
@@ -80,9 +81,10 @@ else:
         "MIN_CONFIDENCE": 0.7,
         "MIN_LIFT": 1.2,
         "MIN_LEVERAGE": 0.005,
+        "MAX_NEGATIVE_LEVERAGE": -0.001,
         "MIN_CONVICTION": 1.3,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
-        "MAX_NEGATIVE_LIFT": 0.7,
+        "MAX_NEGATIVE_LIFT": 0.8,
         "MAX_RULE_LENGTH": 4,
         "TARGET_CELLS": 30,
         "MIN_CELLS_PER_PATCH": 2,

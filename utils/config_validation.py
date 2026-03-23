@@ -1,14 +1,36 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 def validate_config(config, algo, methods):
-    """Validates config keys at pipeline startup. Raises ValueError on first violation."""
+    """
+    Validates config keys at pipeline startup and fills in defaults for optional parameters.
+    Mutates config in-place.
+    """
+    # 1. Fill defaults for optional parameters and log warnings
+    defaults = {
+        "MAX_NEGATIVE_LEVERAGE": -0.001,
+        "MAX_NEGATIVE_LIFT": 0.7,
+        "MIN_CONVICTION": 1.0,
+        "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
+    }
+    
+    for key, default_val in defaults.items():
+        if key not in config:
+            config[key] = default_val
+            logger.warning(f"Optional config key {key!r} missing. Using default: {default_val}")
+
+    # 2. Strict validation for required parameters
     required = [
         "RADIUS", "K_NEIGHBORS", "MIN_SUPPORT", "MIN_CONFIDENCE", "MIN_LIFT",
-        "MIN_LEVERAGE", "MIN_CONVICTION", "MAX_RULE_LENGTH", "N_PERMUTATIONS",
+        "MIN_LEVERAGE", "MAX_RULE_LENGTH", "N_PERMUTATIONS",
         "N_TOP_RULES", "MIN_CELL_TYPE_FREQUENCY",
     ]
     for key in required:
         if key not in config:
             raise ValueError(f"CONFIG missing required key: {key!r}")
 
+    # 3. Value range validation
     if not (0 < config["MIN_SUPPORT"] < 1):
         raise ValueError(f"MIN_SUPPORT must be in (0, 1), got {config['MIN_SUPPORT']}")
     if not (0 <= config["MIN_CONFIDENCE"] <= 1):

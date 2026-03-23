@@ -68,13 +68,6 @@ def plot_raw_volcano(dfs, output_dir):
         ax = axes[i]
         df = dfs[m].copy()
         
-        # Sample if huge to avoid crashing plotter
-        if len(df) > 20000:
-            df = df.sample(20000, random_state=42)
-            title_suffix = " (Sampled 20k)"
-        else:
-            title_suffix = ""
-            
         # Log FDR
         df["log_fdr"] = -np.log10(df["FDR"] + 1e-10)
         
@@ -114,7 +107,7 @@ def plot_raw_volcano(dfs, output_dir):
                 f"10%:{pcts[0]:.1e}, 50%:{pcts[2]:.1e}, 90%:{pcts[4]:.1e}"
             )
 
-        ax.set_title(f"Raw Rules: {m}{title_suffix}\n{stats_subtitle}", fontsize=10)
+        ax.set_title(f"Raw Rules: {m}\n{stats_subtitle}", fontsize=10)
         ax.set_ylabel("-log10(FDR)")
         ax.set_xlabel("Lift")
 

@@ -8,10 +8,12 @@ from utils.spatial import MIN_CELLS, is_dominated
 from utils.rules import filter_rule_by_scores_mask
 from utils.stats import run_permutation_test
 
+from typing import Optional
+
 logger = logging.getLogger(__name__)
 
 
-def run(neighborhoods, coords, cell_types, config, method):
+def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: Optional[np.ndarray] = None):
     """
     Entry point for standard binary FP-Growth.
 
@@ -21,17 +23,18 @@ def run(neighborhoods, coords, cell_types, config, method):
         cell_types:    (N,) array of cell type labels
         config:        Pipeline config dict
         method:        Spatial method name (BAG, CN, KNN_R, WINDOW, GRID)
+        functional_subtypes: (N,) array of lists of functional marker strings
 
     Returns:
         mined_rules: DataFrame of association rules (may be empty)
         validate_fn: Callable validate_fn(rules_df) -> rules_df with p_value columns
         stats:       Dict with transaction statistics (sizes, cell_counts, orig, kept)
     """
-    trans, stats = _build_transactions(neighborhoods, cell_types, method, config)
+    trans, stats = _build_transactions(neighborhoods, cell_types, method, config, functional_subtypes)
     mined_rules = _mine(trans, config, method)
 
     def validate_fn(rules_df):
-        return _validate_rules(neighborhoods, cell_types, rules_df, config, method)
+        return _validate_rules(neighborhoods, cell_types, rules_df, config, method, functional_subtypes)
 
     return mined_rules, validate_fn, stats
 
@@ -40,7 +43,7 @@ def run(neighborhoods, coords, cell_types, config, method):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_transactions(neighborhoods, cell_types, method, config):
+def _build_transactions(neighborhoods, cell_types, method, config, functional_subtypes: Optional[np.ndarray] = None):
     """
     Converts neighborhoods into binary transactions (list of item lists).
 
@@ -62,9 +65,24 @@ def _build_transactions(neighborhoods, cell_types, method, config):
             raw_types = cell_types[idxs]
             if is_dominated(raw_types):
                 continue
-            center = f"{cell_types[center_i]}_CENTER"
-            neighbors = [f"{cell_types[n]}_NEIGHBOR" for n in idxs if n != center_i]
-            trans = [center] + list(set(neighbors))
+
+            # Center logic - use set to avoid duplicates immediately
+            trans = {f"{cell_types[center_i]}_CENTER"}
+            if functional_subtypes is not None:
+                for s in functional_subtypes[center_i]:
+                    trans.add(f"{s}_CENTER")
+
+            # Neighbors logic
+            for n in idxs:
+                if n == center_i:
+                    continue
+                n_type = cell_types[n]
+                trans.add(f"{n_type}_NEIGHBOR")
+                if functional_subtypes is not None:
+                    for s in functional_subtypes[n]:
+                        trans.add(f"{s}_NEIGHBOR")
+            
+            trans_list = list(trans)
         else:
             idxs = item
             if len(idxs) < min_cells:
@@ -72,10 +90,18 @@ def _build_transactions(neighborhoods, cell_types, method, config):
             raw_types = cell_types[idxs]
             if is_dominated(raw_types):
                 continue
-            trans = list(set(raw_types))
+            
+            trans = set()
+            for idx in idxs:
+                trans.add(cell_types[idx])
+                if functional_subtypes is not None:
+                    for s in functional_subtypes[idx]:
+                        trans.add(s)
+            
+            trans_list = list(trans)
 
-        transactions.append(trans)
-        sizes.append(len(trans))
+        transactions.append(trans_list)
+        sizes.append(len(trans_list))
         cell_counts.append(len(idxs))
 
     stats = {
@@ -174,7 +200,7 @@ def _check_rule(rule_row, transaction_sets, config):
     return filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
 
 
-def _validate_rules(neighborhoods, cell_types, rules_df, config, method):
+def _validate_rules(neighborhoods, cell_types, rules_df, config, method, functional_subtypes=None):
     """
     Validates rules via permutation test.
     Shuffles cell type labels, rebuilds binary transactions, checks if rules survive.
@@ -184,11 +210,17 @@ def _validate_rules(neighborhoods, cell_types, rules_df, config, method):
 
     n_perms = config["N_PERMUTATIONS"]
 
-    def build_fn(shuffled_types):
-        trans, _ = _build_transactions(neighborhoods, shuffled_types, method, config)
+    def build_fn(shuffled_indices):
+        # Slice both using the same shuffled indices to maintain marker-cell link
+        sh_types = cell_types[shuffled_indices]
+        sh_subtypes = None
+        if functional_subtypes is not None:
+            sh_subtypes = functional_subtypes[shuffled_indices]
+        
+        trans, _ = _build_transactions(neighborhoods, sh_types, method, config, sh_subtypes)
         return [set(t) for t in trans]
 
     def check_fn(rule_row, transaction_sets):
         return _check_rule(rule_row, transaction_sets, config)
 
-    return run_permutation_test(rules_df, cell_types, n_perms, build_fn, check_fn)
+    return run_permutation_test(rules_df, len(cell_types), n_perms, build_fn, check_fn)

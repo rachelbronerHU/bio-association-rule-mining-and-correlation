@@ -1,14 +1,23 @@
 import pandas as pd
+import numpy as np
 import time
 import logging
 import os
 import csv
-from constants import RARE_FILTERING_STATS_DIR, TRANSACTION_DATA_DIR, ALGO, SAVE_RAW_RULES
+from typing import Optional, Tuple
+from constants import (
+    RARE_FILTERING_STATS_DIR, 
+    TRANSACTION_DATA_DIR, 
+    ALGO, 
+    SAVE_RAW_RULES,
+    USE_FUNCTIONAL_MARKERS
+)
 from utils.spatial import get_neighborhoods
 from utils.rules import (
     select_top_rules,
     count_cell_types_in_fov,
     filter_rules_by_rare_cells,
+    remove_hierarchical_redundancy,
     filter_redundant_rules,
 )
 from algos import fpgrowth as fpgrowth_algo
@@ -17,12 +26,45 @@ from algos import weighted_fpgrowth as wfpg_algo
 logger = logging.getLogger("worker")
 
 
+def _apply_rule_filters(rules: pd.DataFrame, cell_type_counts: dict, config: dict, method: str, n_cells_total: int) -> Tuple[pd.DataFrame, int, int]:
+    """
+    Shared pipeline for filtering rules:
+    1. Rare cell types (calculated against n_cells_total)
+    2. Hierarchical redundancy (Apple is a Fruit)
+    3. Occam's Razor redundancy
+    """
+    if rules.empty:
+        return rules, 0, 0
+
+    # 1. Rare Cell Filter (Mathematical Fix: use physical total)
+    rules, n_rare_filtered = filter_rules_by_rare_cells(rules, cell_type_counts, config, method, n_cells_total)
+    if rules.empty:
+        return rules, 0, n_rare_filtered
+
+    # 2. Hierarchical Pruning
+    rules, n_hier_removed = remove_hierarchical_redundancy(rules, config)
+    if rules.empty:
+        return rules, n_hier_removed, n_rare_filtered
+
+    # 3. Occam's Razor
+    rules, n_occ_removed = filter_redundant_rules(rules, config)
+    
+    total_removed = n_hier_removed + n_occ_removed
+    return rules, total_removed, n_rare_filtered
+
+
 def process_single_sample(sample_id, df_sample, method, config):
     pid = os.getpid()
     prefix = f"[Worker {pid}] [Sample {sample_id}]"
 
     coords = df_sample[["x", "y"]].values
     cell_types = df_sample["cell_type"].values
+    n_cells_total = len(cell_types) # Actual physical cell count
+    
+    # Optional Functional Subtypes
+    functional_subtypes = None
+    if "functional_subtypes" in df_sample.columns:
+        functional_subtypes = df_sample["functional_subtypes"].values
 
     # 1. Get neighborhoods - ONE TIME
     t0 = time.time()
@@ -33,9 +75,9 @@ def process_single_sample(sample_id, df_sample, method, config):
     t0 = time.time()
 
     if ALGO == "fpgrowth":
-        mined_rules, validate_fn, stats = fpgrowth_algo.run(neighborhoods, coords, cell_types, config, method)
+        mined_rules, validate_fn, stats = fpgrowth_algo.run(neighborhoods, coords, cell_types, config, method, functional_subtypes)
     elif ALGO == "weighted_fpgrowth":
-        mined_rules, validate_fn, stats = wfpg_algo.run(neighborhoods, coords, cell_types, config, method)
+        mined_rules, validate_fn, stats = wfpg_algo.run(neighborhoods, coords, cell_types, config, method, functional_subtypes)
     else:
         raise ValueError(f"Unknown ALGO in constants.py: {ALGO!r}")
 
@@ -47,20 +89,22 @@ def process_single_sample(sample_id, df_sample, method, config):
 
     # 3. Filter & Validate
     t0 = time.time()
+    cell_type_counts = count_cell_types_in_fov(cell_types, functional_subtypes)
+    
     if SAVE_RAW_RULES:
-        rules_v, raw_rules_v, n_removed, n_rare_filtered = _process_with_raw_rules(mined_rules, validate_fn, cell_types, config, method)
+        rules_v, raw_rules_v, n_rem, n_rare = _process_with_raw_rules(mined_rules, validate_fn, cell_type_counts, config, method, n_cells_total)
     else:
-        rules_v, raw_rules_v, n_removed, n_rare_filtered = _process_optimized(mined_rules, validate_fn, cell_types, config, method)
+        rules_v, raw_rules_v, n_rem, n_rare = _process_optimized(mined_rules, validate_fn, cell_type_counts, config, method, n_cells_total)
 
     t_val = time.time() - t0
     n_val = len(rules_v)
 
-    stats["redundant_removed"] = n_removed
-    stats["rare_filtered"] = n_rare_filtered
+    stats["redundant_removed"] = n_rem
+    stats["rare_filtered"] = n_rare
 
-    logger.info(f"{prefix} {method}: {stats['kept']} Trans | {n_mined} Mined | {n_rare_filtered} RareFiltered | {n_val} Validated (S:{t_struct:.2f}s M:{t_mine:.2f}s V:{t_val:.2f}s)")
+    logger.info(f"{prefix} {method}: {stats['kept']} Trans | {n_mined} Mined | {n_rare} RareFiltered | {n_val} Validated (S:{t_struct:.2f}s M:{t_mine:.2f}s V:{t_val:.2f}s)")
 
-    _save_rare_filtering_stats(sample_id, method, n_mined, n_rare_filtered, n_val)
+    _save_rare_filtering_stats(sample_id, method, n_mined, n_rare, n_val)
 
     return {
         "Sample": sample_id,
@@ -70,61 +114,36 @@ def process_single_sample(sample_id, df_sample, method, config):
     }
 
 
-def _process_with_raw_rules(mined_rules, validate_fn, cell_types, config, method):
+def _process_with_raw_rules(mined_rules, validate_fn, cell_type_counts, config, method, n_cells_total):
     """
     SAVE_RAW_RULES = True path:
-    1. Filter rare cell types
-    2. Select Top N candidates
-    3. Validate ALL (get p-values for raw rules)
-    4. Filter redundancy from validated set
+    1. Select Top N candidates from ALL mined rules
+    2. Validate ALL Top N (get p-values for raw rules)
+    3. Apply standard filters to validated set
     """
-    n_removed = n_rare_filtered = 0
-    empty = pd.DataFrame()
-
-    if mined_rules.empty:
-        return empty, empty, n_removed, n_rare_filtered
-
-    cell_type_counts = count_cell_types_in_fov(cell_types)
-    mined_rules, n_rare_filtered = filter_rules_by_rare_cells(mined_rules, cell_type_counts, config, method)
-
-    if mined_rules.empty:
-        return empty, empty, n_removed, n_rare_filtered
-
     candidates = select_top_rules(mined_rules, n=config["N_TOP_RULES"])
     raw_rules_v = validate_fn(candidates)
-    rules_v, n_removed = filter_redundant_rules(raw_rules_v, config)
+    
+    rules_v, n_removed, n_rare_filtered = _apply_rule_filters(raw_rules_v, cell_type_counts, config, method, n_cells_total)
 
     return rules_v, raw_rules_v, n_removed, n_rare_filtered
 
 
-def _process_optimized(mined_rules, validate_fn, cell_types, config, method):
+def _process_optimized(mined_rules, validate_fn, cell_type_counts, config, method, n_cells_total):
     """
     SAVE_RAW_RULES = False path:
-    1. Filter rare cell types
-    2. Filter redundancy (pre-validation)
-    3. Select Top N
-    4. Validate survivors only
+    1. Apply filters to ALL mined rules first (unvalidated)
+    2. Select Top N from survivors
+    3. Validate survivors only
     """
-    n_removed = n_rare_filtered = 0
-    empty = pd.DataFrame()
-
-    if mined_rules.empty:
-        return empty, empty, n_removed, n_rare_filtered
-
-    cell_type_counts = count_cell_types_in_fov(cell_types)
-    mined_rules, n_rare_filtered = filter_rules_by_rare_cells(mined_rules, cell_type_counts, config, method)
-
-    if mined_rules.empty:
-        return empty, empty, n_removed, n_rare_filtered
-
-    filtered_rules, n_removed = filter_redundant_rules(mined_rules, config)
+    filtered_rules, n_removed, n_rare_filtered = _apply_rule_filters(mined_rules, cell_type_counts, config, method, n_cells_total)
 
     if len(filtered_rules) > config["N_TOP_RULES"]:
         filtered_rules = select_top_rules(filtered_rules, n=config["N_TOP_RULES"])
 
     rules_v = validate_fn(filtered_rules)
 
-    return rules_v, empty, n_removed, n_rare_filtered
+    return rules_v, pd.DataFrame(), n_removed, n_rare_filtered
 
 
 def _save_rare_filtering_stats(sample_id, method, n_mined, n_rare_filtered, n_validated):

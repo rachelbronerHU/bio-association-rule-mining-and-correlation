@@ -7,10 +7,12 @@ from utils.spatial import MIN_CELLS, is_dominated
 from utils.rules import filter_rule_by_scores_mask
 from utils.stats import run_permutation_test
 
+from typing import Optional
+
 logger = logging.getLogger(__name__)
 
 
-def run(neighborhoods, coords, cell_types, config, method):
+def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: Optional[np.ndarray] = None):
     """
     Entry point for Weighted FP-Growth with Gaussian distance-decay.
 
@@ -20,6 +22,7 @@ def run(neighborhoods, coords, cell_types, config, method):
         cell_types:    (N,) array of cell type labels
         config:        Pipeline config dict
         method:        Spatial method name — must be CN or KNN_R
+        functional_subtypes: (N,) array of lists of functional marker strings
 
     Returns:
         mined_rules: DataFrame of association rules (may be empty)
@@ -37,7 +40,19 @@ def run(neighborhoods, coords, cell_types, config, method):
     # sample regardless of how many times cell type labels are shuffled.
     geo_cache = _precompute_geometry(neighborhoods, coords, config)
 
-    trans, sizes, cell_counts = _build_transactions_from_cache(geo_cache, cell_types)
+    # PERFORMANCE OPTIMIZATION: Pre-calculate spatial labels once to avoid 
+    # millions of f-string operations inside the permutation loop.
+    neighbor_labels = np.array([f"{ct}_NEIGHBOR" for ct in cell_types])
+    center_labels = np.array([f"{ct}_CENTER" for ct in cell_types])
+    
+    fn_labels = fc_labels = None
+    if functional_subtypes is not None:
+        fn_labels = np.array([[f"{s}_NEIGHBOR" for s in st] for st in functional_subtypes], dtype=object)
+        fc_labels = np.array([[f"{s}_CENTER" for s in st] for st in functional_subtypes], dtype=object)
+
+    trans, sizes, cell_counts = _build_transactions_from_cache(
+        geo_cache, cell_types, neighbor_labels, center_labels, fn_labels, fc_labels
+    )
     stats = {
         "sizes": sizes,
         "cell_counts": cell_counts,
@@ -47,7 +62,10 @@ def run(neighborhoods, coords, cell_types, config, method):
     mined_rules = _mine(trans, config)
 
     def validate_fn(rules_df):
-        return _validate_rules(geo_cache, cell_types, rules_df, config)
+        return _validate_rules(
+            geo_cache, cell_types, neighbor_labels, center_labels, 
+            rules_df, config, fn_labels, fc_labels
+        )
 
     return mined_rules, validate_fn, stats
 
@@ -90,16 +108,9 @@ def _precompute_geometry(neighborhoods, coords, config):
     return cache
 
 
-def _build_transactions_from_cache(geo_cache, cell_types):
+def _build_transactions_from_cache(geo_cache, cell_types, neighbor_labels, center_labels, fn_labels=None, fc_labels=None):
     """
-    Builds weighted transactions using pre-computed geometry and current cell type labels.
-
-    Called once for the initial mining pass and once per permutation iteration,
-    but geometry (distances, weights) is never recomputed — only label lookups occur.
-
-    Weighted transaction format: {item_label: capped_weight, ...}
-      - Neighbor items:  f"{cell_type}_NEIGHBOR", weight = min(Gaussian decay sum, 1.0)
-      - Center item:     f"{cell_type}_CENTER",   weight = 1.0
+    Builds weighted transactions using pre-computed geometry and pre-calculated labels.
     """
     transactions = []
     sizes = []
@@ -112,15 +123,20 @@ def _build_transactions_from_cache(geo_cache, cell_types):
 
         trans = {}
         for n_idx, w in zip(neighbor_idxs, weights):
-            ct = f"{cell_types[n_idx]}_NEIGHBOR"
+            ct = neighbor_labels[n_idx]
             trans[ct] = trans.get(ct, 0.0) + w
+            if fn_labels is not None:
+                for st in fn_labels[n_idx]:
+                    trans[st] = trans.get(st, 0.0) + w
 
-        # Center cell at distance 0 → Gaussian weight = 1.0
-        trans[f"{cell_types[center_i]}_CENTER"] = 1.0
+        # Center cell
+        ct_center = center_labels[center_i]
+        trans[ct_center] = 1.0
+        if fc_labels is not None:
+            for st in fc_labels[center_i]:
+                trans[st] = 1.0
 
-        # Cap each neighbor weight at 1.0 (receptor saturation model):
-        # once a neighborhood has ~1 unit of a cell type nearby, adding more
-        # cells doesn't increase the interaction signal. CENTER is always 1.0.
+        # Cap each neighbor weight at 1.0
         trans = {k: min(v, 1.0) for k, v in trans.items()}
 
         transactions.append(trans)
@@ -142,7 +158,7 @@ class _FPNode:
         self.weight = 0.0
         self.parent = parent
         self.children = {}
-        self.link = None  # horizontal link to next node with same item in header
+        self.link = None
 
 
 class WeightedFPTree:
@@ -198,33 +214,12 @@ class WeightedFPTree:
 # Phase C: Mining with min-based weighted support
 # ---------------------------------------------------------------------------
 
-def _min_support(itemset, transactions):
-    """
-    Compute min-based weighted support for an itemset over raw transactions.
-
-    support(I) = (1/N) × Σ_t min(w_i_t for i in I)
-
-    This is the correct definition: co-occurrence strength is limited by the
-    weakest partner per transaction. It satisfies downward closure, so
-    support({A,B}) ≤ support({A}) always holds.
-    """
-    items = list(itemset)
-    N = len(transactions)
-    total = 0.0
-    for trans in transactions:
-        if all(item in trans for item in items):
-            total += min(trans[item] for item in items)
-    return total / N
-
-
 def _mine(transactions, config):
     """Build WeightedFPTree and mine frequent weighted itemsets → rules DataFrame."""
     if not transactions:
         return pd.DataFrame()
 
     N = len(transactions)
-    # Effective raw support threshold: whichever is stricter — the relative
-    # fraction (MIN_SUPPORT * N) or the absolute floor (MIN_ABS_SUPPORT).
     min_support_raw = max(
         config["MIN_SUPPORT"] * N,
         config.get("MIN_ABS_SUPPORT", 0),
@@ -242,9 +237,7 @@ def _mine(transactions, config):
     if not itemsets_raw:
         return pd.DataFrame()
 
-    # Drop itemsets that are too large to produce any valid rule before the
-    # expensive O(N) per-itemset recomputation. MAX_RULE_LENGTH == itemset size
-    # because len(antecedents) + len(consequents) always equals the source itemset size.
+    # Prune based on size before recomputing exact support
     max_itemset_size = config["MAX_RULE_LENGTH"]
     itemsets_raw = [(fs, w) for fs, w in itemsets_raw if len(fs) <= max_itemset_size]
 
@@ -255,9 +248,12 @@ def _mine(transactions, config):
     # weights are an upper bound on min-based support, not the exact value.
     # Any itemset whose true min-based support falls below the threshold is discarded.
     effective_min_support = min_support_raw / N
+    W, item_idx_map = _build_weight_matrix(transactions)
+    
     itemsets = []
     for fs, _ in itemsets_raw:
-        sup = _min_support(fs, transactions)
+        # Uses fast NumPy math instead of Python loops
+        sup = _calculate_weighted_support_vectorized(fs, W, item_idx_map)
         if sup >= effective_min_support:
             itemsets.append((fs, sup))
 
@@ -277,10 +273,7 @@ def _mine_tree(tree, min_support, prefix):
     an exact condition (not just an upper bound).
     """
     frequent = []
-
     for item in sorted(tree.header.keys(), key=lambda x: tree.header[x][0]):
-        # Callers invoke prune() before _mine_tree so this is typically always True,
-        # but kept as a defensive guard for direct callers that skip prune().
         if tree.header[item][0] < min_support:
             continue
 
@@ -333,9 +326,7 @@ def _itemsets_to_rules(itemsets, support_map, config):
                 s_ant = support_map.get(ant, 0)
                 s_con = support_map.get(con, 0)
 
-                assert s_ant > 0 and s_con > 0, (
-                    f"Downward closure violated: subset support is 0 for itemset {itemset}"
-                )
+                assert s_ant > 0 and s_con > 0, f"Closure violation for {itemset}"
 
                 confidence = s_both / s_ant
                 lift = confidence / s_con
@@ -363,15 +354,14 @@ def _itemsets_to_rules(itemsets, support_map, config):
     rules = pd.DataFrame(rows)
     rules["len_ant"] = rules["antecedents"].apply(len)
     rules["len_con"] = rules["consequents"].apply(len)
-
+    
     # weighted_fpgrowth always uses CN/KNN_R: antecedent must contain center cell
     rules = rules[rules["antecedents"].apply(lambda x: any("_CENTER" in i for i in x))]
-
     return rules.drop_duplicates().reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
-# Validation
+# Phase D: High-Performance Vectorized Utilities
 # ---------------------------------------------------------------------------
 
 def _build_weight_matrix(transactions):
@@ -383,6 +373,9 @@ def _build_weight_matrix(transactions):
                   W[t, j] = weight of item j in transaction t (0 if absent)
         item_idx: dict mapping item label -> column index in W
     """
+    if not transactions:
+        return np.array([]), {}
+        
     all_items = sorted({item for trans in transactions for item in trans})
     item_idx = {item: i for i, item in enumerate(all_items)}
     W = np.zeros((len(transactions), len(all_items)), dtype=np.float64)
@@ -392,18 +385,23 @@ def _build_weight_matrix(transactions):
     return W, item_idx
 
 
-def _batch_check_rules(rules_df, transactions, config):
-    """
-    Vectorized check of all rules against a transaction list.
+def _calculate_weighted_support_vectorized(itemset, W, item_idx_map):
+    """Computes min-based weighted support using NumPy matrix operations."""
+    if W.size == 0:
+        return 0.0
+        
+    items = list(itemset)
+    cols = [item_idx_map[i] for i in items if i in item_idx_map]
+    
+    if len(cols) < len(items):
+        return 0.0
+        
+    # extract columns, find min per row, sum and normalize
+    return float(np.min(W[:, cols], axis=1).sum()) / W.shape[0]
 
-    Builds a weight matrix W once, then for each rule uses NumPy slice
-    operations to compute weighted support without any Python loops over
-    transactions. Returns a boolean array of shape (len(rules_df),).
 
-    Weighted support semantics:
-        support(I, T) = min(W[T, i] for i in I)  if all items present, else 0
-    This is the same definition used in _check_rule.
-    """
+def _check_all_rules_vectorized(rules_df, transactions, config):
+    """Vectorized check of all discovered rules against a transaction list."""
     if not transactions:
         return np.zeros(len(rules_df), dtype=bool)
 
@@ -417,18 +415,16 @@ def _batch_check_rules(rules_df, transactions, config):
     )
 
     for r_idx, (_, row) in enumerate(rules_df.iterrows()):
-        antecedents = list(row["antecedents"])
-        consequents = list(row["consequents"])
-
-        # If any item never appears in any transaction, skip immediately
-        ant_cols = [item_idx[i] for i in antecedents if i in item_idx]
-        con_cols = [item_idx[i] for i in consequents if i in item_idx]
-        if len(ant_cols) < len(antecedents) or len(con_cols) < len(consequents):
+        ant_cols = [item_idx[i] for i in row["antecedents"] if i in item_idx]
+        con_cols = [item_idx[i] for i in row["consequents"] if i in item_idx]
+        
+        if len(ant_cols) < len(row["antecedents"]) or len(con_cols) < len(row["consequents"]):
             continue
 
-        ant_W = W[:, ant_cols]           # (N, len_ant)
-        con_W = W[:, con_cols]           # (N, len_con)
-        all_W = W[:, ant_cols + con_cols]  # (N, len_ant+len_con)
+        # Mathematical logic: find min weight per row for ant, con, and combined
+        ant_W = W[:, ant_cols]
+        con_W = W[:, con_cols]
+        all_W = W[:, ant_cols + con_cols]
 
         has_ant = np.all(ant_W > 0, axis=1)
         has_con = np.all(con_W > 0, axis=1)
@@ -455,26 +451,27 @@ def _batch_check_rules(rules_df, transactions, config):
     return results
 
 
-def _validate_rules(geo_cache, cell_types, rules_df, config):
+def _validate_rules(geo_cache, cell_types, neighbor_labels, center_labels, rules_df, config, fn_labels=None, fc_labels=None):
     """
     Validates rules via permutation test.
-
-    Geometry (neighbor indices, Gaussian weights) is already cached — each
-    permutation only shuffles cell type labels and does a fast label-lookup
-    rebuild via _build_transactions_from_cache.
-
-    Uses _batch_check_rules (vectorized) so all rules are evaluated against
-    each permutation's weight matrix with NumPy operations, not Python loops.
+    Uses high-speed matrix math and pre-calculated labels to avoid bottlenecks.
     """
     if rules_df.empty:
         return rules_df
 
-    def build_fn(shuffled_types):
-        trans, _, _ = _build_transactions_from_cache(geo_cache, shuffled_types)
+    def build_fn(shuffled_indices):
+        # Slice both using the same shuffled indices
+        sh_types = cell_types[shuffled_indices]
+        sh_n = neighbor_labels[shuffled_indices]
+        sh_c = center_labels[shuffled_indices]
+        sh_fn = fn_labels[shuffled_indices] if fn_labels is not None else None
+        sh_fc = fc_labels[shuffled_indices] if fc_labels is not None else None
+        
+        trans, _, _ = _build_transactions_from_cache(geo_cache, sh_types, sh_n, sh_c, sh_fn, sh_fc)
         return trans
 
-    def batch_check_fn(rdf, transactions):
-        return _batch_check_rules(rdf, transactions, config)
+    def validation_callback(rdf, transactions):
+        return _check_all_rules_vectorized(rdf, transactions, config)
 
-    return run_permutation_test(rules_df, cell_types, config["N_PERMUTATIONS"], build_fn,
-                                check_fn=None, batch_check_fn=batch_check_fn)
+    return run_permutation_test(rules_df, len(cell_types), config["N_PERMUTATIONS"], build_fn,
+                                check_fn=None, batch_check_fn=validation_callback)

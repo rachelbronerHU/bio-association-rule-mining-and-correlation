@@ -10,6 +10,17 @@ SAVE_RAW_RULES = True
 _DEFAULT_ALGO = "weighted_fpgrowth"
 ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
 
+# Functional Markers Expansion
+USE_FUNCTIONAL_MARKERS = True
+
+CELLTYPE_MARKER_THRESHOLDS = {
+    'Epithelial': {'Ki67': 2.5, 'HLADRDPDQ': 1.75},
+    'CD8T': {'Ki67': 2.5, 'CD103': 2.0, 'CD69': 2.0, 'GZMB': 2.5},
+    'CD4T': {'Ki67': 1.0, 'CD103': 1.0, 'CD69': 2.0, 'GZMB': 0.5},
+    'Neutrophil': {'CD103': 2.75},
+    'Neutrophil_CD15': {'CD103': 2.75}
+}
+
 # Path Configuration
 DATA_DIR = 'data/'
 MIBI_GUT_DIR_PATH = DATA_DIR + 'MIBIGutCsv/'
@@ -54,21 +65,21 @@ if ALGO == "weighted_fpgrowth":
         "K_NEIGHBORS": 30,
         "BANDWIDTH": 15.0,          # Gaussian decay (µm). At d=BANDWIDTH weight ≈ 0.6. Defaults to RADIUS if absent.
         "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
-        "MIN_ABS_SUPPORT": 10,      # Rule must hold in at least this many transactions (absolute floor)
-        "MIN_CONFIDENCE": 0.7,      # Same as binary — weighted confidence already requires intensity match, not just presence
+        "MIN_ABS_SUPPORT": 5,      # Rule must hold in at least this many transactions (absolute floor)
+        "MIN_CONFIDENCE": 0.3,      # Same as binary — weighted confidence already requires intensity match, not just presence
         "MIN_LIFT": 1.2,            # Slightly stricter to compensate for finer-grained support scale
         "MIN_LEVERAGE": 0.005,
         "MAX_NEGATIVE_LEVERAGE": -0.001,
         "MIN_CONVICTION": 1.3,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
         "MAX_NEGATIVE_LIFT": 0.8,
-        "MAX_RULE_LENGTH": 4,
+        "MAX_RULE_LENGTH": 5,
         "TARGET_CELLS": 30,
         "MIN_CELLS_PER_PATCH": 2,
         "N_PERMUTATIONS": 5 if DEBUG else 1000,
         "N_TOP_RULES": 100 if DEBUG else 2000,
         "MIN_CELL_TYPE_FREQUENCY": 5,
-        "MIN_CELL_TYPE_PERCENTAGE": 0.01,
+        "MIN_CELL_TYPE_PERCENTAGE": 0.0, # 0% of all cells, to catch rare types in small samples while still filtering out very rare types in large samples
     }
 else:
     METHODS = ["BAG", "CN", "KNN_R"]
@@ -77,19 +88,19 @@ else:
         "K_NEIGHBORS": 30,
         "GRID_WINDOW_SIZE": 30.0,
         "WINDOW_STEP_FRACTION": 0.5,
-        "MIN_SUPPORT": 0.05,
-        "MIN_CONFIDENCE": 0.7,
+        "MIN_SUPPORT": 0.01,
+        "MIN_CONFIDENCE": 0.3,
         "MIN_LIFT": 1.2,
         "MIN_LEVERAGE": 0.005,
         "MAX_NEGATIVE_LEVERAGE": -0.001,
         "MIN_CONVICTION": 1.3,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
         "MAX_NEGATIVE_LIFT": 0.8,
-        "MAX_RULE_LENGTH": 4,
+        "MAX_RULE_LENGTH": 5,
         "TARGET_CELLS": 30,
         "MIN_CELLS_PER_PATCH": 2,
         "N_PERMUTATIONS": 5 if DEBUG else 1000,
         "N_TOP_RULES": 100 if DEBUG else 2000,
         "MIN_CELL_TYPE_FREQUENCY": 5,
-        "MIN_CELL_TYPE_PERCENTAGE": 0.01,
+        "MIN_CELL_TYPE_PERCENTAGE": 0.0, # 0% of all cells, to catch rare types in small samples while still filtering out very rare types in large samples
     }

@@ -6,7 +6,19 @@ import logging
 import os
 import json
 from concurrent.futures import ProcessPoolExecutor
-from constants import DEBUG, DEBUG_FOVS_PER_GROUP, MIBI_GUT_DIR_PATH, RESULTS_DATA_DIR, SAVE_RAW_RULES, TRANSACTION_DATA_DIR, ALGO, CONFIG, METHODS
+from constants import (
+    DEBUG, 
+    DEBUG_FOVS_PER_GROUP, 
+    MIBI_GUT_DIR_PATH, 
+    RESULTS_DATA_DIR, 
+    SAVE_RAW_RULES, 
+    TRANSACTION_DATA_DIR, 
+    ALGO, 
+    CONFIG, 
+    METHODS,
+    USE_FUNCTIONAL_MARKERS,
+    CELLTYPE_MARKER_THRESHOLDS
+)
 from utils.logging_setup import setup_logging
 from utils.config_validation import validate_config
 import worker_task
@@ -20,9 +32,39 @@ GROUP_COL = "Pathological stage"
 ID_COL = "fov"
 BIOPSY_COL = "Biopsy_ID"
 
-# CONFIG and METHODS are imported from constants.py (algo-specific, set via ALGO)
-
 # --- 1. DATA LOADING ---
+
+def _add_functional_subtypes(df):
+    """
+    Identifies functional states (e.g., Ki67+) based on protein expression thresholds.
+    Markers are linked to their base cell type and stored in a new column.
+    """
+    if not USE_FUNCTIONAL_MARKERS:
+        return df
+
+    logger.info("Pre-calculating functional subtypes...")
+    # Initialize a list of lists for efficiency
+    functional_subtypes_list = [[] for _ in range(len(df))]
+    
+    # Build a mapping of index to position for faster lookup
+    idx_to_pos = {idx: i for i, idx in enumerate(df.index)}
+
+    for base_type, markers in CELLTYPE_MARKER_THRESHOLDS.items():
+        type_mask = df["cell_type"] == base_type
+        for marker, threshold in markers.items():
+            if marker in df.columns:
+                mask = type_mask & (df[marker] > threshold)
+                subtype_label = f"{base_type}_{marker}+"
+                
+                # Vectorized index extraction
+                matching_indices = df.index[mask]
+                for idx in matching_indices:
+                    functional_subtypes_list[idx_to_pos[idx]].append(subtype_label)
+    
+    df["functional_subtypes"] = functional_subtypes_list
+    logger.info("Functional subtypes calculated.")
+    return df
+
 def _normalize_coordinates(df):
     """
     Normalizes x/y coordinates to microns using fixed resolution standards.
@@ -86,6 +128,7 @@ def load_data():
     df_final = df_final.rename(columns={"centroid_x": "x", "centroid_y": "y", "cell type": "cell_type"})
     
     df_final = _normalize_coordinates(df_final)
+    df_final = _add_functional_subtypes(df_final)
 
     # We only need basic spatial data for mining
     req_cols = ["fov", "cell_type", "x", "y"]

@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 from collections import Counter
 
+from typing import Optional
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,46 +31,65 @@ def select_top_rules(rules, n=2000):
     return pd.concat([pos.head(take_pos), neg.head(take_neg)]).drop_duplicates()
 
 
-def count_cell_types_in_fov(cell_types):
+def count_cell_types_in_fov(cell_types, functional_subtypes: Optional[np.ndarray] = None):
     """Count actual cells of each type in FOV. Returns dict {cell_type: count}."""
-    return dict(Counter(cell_types))
+    counts = Counter(cell_types)
+    if functional_subtypes is not None:
+        for subtypes in functional_subtypes:
+            for s in subtypes:
+                counts[s] += 1
+    return dict(counts)
 
 
-def filter_rules_by_rare_cells(rules, cell_type_counts, config, method):
+def _extract_base_lineage(item):
     """
-    Filter out rules where any cell type is rare (below threshold).
+    Robustly extracts the parent lineage from a spatial item.
+    Examples:
+        'Neutrophil_CD15_Ki67+_NEIGHBOR' -> 'Neutrophil_CD15'
+        'CD8T_Ki67+_CENTER' -> 'CD8T'
+        'CD8T_CENTER' -> 'CD8T'
+    """
+    # 1. Strip spatial suffix
+    clean = item.replace("_CENTER", "").replace("_NEIGHBOR", "")
+    
+    # 2. Handle functional markers (identified by '+')
+    if "+" in clean:
+        parts = clean.split("_")
+        # Base is everything except the last marker segment
+        if len(parts) > 1:
+            return "_".join(parts[:-1])
+    return clean
 
-    Threshold = max(MIN_CELL_TYPE_FREQUENCY, MIN_CELL_TYPE_PERCENTAGE * total_cells).
-    MIN_CELL_TYPE_FREQUENCY: absolute cell count floor (default 5).
-    MIN_CELL_TYPE_PERCENTAGE: fraction of all cells (0–1, default 0 = disabled).
 
-    Returns:
-        filtered_rules: DataFrame of rules without rare cell types
-        n_filtered: Number of rules removed
+def filter_rules_by_rare_cells(rules, cell_type_counts, config, method, n_cells_total):
+    """
+    Filter out rules where any cell type lineage is rare (below threshold).
+
+    Threshold = max(MIN_CELL_TYPE_FREQUENCY, MIN_CELL_TYPE_PERCENTAGE * n_cells_total).
+    
+    Mathematical Fix: We use n_cells_total (the physical number of cells) rather 
+    than summing cell_type_counts, because cell_type_counts contains markers 
+    that would cause double-counting.
     """
     if rules.empty:
         return rules, 0
 
-    n_cells = sum(cell_type_counts.values())
     min_absolute = config.get("MIN_CELL_TYPE_FREQUENCY", 5)
-    # MIN_CELL_TYPE_PERCENTAGE is a fraction of total cells (0–1), distinct from
-    # MIN_SUPPORT which is a fraction of transactions. Defaults to 0 (disabled).
     min_percentage = config.get("MIN_CELL_TYPE_PERCENTAGE", 0)
-    threshold = max(min_absolute, int(min_percentage * n_cells))
+    threshold = max(min_absolute, int(min_percentage * n_cells_total))
 
-    def get_cell_types_from_rule(row):
-        cell_types = set()
+    def get_lineages_from_rule(row):
+        lineages = set()
         for item in list(row["antecedents"]) + list(row["consequents"]):
-            if method in ["CN", "KNN_R"]:
-                cell_type = item.replace("_CENTER", "").replace("_NEIGHBOR", "")
-            else:
-                cell_type = item
-            cell_types.add(cell_type)
-        return cell_types
+            # Use shared helper for ALL methods. This ensures that even in 
+            # BAG/GRID/WINDOW modes, we filter based on the parent lineage count
+            # (e.g. CD8T) while allowing rare specific markers to survive.
+            lineages.add(_extract_base_lineage(item))
+        return lineages
 
     original_count = len(rules)
     mask = [
-        all(cell_type_counts.get(ct, 0) >= threshold for ct in get_cell_types_from_rule(row))
+        all(cell_type_counts.get(lin, 0) >= threshold for lin in get_lineages_from_rule(row))
         for _, row in rules.iterrows()
     ]
 
@@ -76,9 +97,85 @@ def filter_rules_by_rare_cells(rules, cell_type_counts, config, method):
     n_filtered = original_count - len(filtered_rules)
 
     if n_filtered > 0:
-        logger.info(f"Filtered {n_filtered} rules with rare cell types (threshold={threshold} cells)")
+        logger.info(f"Filtered {n_filtered} rules with rare cell lineages (threshold={threshold} cells)")
 
     return filtered_rules, n_filtered
+
+
+def _is_hierarchical_redundant(itemset, markers):
+    """
+    Checks if an itemset contains both a base lineage and its own subtype.
+    Uses pre-parsed data to avoid string manipulation in the inner loop.
+    """
+    items = list(itemset)
+    # n^2 check over items in a single rule (usually < 5 items)
+    for i_idx in range(len(items)):
+        item_i = items[i_idx]
+        if item_i not in markers:
+            continue
+            
+        b_name_i, has_plus_i, suffix_i = markers[item_i]
+        
+        # Only check base types (no plus)
+        if has_plus_i:
+            continue
+            
+        for j_idx in range(len(items)):
+            if i_idx == j_idx:
+                continue
+            item_j = items[j_idx]
+            if item_j not in markers:
+                continue
+                
+            b_name_j, has_plus_j, suffix_j = markers[item_j]
+            
+            # REDUNDANCY CONDITION:
+            # 1. Same parent lineage (e.g. CD8T)
+            # 2. Item J is a subtype (has plus)
+            # 3. Same spatial suffix (e.g. both are _CENTER)
+            if b_name_i == b_name_j and has_plus_j and suffix_i == suffix_j:
+                return True
+    return False
+
+
+def remove_hierarchical_redundancy(rules, config):
+    """
+    Deletes rules that contain both a base lineage and its own subtype
+    on the same side (antecedent or consequent).
+    
+    Optimization: Pre-parses all unique items in the rule set once into 
+    (base_name, has_plus, suffix) tuples to avoid string manipulation 
+    during rule iteration.
+    """
+    from constants import USE_FUNCTIONAL_MARKERS
+    if not USE_FUNCTIONAL_MARKERS or rules.empty:
+        return rules, 0
+
+    # 1. Pre-parse unique items in the rule set once
+    unique_items = set()
+    for ant, con in zip(rules["antecedents"], rules["consequents"]):
+        unique_items.update(ant)
+        unique_items.update(con)
+    
+    # item -> (base_name, has_plus, suffix)
+    markers = {}
+    for item in unique_items:
+        suffix = "_CENTER" if "_CENTER" in item else "_NEIGHBOR"
+        has_plus = "+" in item
+        # Use robust shared utility for parent extraction
+        clean_base = _extract_base_lineage(item)
+        markers[item] = (clean_base, has_plus, suffix)
+
+    # 2. Apply filtering using pre-parsed markers
+    # List comprehension over zipped columns is significantly faster than rules.apply(axis=1)
+    mask = [
+        _is_hierarchical_redundant(ant, markers) or 
+        _is_hierarchical_redundant(con, markers)
+        for ant, con in zip(rules["antecedents"], rules["consequents"])
+    ]
+    
+    n_removed = int(sum(mask))
+    return rules[~np.array(mask)], n_removed
 
 
 def filter_redundant_rules(rules, config):

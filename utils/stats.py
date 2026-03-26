@@ -13,16 +13,18 @@ def apply_fdr_correction(p_values):
     return pvals_corrected
 
 
-def run_permutation_test(rules_df, cell_types, n_perms, build_fn, check_fn,
+def run_permutation_test(rules_df, n_items, n_perms, build_fn, check_fn=None,
                          batch_check_fn=None):
     """
     Generic permutation test for validating association rules.
+    Shuffles an index array of size n_items, rebuilds transactions via build_fn,
+    and checks rule survival.
 
     Args:
         rules_df:        DataFrame of rules to validate (must not be empty)
-        cell_types:      Array of cell type labels for the sample
+        n_items:         Number of items (cells) to shuffle
         n_perms:         Number of permutations (0 = skip, assign p_value=1.0)
-        build_fn:        build_fn(shuffled_cell_types) -> transactions
+        build_fn:        build_fn(shuffled_indices) -> transactions
                          Caller is responsible for format (sets, dicts, etc.)
         check_fn:        check_fn(rule_row, transactions) -> bool
                          Per-rule check. Used when batch_check_fn is None.
@@ -41,10 +43,14 @@ def run_permutation_test(rules_df, cell_types, n_perms, build_fn, check_fn,
         return rules_df
 
     better_counts = np.zeros(len(rules_df))
+    
+    # Pre-allocate index array for shuffling
+    indices = np.arange(n_items)
 
     for _ in range(n_perms):
-        shuffled_types = np.random.permutation(cell_types)
-        perm_trans = build_fn(shuffled_types)
+        # Shuffle indices in-place
+        np.random.shuffle(indices)
+        perm_trans = build_fn(indices)
 
         if batch_check_fn is not None:
             better_counts += batch_check_fn(rules_df, perm_trans).astype(float)

@@ -59,7 +59,7 @@ MIN_P_VALUE = 0.05
 # Switch ALGO above to change everything below automatically.
 
 if ALGO == "weighted_fpgrowth":
-    METHODS = ["CN", "KNN_R"]  # BAG has no center cell — not supported by weighted_fpgrowth
+    METHODS = ["CN"]  # "KNN_R" removed. BAG has no center cell — not supported by weighted_fpgrowth
     CONFIG = {
         "RADIUS": 25.0,
         "K_NEIGHBORS": 30,
@@ -82,7 +82,7 @@ if ALGO == "weighted_fpgrowth":
         "MIN_CELL_TYPE_PERCENTAGE": 0.0, # 0% of all cells, to catch rare types in small samples while still filtering out very rare types in large samples
     }
 else:
-    METHODS = ["BAG", "CN", "KNN_R"]
+    METHODS = ["CN"] # "KNN_R", "BAG" "GRID" "WIN" removed.
     CONFIG = {
         "RADIUS": 25.0,
         "K_NEIGHBORS": 30,

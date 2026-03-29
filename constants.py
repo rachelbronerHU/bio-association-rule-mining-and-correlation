@@ -7,7 +7,7 @@ SAVE_RAW_RULES = True
 
 # Algorithm Selection: "fpgrowth" | "weighted_fpgrowth"
 # Change _DEFAULT_ALGO to switch default. Override per-run via: ALGO=weighted_fpgrowth python ...
-_DEFAULT_ALGO = "weighted_fpgrowth"
+_DEFAULT_ALGO = "fpgrowth"
 ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
 
 # Functional Markers Expansion
@@ -88,7 +88,7 @@ else:
         "K_NEIGHBORS": 30,
         "GRID_WINDOW_SIZE": 30.0,
         "WINDOW_STEP_FRACTION": 0.5,
-        "MIN_SUPPORT": 0.01,
+        "MIN_SUPPORT": 0.05,
         "MIN_CONFIDENCE": 0.3,
         "MIN_LIFT": 1.2,
         "MIN_LEVERAGE": 0.005,

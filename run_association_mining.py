@@ -32,6 +32,16 @@ GROUP_COL = "Pathological stage"
 ID_COL = "fov"
 BIOPSY_COL = "Biopsy_ID"
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
+
 # --- 1. DATA LOADING ---
 
 def _add_functional_subtypes(df):
@@ -230,8 +240,8 @@ def save_results(results, df_biopsy, df_fovs, suffix, data_key="Rules"):
             # Basic dict
             entry = {
                 "FOV": res["Sample"],
-                "Antecedents": str(list(row["antecedents"])),
-                "Consequents": str(list(row["consequents"])),
+                "Antecedents": str([str(x) for x in row["antecedents"]]),
+                "Consequents": str([str(x) for x in row["consequents"]]),
                 "Lift": row["lift"],
                 "Confidence": row["confidence"],
                 "Conviction": row["conviction"],
@@ -322,7 +332,7 @@ def run_pipeline():
         # Save Stats
         out_dir = RESULTS_DATA_DIR
         with open(f"{out_dir}/stats_{method}.json", "w") as f:
-            json.dump(stats_collection, f)
+            json.dump(stats_collection, f, cls=NumpyEncoder)
             
     elapsed = time.time() - start_time
     h, rem = divmod(int(elapsed), 3600)

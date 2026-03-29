@@ -5,7 +5,13 @@ from itertools import combinations
 
 from utils.spatial import MIN_CELLS, is_dominated
 from utils.rules import filter_rule_by_scores_mask
-from utils.stats import run_permutation_test
+from utils.validation import (
+    prepare_validation_matrices, 
+    run_matrix_permutation_test, 
+    calculate_metrics,
+    calculate_support_vectorized,
+    _build_weight_matrix
+)
 
 from typing import Optional
 
@@ -61,10 +67,18 @@ def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: 
     }
     mined_rules = _mine(trans, config)
 
+    # PRE-COMPUTE ONCE PER FOV:
+    # Capture the physical structure and labels before returning the hook
+    adj_center, adj_neighbor, label_mat, label_names = prepare_validation_matrices(
+        None, len(cell_types), cell_types, fn_labels, weighted_geo=geo_cache
+    )
+    n_perms = config["N_PERMUTATIONS"]
+
     def validate_fn(rules_df):
-        return _validate_rules(
-            geo_cache, cell_types, neighbor_labels, center_labels, 
-            rules_df, config, fn_labels, fc_labels
+        if rules_df.empty:
+            return rules_df
+        return run_matrix_permutation_test(
+            rules_df, adj_center, adj_neighbor, label_mat, label_names, n_perms, config
         )
 
     return mined_rules, validate_fn, stats
@@ -219,9 +233,9 @@ def _mine(transactions, config):
     if not transactions:
         return pd.DataFrame()
 
-    N = len(transactions)
+    num_trans = len(transactions)
     min_support_raw = max(
-        config["MIN_SUPPORT"] * N,
+        config["MIN_SUPPORT"] * num_trans,
         config.get("MIN_ABS_SUPPORT", 0),
     )
 
@@ -244,16 +258,15 @@ def _mine(transactions, config):
     if not itemsets_raw:
         return pd.DataFrame()
 
-    # Recompute support using min-based semantics: the FP-tree's accumulated
-    # weights are an upper bound on min-based support, not the exact value.
-    # Any itemset whose true min-based support falls below the threshold is discarded.
-    effective_min_support = min_support_raw / N
-    W, item_idx_map = _build_weight_matrix(transactions)
+    # Recompute support using min-based semantics: any itemset whose 
+    # true min-based support falls below the threshold is discarded.
+    effective_min_support = min_support_raw / num_trans
+    trans_mat, item_idx_map = _build_weight_matrix(transactions)
     
     itemsets = []
     for fs, _ in itemsets_raw:
-        # Uses fast NumPy math instead of Python loops
-        sup = _calculate_weighted_support_vectorized(fs, W, item_idx_map)
+        # Uses high-performance unified Matrix Engine
+        sup = calculate_support_vectorized(fs, trans_mat, item_idx_map)
         if sup >= effective_min_support:
             itemsets.append((fs, sup))
 
@@ -322,16 +335,13 @@ def _itemsets_to_rules(itemsets, support_map, config):
                 ant = frozenset(ant)
                 con = itemset - ant
 
-                s_both = support_map.get(itemset, 0)
-                s_ant = support_map.get(ant, 0)
-                s_con = support_map.get(con, 0)
+                sup_both = support_map.get(itemset, 0)
+                sup_ant = support_map.get(ant, 0)
+                sup_con = support_map.get(con, 0)
 
-                assert s_ant > 0 and s_con > 0, f"Closure violation for {itemset}"
+                assert sup_ant > 0 and sup_con > 0, f"Closure violation for {itemset}"
 
-                confidence = s_both / s_ant
-                lift = confidence / s_con
-                leverage = s_both - s_ant * s_con
-                conviction = float("inf") if confidence >= 1.0 else (1 - s_con) / (1 - confidence)
+                confidence, lift, leverage, conviction = calculate_metrics(sup_both, sup_ant, sup_con)
 
                 if not filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence):
                     continue
@@ -339,9 +349,9 @@ def _itemsets_to_rules(itemsets, support_map, config):
                 rows.append({
                     "antecedents": tuple(sorted(ant)),
                     "consequents": tuple(sorted(con)),
-                    "support": s_both,
-                    "antecedent support": s_ant,
-                    "consequent support": s_con,
+                    "support": sup_both,
+                    "antecedent support": sup_ant,
+                    "consequent support": sup_con,
                     "confidence": confidence,
                     "lift": lift,
                     "leverage": leverage,
@@ -361,117 +371,4 @@ def _itemsets_to_rules(itemsets, support_map, config):
 
 
 # ---------------------------------------------------------------------------
-# Phase D: High-Performance Vectorized Utilities
-# ---------------------------------------------------------------------------
-
-def _build_weight_matrix(transactions):
-    """
-    Converts a list of weighted transaction dicts into a dense NumPy matrix.
-
-    Returns:
-        W:        float64 array of shape (N_transactions, N_unique_items)
-                  W[t, j] = weight of item j in transaction t (0 if absent)
-        item_idx: dict mapping item label -> column index in W
-    """
-    if not transactions:
-        return np.array([]), {}
-        
-    all_items = sorted({item for trans in transactions for item in trans})
-    item_idx = {item: i for i, item in enumerate(all_items)}
-    W = np.zeros((len(transactions), len(all_items)), dtype=np.float64)
-    for t_idx, trans in enumerate(transactions):
-        for item, w in trans.items():
-            W[t_idx, item_idx[item]] = w
-    return W, item_idx
-
-
-def _calculate_weighted_support_vectorized(itemset, W, item_idx_map):
-    """Computes min-based weighted support using NumPy matrix operations."""
-    if W.size == 0:
-        return 0.0
-        
-    items = list(itemset)
-    cols = [item_idx_map[i] for i in items if i in item_idx_map]
-    
-    if len(cols) < len(items):
-        return 0.0
-        
-    # extract columns, find min per row, sum and normalize
-    return float(np.min(W[:, cols], axis=1).sum()) / W.shape[0]
-
-
-def _check_all_rules_vectorized(rules_df, transactions, config):
-    """Vectorized check of all discovered rules against a transaction list."""
-    if not transactions:
-        return np.zeros(len(rules_df), dtype=bool)
-
-    N = len(transactions)
-    W, item_idx = _build_weight_matrix(transactions)
-    results = np.zeros(len(rules_df), dtype=bool)
-    # Mirror the same effective threshold used during mining
-    effective_min_support = max(
-        config["MIN_SUPPORT"],
-        config.get("MIN_ABS_SUPPORT", 0) / N,
-    )
-
-    for r_idx, (_, row) in enumerate(rules_df.iterrows()):
-        ant_cols = [item_idx[i] for i in row["antecedents"] if i in item_idx]
-        con_cols = [item_idx[i] for i in row["consequents"] if i in item_idx]
-        
-        if len(ant_cols) < len(row["antecedents"]) or len(con_cols) < len(row["consequents"]):
-            continue
-
-        # Mathematical logic: find min weight per row for ant, con, and combined
-        ant_W = W[:, ant_cols]
-        con_W = W[:, con_cols]
-        all_W = W[:, ant_cols + con_cols]
-
-        has_ant = np.all(ant_W > 0, axis=1)
-        has_con = np.all(con_W > 0, axis=1)
-        has_both = has_ant & has_con
-
-        sum_ant = float(ant_W[has_ant].min(axis=1).sum()) if has_ant.any() else 0.0
-        sum_con = float(con_W[has_con].min(axis=1).sum()) if has_con.any() else 0.0
-        sum_both = float(all_W[has_both].min(axis=1).sum()) if has_both.any() else 0.0
-
-        support_both = sum_both / N
-        support_ant = sum_ant / N
-        support_con = sum_con / N
-
-        if support_both < effective_min_support or support_ant == 0 or support_con == 0:
-            continue
-
-        confidence = support_both / support_ant
-        lift = confidence / support_con
-        leverage = support_both - support_ant * support_con
-        conviction = float("inf") if confidence >= 1.0 else (1 - support_con) / (1 - confidence)
-
-        results[r_idx] = filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
-
-    return results
-
-
-def _validate_rules(geo_cache, cell_types, neighbor_labels, center_labels, rules_df, config, fn_labels=None, fc_labels=None):
-    """
-    Validates rules via permutation test.
-    Uses high-speed matrix math and pre-calculated labels to avoid bottlenecks.
-    """
-    if rules_df.empty:
-        return rules_df
-
-    def build_fn(shuffled_indices):
-        # Slice both using the same shuffled indices
-        sh_types = cell_types[shuffled_indices]
-        sh_n = neighbor_labels[shuffled_indices]
-        sh_c = center_labels[shuffled_indices]
-        sh_fn = fn_labels[shuffled_indices] if fn_labels is not None else None
-        sh_fc = fc_labels[shuffled_indices] if fc_labels is not None else None
-        
-        trans, _, _ = _build_transactions_from_cache(geo_cache, sh_types, sh_n, sh_c, sh_fn, sh_fc)
-        return trans
-
-    def validation_callback(rdf, transactions):
-        return _check_all_rules_vectorized(rdf, transactions, config)
-
-    return run_permutation_test(rules_df, len(cell_types), config["N_PERMUTATIONS"], build_fn,
-                                check_fn=None, batch_check_fn=validation_callback)
+# (End of file)

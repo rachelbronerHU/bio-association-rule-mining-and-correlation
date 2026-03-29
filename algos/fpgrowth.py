@@ -6,7 +6,7 @@ from mlxtend.frequent_patterns import fpgrowth, association_rules
 
 from utils.spatial import MIN_CELLS, is_dominated
 from utils.rules import filter_rule_by_scores_mask
-from utils.stats import run_permutation_test
+from utils.validation import prepare_validation_matrices, run_matrix_permutation_test
 
 from typing import Optional
 
@@ -16,25 +16,23 @@ logger = logging.getLogger(__name__)
 def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: Optional[np.ndarray] = None):
     """
     Entry point for standard binary FP-Growth.
-
-    Args:
-        neighborhoods: Output of utils.spatial.get_neighborhoods()
-        coords:        (N, 2) array of cell coordinates (unused here, kept for uniform signature)
-        cell_types:    (N,) array of cell type labels
-        config:        Pipeline config dict
-        method:        Spatial method name (BAG, CN, KNN_R, WINDOW, GRID)
-        functional_subtypes: (N,) array of lists of functional marker strings
-
-    Returns:
-        mined_rules: DataFrame of association rules (may be empty)
-        validate_fn: Callable validate_fn(rules_df) -> rules_df with p_value columns
-        stats:       Dict with transaction statistics (sizes, cell_counts, orig, kept)
     """
     trans, stats = _build_transactions(neighborhoods, cell_types, method, config, functional_subtypes)
     mined_rules = _mine(trans, config, method)
 
+    # PRE-COMPUTE ONCE PER FOV:
+    # Capture the physical structure and labels before returning the hook
+    adj_center, adj_neighbor, label_mat, label_names = prepare_validation_matrices(
+        neighborhoods, len(cell_types), cell_types, functional_subtypes
+    )
+    n_perms = config["N_PERMUTATIONS"]
+
     def validate_fn(rules_df):
-        return _validate_rules(neighborhoods, cell_types, rules_df, config, method, functional_subtypes)
+        if rules_df.empty:
+            return rules_df
+        return run_matrix_permutation_test(
+            rules_df, adj_center, adj_neighbor, label_mat, label_names, n_perms, config
+        )
 
     return mined_rules, validate_fn, stats
 
@@ -119,8 +117,8 @@ def _mine(transactions, config, method):
         return pd.DataFrame()
 
     te = TransactionEncoder()
-    te_ary = te.fit(transactions).transform(transactions)
-    df_trans = pd.DataFrame(te_ary, columns=te.columns_)
+    trans_mat = te.fit(transactions).transform(transactions)
+    df_trans = pd.DataFrame(trans_mat, columns=te.columns_)
 
     frequent_itemsets = fpgrowth(df_trans, min_support=config["MIN_SUPPORT"], use_colnames=True)
     if frequent_itemsets.empty:
@@ -156,71 +154,5 @@ def _mine(transactions, config, method):
     return rules
 
 
-def _check_rule(rule_row, transaction_sets, config):
-    """
-    Checks if a rule passes thresholds in a given set of transactions.
-
-    Args:
-        rule_row:         A row from the rules DataFrame
-        transaction_sets: List[set] — pre-converted for fast membership checks
-        config:           Pipeline config dict
-    """
-    if not transaction_sets:
-        return False
-
-    N = len(transaction_sets)
-    antecedents = set(rule_row["antecedents"])
-    consequents = set(rule_row["consequents"])
-
-    count_ant = count_cons = count_both = 0
-    for t_set in transaction_sets:
-        has_ant = antecedents.issubset(t_set)
-        has_cons = consequents.issubset(t_set)
-        if has_ant:
-            count_ant += 1
-        if has_cons:
-            count_cons += 1
-        if has_ant and has_cons:
-            count_both += 1
-
-    support_both = count_both / N
-    support_ant = count_ant / N
-    support_cons = count_cons / N
-
-    if support_both < config["MIN_SUPPORT"]:
-        return False
-    if support_ant == 0 or support_cons == 0:
-        return False
-
-    confidence = support_both / support_ant
-    lift = confidence / support_cons
-    leverage = support_both - (support_ant * support_cons)
-    conviction = float("inf") if confidence >= 1.0 else (1 - support_cons) / (1 - confidence)
-
-    return filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
-
-
-def _validate_rules(neighborhoods, cell_types, rules_df, config, method, functional_subtypes=None):
-    """
-    Validates rules via permutation test.
-    Shuffles cell type labels, rebuilds binary transactions, checks if rules survive.
-    """
-    if rules_df.empty:
-        return rules_df
-
-    n_perms = config["N_PERMUTATIONS"]
-
-    def build_fn(shuffled_indices):
-        # Slice both using the same shuffled indices to maintain marker-cell link
-        sh_types = cell_types[shuffled_indices]
-        sh_subtypes = None
-        if functional_subtypes is not None:
-            sh_subtypes = functional_subtypes[shuffled_indices]
-        
-        trans, _ = _build_transactions(neighborhoods, sh_types, method, config, sh_subtypes)
-        return [set(t) for t in trans]
-
-    def check_fn(rule_row, transaction_sets):
-        return _check_rule(rule_row, transaction_sets, config)
-
-    return run_permutation_test(rules_df, len(cell_types), n_perms, build_fn, check_fn)
+# ---------------------------------------------------------------------------
+# (End of file)

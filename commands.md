@@ -31,10 +31,10 @@
 # Step no. 4: Result Visualization
 * python visualization\visualize_mining_results.py (results/full_run/plots/mining_report)
 * python visualization\visualize_raw_rules.py (results/full_run/plots/raw_rules_report)
-* python visualization\visualize_stage_marker_rules.py [--top_n 10] [--no_self] (results/full_run/plots/mining_report)
+* python visualization\visualize_stage_marker_rules.py [--top_n 10] [--no_self] [--min_n_stages 2] (results/full_run/plots/mining_report)
 * python visualization\visualize_top_rules_spatial.py [--top_n 20] [--exclude_shared_items / --exclude_self_loops] [--show_tissue_background] (results/full_run/plots/top_rules_spatial)
 * python visualization\visualize_transaction_distributions.py (results/full_run/plots/transaction_distributions)
-* python visualization\visualize_dynamic_spatial_evolution.py [--top_n 3] [--method CN] [--stage_col "GI stage"] [--time_col "Days after Transplant grouped"] [--min_n_stages 2] (results/full_run/plots/evolution_plots)
+* python visualization\visualize_dynamic_spatial_evolution.py [--top_n 3] [--method CN] [--stage_col "GI stage"] [--time_col "Days after Transplant grouped"] [--min_n_stages 2] (results/full_run/plots/evolution_plots, organ-stratified; filenames include organ)
 * python visualization\run_all_visualizations.py (runs fixed post-mining pipeline line-by-line: exploration, mining visualizations, NEW spatial visualizations, consensus with/without no_self, and stage-marker variants)
 
 # Step no. 5: Consensus Report:

@@ -337,6 +337,13 @@ def _itemsets_to_rules(itemsets, support_map, config):
                 ant = frozenset(ant)
                 con = itemset - ant
 
+                # Enforce directional spatial grammar early to avoid wasted metric computation:
+                # antecedent can contain _CENTER anchors, consequent must be neighbor-only.
+                if any("_CENTER" in item for item in con):
+                    continue
+                if not any("_CENTER" in item for item in ant):
+                    continue
+
                 sup_both = support_map.get(itemset, 0)
                 sup_ant = support_map.get(ant, 0)
                 sup_con = support_map.get(con, 0)

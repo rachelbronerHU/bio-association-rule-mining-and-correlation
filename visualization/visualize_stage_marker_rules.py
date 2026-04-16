@@ -15,7 +15,7 @@ from visualization.utils.visualization_util import merge_biopsy_metadata
 sns.set_theme(style="whitegrid")
 
 def load_data(no_self=False):
-    """Loads results CSVs and attaches fresh metadata."""
+    """Loads results CSVs, attaches fresh metadata, and splits by organ when available."""
     dfs = {}
     print(f"Loading data from: {RESULTS_DATA_DIR}")
     for m in METHODS:
@@ -31,12 +31,25 @@ def load_data(no_self=False):
                 if no_self:
                     from visualization.utils.visualization_util import filter_no_self_rules
                     df = filter_no_self_rules(df)
+                if "Organ" in df.columns:
+                    organ_values = [
+                        organ for organ in sorted(df["Organ"].dropna().unique())
+                        if str(organ) != "Unknown"
+                    ]
+                    if organ_values:
+                        for organ in organ_values:
+                            organ_df = df[df["Organ"] == organ].copy()
+                            if organ_df.empty:
+                                continue
+                            safe_organ = str(organ).replace("/", "_").replace(" ", "_")
+                            dfs[f"{m}_{safe_organ}"] = organ_df
+                        continue
                 dfs[m] = df
             except Exception as e:
                 print(f"Error loading {m} CSV: {e}")
     return dfs
 
-def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
+def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False, min_n_stages=2):
     """
     Plots Stage-Specific Markers (Positive & Negative).
     Color = Marker Score (Red = Enriched in stage, Blue = Depleted in stage).
@@ -69,6 +82,13 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
         pivot_k = pivot_k.reindex(index=all_method_rules, columns=valid_stages, fill_value=0)
         pivot_std = pivot_std.reindex(index=all_method_rules, columns=valid_stages, fill_value=0)
         
+        # Keep only rules that appear in at least min_n_stages stages
+        stage_presence = (pivot_k[valid_stages] > 0).sum(axis=1)
+        eligible_rules = stage_presence[stage_presence >= min_n_stages].index
+        if len(eligible_rules) == 0:
+            print(f"[{m}] No rules meet min_n_stages={min_n_stages}. Skipping.")
+            continue
+
         # 2) Calculate Interaction Strength Score
         # Color (Red/Blue) determined by Lift > 1 or < 1
         # Saturation determined by abs(log2(Lift)) * sqrt(Prevalence)
@@ -94,6 +114,7 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
             lift_ratio = np.log2((mu_target + eps) / (mu_other + eps)).clip(-3, 3)
             reliability = np.sqrt(pivot_k[stage] + pivot_k[others].sum(axis=1))
             selection_score = prev_diff * np.abs(lift_ratio) * reliability
+            selection_score = selection_score.loc[eligible_rules]
 
             # Pick Top N/2 Positive and Top N/2 Negative per stage
             n_each = max(1, rules_per_stage // 2)
@@ -238,8 +259,9 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
             ax_violin.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
             ax_sum.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
 
+        safe_stage_col = str(stage_col).replace('/', '_').replace(' ', '_')
         no_self_suffix = "_no_self" if no_self else ""
-        save_path = os.path.join(output_dir, f"heatmap_stage_marker_rules_{m}{no_self_suffix}.png")
+        save_path = os.path.join(output_dir, f"heatmap_stage_marker_rules_{safe_stage_col}_{m}{no_self_suffix}.png")
         plt.savefig(save_path, bbox_inches='tight')
         plt.close(fig)
         print(f"Saved {save_path}")
@@ -248,6 +270,7 @@ def main():
     parser = argparse.ArgumentParser(description="Generate Stage Marker Rules Heatmaps")
     parser.add_argument("--top_n", type=int, default=10, help="Top N rules per stage to display")
     parser.add_argument("--no_self", action="store_true", help="Filter out self-loops")
+    parser.add_argument("--min_n_stages", type=int, default=2, help="Minimum number of stages a rule must appear in.")
     args = parser.parse_args()
     
     out_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
@@ -258,7 +281,14 @@ def main():
         print("No data found. Exiting.")
         return
 
-    plot_stage_marker_rules(dfs, out_dir, rules_per_stage=args.top_n, no_self=args.no_self)
+    min_n_stages = max(1, args.min_n_stages)
+    plot_stage_marker_rules(
+        dfs,
+        out_dir,
+        rules_per_stage=args.top_n,
+        no_self=args.no_self,
+        min_n_stages=min_n_stages,
+    )
     print("Visualization Complete.")
 
 if __name__ == "__main__":

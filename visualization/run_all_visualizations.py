@@ -29,7 +29,7 @@ def main():
     run_cmd([py, "visualization/visualize_top_rules_spatial.py", "--top_n", "20", "--exclude_self_loops"], repo_root)
 
     print("\n>>> Running New Spatial Visualizations...")
-    run_cmd([py, "visualization/visualize_dynamic_spatial_evolution.py", "--top_n", "3", "--method", "CN"], repo_root)
+    run_cmd([py, "visualization/visualize_dynamic_spatial_evolution.py", "--top_n", "3", "--method", "CN", "--min_n_stages", "3"], repo_root)
 
     print("\n>>> Generating Consensus Reports...")
     # With self-loops (default)
@@ -40,8 +40,8 @@ def main():
     run_cmd([py, "visualization/visualize_consensus.py", "--no_self"], repo_root)
 
     print("\n>>> Generating Variant Rules...")
-    run_cmd([py, "visualization/visualize_stage_marker_rules.py", "--top_n", "20"], repo_root)
-    run_cmd([py, "visualization/visualize_stage_marker_rules.py", "--top_n", "20", "--no_self"], repo_root)
+    run_cmd([py, "visualization/visualize_stage_marker_rules.py", "--top_n", "20", "--min_n_stages", "3"], repo_root)
+    run_cmd([py, "visualization/visualize_stage_marker_rules.py", "--top_n", "20", "--no_self", "--min_n_stages", "3"], repo_root)
 
 
 if __name__ == "__main__":

@@ -273,6 +273,10 @@ def run_visualizations(top_n=TOP_N_RULES, method="CN", stage_col=STAGE_COL, time
     results_df = filter_no_self_rules(results_df)
     results_df['Rule_ID'] = results_df['Antecedents'] + " -> " + results_df['Consequents']
     results_df = results_df.dropna(subset=['Rule_Count_Global'])
+    if 'Organ' not in results_df.columns:
+        print("Warning: Organ column missing after metadata merge. Running in pooled mode.")
+        results_df['Organ'] = "All"
+
     has_stage_col = stage_col in results_df.columns
     has_time_col = time_col in results_df.columns
     if not has_stage_col and not has_time_col:
@@ -286,79 +290,97 @@ def run_visualizations(top_n=TOP_N_RULES, method="CN", stage_col=STAGE_COL, time
         print(f"Warning: Time column '{time_col}' not found. Skipping temporal evolution plots.")
 
     cell_df = normalize_cell_table(pd.read_csv(cell_table_path))
+    organ_values = [
+        organ for organ in sorted(results_df['Organ'].dropna().unique())
+        if str(organ) != "Unknown"
+    ]
+    if not organ_values:
+        organ_values = ["All"]
 
-    # 1. Stage Evolution
-    if has_stage_col:
-        print(f"\nProcessing Stage Evolution (using {stage_col})...")
-        stage_df = results_df.dropna(subset=[stage_col]).copy()
-        stage_order = get_sorted_stage_values(stage_df, stage_col)
-        baseline_stage = get_baseline_stage(stage_order)
-
-        if not stage_order or baseline_stage is None or len(stage_order) < 2:
-            print(f"Warning: Need at least two numeric stages in '{stage_col}'. Skipping stage evolution plots.")
+    for organ in organ_values:
+        if organ == "All":
+            organ_df = results_df.copy()
+            print("\nProcessing pooled data (no organ split available)...")
         else:
-            print(f"  Detected stage order: {stage_order} | baseline stage: {baseline_stage}")
-            top_stage_rules = get_dynamic_rules_by_stage(
-                stage_df,
-                stage_col,
-                stage_order=stage_order,
-                baseline_stage=baseline_stage,
-                n=top_n,
-                min_n_stages=min_n_stages
-            )
-            if not top_stage_rules:
-                print(
-                    f"  No stage rules passed filters "
-                    f"(MIN_DELTA={MIN_DELTA}, min_n_stages={min_n_stages}, "
-                    f"MIN_FOVS_PER_STAGE={MIN_FOVS_PER_STAGE})."
-                )
+            organ_df = results_df[results_df['Organ'] == organ].copy()
+            print(f"\nProcessing organ: {organ}")
+        if organ_df.empty:
+            continue
+        safe_organ = str(organ).replace('/', '_').replace(' ', '_')
+        safe_stage_col = str(stage_col).replace('/', '_').replace(' ', '_')
 
-            for rule in top_stage_rules:
-                print(f"  Generating plot for {rule}...")
-                rep_fovs = {s: select_representative_fov(stage_df, rule, stage_col, s) for s in stage_order}
-                stage_stats_by_group = _compute_rule_group_stats(stage_df, rule, stage_col, stage_order)
-                safe_name = rule.replace('/', '_').replace(' ', '_').replace('->', 'to').replace('[', '').replace(']', '').replace("'", "")
-                plot_evolution_grid(
-                    rule, rep_fovs, stage_order, cell_df,
-                    os.path.join(output_dir, f"stage_evolution_{safe_name}.png"),
-                    mode="stage",
-                    group_stats=stage_stats_by_group
-                )
+        # 1. Stage Evolution
+        if has_stage_col:
+            print(f"  Processing Stage Evolution (using {stage_col})...")
+            stage_df = organ_df.dropna(subset=[stage_col]).copy()
+            stage_order = get_sorted_stage_values(stage_df, stage_col)
+            baseline_stage = get_baseline_stage(stage_order)
 
-    # 2. Temporal Evolution
-    if has_time_col:
-        print(f"\nProcessing Temporal Evolution (using {time_col})...")
-        time_df = results_df.dropna(subset=[time_col]).copy()
-        time_order = [b for b in TIME_ORDER if b in set(time_df[time_col].unique())]
-        if not time_order or len(time_order) < 2:
-            print(f"Warning: Need at least two time bins in '{time_col}'. Skipping temporal evolution plots.")
-        else:
-            print(f"  Detected time order: {time_order}")
-            top_time_rules = get_dynamic_rules_by_time(
-                time_df,
-                time_col,
-                time_order=time_order,
-                n=top_n,
-                min_n_stages=min_n_stages,
-            )
-            if not top_time_rules:
-                print(
-                    f"  No temporal rules passed filters "
-                    f"(MIN_DELTA={MIN_DELTA}, min_n_stages={min_n_stages}, "
-                    f"MIN_FOVS_PER_TIME_BIN={MIN_FOVS_PER_TIME_BIN})."
+            if not stage_order or baseline_stage is None or len(stage_order) < 2:
+                print(f"  Warning: Need at least two numeric stages in '{stage_col}'. Skipping stage evolution plots.")
+            else:
+                print(f"    Detected stage order: {stage_order} | baseline stage: {baseline_stage}")
+                top_stage_rules = get_dynamic_rules_by_stage(
+                    stage_df,
+                    stage_col,
+                    stage_order=stage_order,
+                    baseline_stage=baseline_stage,
+                    n=top_n,
+                    min_n_stages=min_n_stages
                 )
+                if not top_stage_rules:
+                    print(
+                        f"    No stage rules passed filters "
+                        f"(MIN_DELTA={MIN_DELTA}, min_n_stages={min_n_stages}, "
+                        f"MIN_FOVS_PER_STAGE={MIN_FOVS_PER_STAGE})."
+                    )
 
-            for rule in top_time_rules:
-                print(f"  Generating plot for {rule}...")
-                rep_fovs = {t: select_representative_fov(time_df, rule, time_col, t) for t in time_order}
-                time_stats_by_group = _compute_rule_group_stats(time_df, rule, time_col, time_order)
-                safe_name = rule.replace('/', '_').replace(' ', '_').replace('->', 'to').replace('[', '').replace(']', '').replace("'", "")
-                plot_evolution_grid(
-                    rule, rep_fovs, time_order, cell_df,
-                    os.path.join(output_dir, f"temporal_evolution_{safe_name}.png"),
-                    mode="time",
-                    group_stats=time_stats_by_group
+                for rule in top_stage_rules:
+                    print(f"    Generating stage plot for {rule}...")
+                    rep_fovs = {s: select_representative_fov(stage_df, rule, stage_col, s) for s in stage_order}
+                    stage_stats_by_group = _compute_rule_group_stats(stage_df, rule, stage_col, stage_order)
+                    safe_name = rule.replace('/', '_').replace(' ', '_').replace('->', 'to').replace('[', '').replace(']', '').replace("'", "")
+                    plot_evolution_grid(
+                        rule, rep_fovs, stage_order, cell_df,
+                        os.path.join(output_dir, f"stage_evolution_{safe_organ}_{safe_stage_col}_{safe_name}.png"),
+                        mode="stage",
+                        group_stats=stage_stats_by_group
+                    )
+
+        # 2. Temporal Evolution
+        if has_time_col:
+            print(f"  Processing Temporal Evolution (using {time_col})...")
+            time_df = organ_df.dropna(subset=[time_col]).copy()
+            time_order = [b for b in TIME_ORDER if b in set(time_df[time_col].unique())]
+            if not time_order or len(time_order) < 2:
+                print(f"  Warning: Need at least two time bins in '{time_col}'. Skipping temporal evolution plots.")
+            else:
+                print(f"    Detected time order: {time_order}")
+                top_time_rules = get_dynamic_rules_by_time(
+                    time_df,
+                    time_col,
+                    time_order=time_order,
+                    n=top_n,
+                    min_n_stages=min_n_stages,
                 )
+                if not top_time_rules:
+                    print(
+                        f"    No temporal rules passed filters "
+                        f"(MIN_DELTA={MIN_DELTA}, min_n_stages={min_n_stages}, "
+                        f"MIN_FOVS_PER_TIME_BIN={MIN_FOVS_PER_TIME_BIN})."
+                    )
+
+                for rule in top_time_rules:
+                    print(f"    Generating temporal plot for {rule}...")
+                    rep_fovs = {t: select_representative_fov(time_df, rule, time_col, t) for t in time_order}
+                    time_stats_by_group = _compute_rule_group_stats(time_df, rule, time_col, time_order)
+                    safe_name = rule.replace('/', '_').replace(' ', '_').replace('->', 'to').replace('[', '').replace(']', '').replace("'", "")
+                    plot_evolution_grid(
+                        rule, rep_fovs, time_order, cell_df,
+                        os.path.join(output_dir, f"temporal_evolution_{safe_organ}_{safe_name}.png"),
+                        mode="time",
+                        group_stats=time_stats_by_group
+                    )
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Stage/Temporal evolution representative FOV plots.")

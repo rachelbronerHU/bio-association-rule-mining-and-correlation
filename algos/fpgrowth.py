@@ -126,6 +126,11 @@ def _mine(transactions, config, method):
 
     rules = association_rules(frequent_itemsets, metric="support", min_threshold=config["MIN_SUPPORT"])
 
+    if method in ["CN", "KNN_R"]:
+        # Enforce directional spatial grammar: consequents must be neighbor-only.
+        # In mlxtend path, this is the earliest point available after split generation.
+        rules = rules[~rules["consequents"].apply(lambda x: any("_CENTER" in item for item in x))]
+
     if "conviction" not in rules.columns:
         with np.errstate(divide="ignore", invalid="ignore"):
             rules["conviction"] = (1 - rules["consequent support"]) / (1 - rules["confidence"])

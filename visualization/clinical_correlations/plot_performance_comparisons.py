@@ -10,11 +10,7 @@ import argparse
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))) # Adjust path for constants.py
 import constants
-
-from data_exploration.check_data_bias import load_stratified_biopsies
-from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE, filter_viable_stratum
-
-from data_exploration.check_data_bias import load_stratified_biopsies
+from visualization.utils.visualization_util import load_shifted_biopsy_metadata, add_organ_column
 from check_rule_correlation_with_disease.stratified_utils import CONTROLS_ELIGIBLE, filter_viable_stratum
 
 # Setup Logging
@@ -162,9 +158,9 @@ def generate_comparison_plots(no_self=False):
     logger.info("Generating Grouped Bar Charts for model-wise performance comparison...")
 
     try:
-        df_biopsies = load_stratified_biopsies()
+        df_biopsies = load_shifted_biopsy_metadata(os.path.join(PROJECT_ROOT, constants.MIBI_GUT_DIR_PATH))
     except Exception as e:
-        logger.error(f"Failed to load stratified biopsies: {e}")
+        logger.error(f"Failed to load shifted biopsies: {e}")
         df_biopsies = pd.DataFrame()
 
     group_counts = {}

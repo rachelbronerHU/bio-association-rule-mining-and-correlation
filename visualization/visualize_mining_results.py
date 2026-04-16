@@ -13,7 +13,10 @@ from sklearn.decomposition import PCA
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS, MIBI_GUT_DIR_PATH
-from visualization.utils.visualization_util import add_organ_column
+from visualization.utils.visualization_util import add_organ_column, get_stage_palette
+
+# Define standard stage colors using our utility
+STAGE_PALETTE = get_stage_palette(n_stages=5)
 
 sns.set_theme(style="whitegrid")
 
@@ -160,18 +163,13 @@ def plot_volcano(dfs, output_dir):
     
     fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows), constrained_layout=True)
     axes = axes.flatten()
-    
-    # Fixed Color Map for Stages
-    stage_colors = {
-        0: "forestgreen", # Control
-        1: "gold",
-        2: "orange",
-        3: "darkorange",
-        4: "firebrick"
+    stage_color_map = {
+        0: "#1b9e77",  # teal
+        1: "#d95f02",  # orange
+        2: "#7570b3",  # purple
+        3: "#e7298a",  # magenta
+        4: "#66a61e",  # green
     }
-    
-    # Legend Labels
-    stage_labels = ["Control", "Stage 1", "Stage 2", "Stage 3", "Stage 4"]
     
     for i, m in enumerate(valid_methods):
         ax = axes[i]
@@ -182,7 +180,7 @@ def plot_volcano(dfs, output_dir):
         
         # Color Logic
         hue_col = "Pathological stage" if "Pathological stage" in df.columns else "Group"
-        palette = stage_colors if hue_col == "Pathological stage" else "Spectral"
+        palette = stage_color_map if hue_col == "Pathological stage" else "Spectral"
         
         if hue_col == "Pathological stage":
              df[hue_col] = df[hue_col].fillna(-1).astype(int)

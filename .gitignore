@@ -17,5 +17,7 @@ results/full_run/rare_filtering_stats
 references/
 
 # temp
+results/full_run/weighted_fpgrowth_old
+results/full_run/fpgrowth_old
 results/full_run/weighted_fpgrowth
 results/full_run/fpgrowth

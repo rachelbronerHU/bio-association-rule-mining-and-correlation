@@ -93,21 +93,18 @@ The following tables demonstrate the efficiency of different neighborhood defini
 
 > | METHOD | RULE | LIFT | CONF | CONV | SUP | FDR |
 > | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-> | **BAG** | Endothelial, Muscle -> BrunnerGland, CD4T | 18.98 | 0.95 | 19.95 | 0.011 | 0.2709 |
-> | **BAG** | Muscle, SMV -> BrunnerGland, CD4T | 15.95 | 0.80 | 4.75 | 0.011 | 0.1620 |
-> | **BAG** | Muscle -> Epithelial, Goblet | 0.07 | 0.03 | 0.58 | 0.013 | 0.0022 |
-> | **BAG** | Muscle -> Epithelial | 0.07 | 0.03 | 0.52 | 0.011 | 0.0033 |
+> | **CN** | CD4T_CD69+_CENTER, CD8T_NEIGHBOR -> CD4T_CENTER, CD8T_CD69+_NEIGHBOR | 86.01 | 1.00 | inf | 0.011 | 0.0065 |
+> | **CN** | CD4T_CENTER, CD8T_CD69+_NEIGHBOR -> CD4T_CD69+_CENTER, CD8T_NEIGHBOR | 86.01 | 0.92 | 11.78 | 0.011 | 0.0065 |
+> | **CN** | Epithelial_CENTER -> Plasma_NEIGHBOR, SMV_NEIGHBOR | 0.10 | 0.03 | 0.70 | 0.011 | 0.0021 |
+> | **CN** | Epithelial_CENTER -> Macrophage_NEIGHBOR, Plasma_NEIGHBOR, SMV_NEIGHBOR | 0.10 | 0.03 | 0.71 | 0.011 | 0.0021 |
 > | --- | --- | --- | --- | --- | --- | --- |
-> | **CN** | Endothelial_NEIGHBOR, Muscle_CENTER -> Epithelial_NEIGHBOR, Muscle_NEIGHBOR | 44.29 | 0.73 | 3.69 | 0.010 | 0.0013 |
-> | **CN** | Muscle_CENTER -> Muscle_NEIGHBOR, Paneth_NEIGHBOR | 34.46 | 0.89 | 8.96 | 0.019 | 0.0020 |
-> | **CN** | Muscle_CENTER -> Epithelial_NEIGHBOR | 0.07 | 0.04 | 0.48 | 0.011 | 0.0014 |
-> | **CN** | Fibroblast_NEIGHBOR, Muscle_CENTER -> Epithelial_NEIGHBOR | 0.08 | 0.04 | 0.48 | 0.011 | 0.0014 |
-> | --- | --- | --- | --- | --- | --- | --- |
-> | **KNN_R** | Endothelial_NEIGHBOR, Muscle_CENTER -> Epithelial_NEIGHBOR, Muscle_NEIGHBOR | 46.98 | 0.73 | 3.69 | 0.010 | 0.0012 |
-> | **KNN_R** | Muscle_CENTER, Plasma_NEIGHBOR -> Muscle_NEIGHBOR, Neuron_NEIGHBOR | 35.02 | 0.95 | 20.43 | 0.010 | 0.0017 |
-> | **KNN_R** | Muscle_CENTER -> Macrophage_NEIGHBOR, Neutrophil_NEIGHBOR | 0.11 | 0.08 | 0.33 | 0.011 | 0.0013 |
-> | **KNN_R** | Epithelial_CENTER -> CD4T_NEIGHBOR, Mesenchymal_VIM_NEIGHBOR, SMV_NEIGHBOR | 0.12 | 0.05 | 0.65 | 0.012 | 0.0014 |
-> | --- | --- | --- | --- | --- | --- | --- |
+
+
+
+
+
+
+
 
 
 

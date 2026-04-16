@@ -10,11 +10,12 @@ import ast
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS, MIBI_GUT_DIR_PATH
+from visualization.utils.visualization_util import merge_biopsy_metadata
 
 sns.set_theme(style="whitegrid")
 
 def load_data(no_self=False):
-    """Loads results CSVs."""
+    """Loads results CSVs and attaches fresh metadata."""
     dfs = {}
     print(f"Loading data from: {RESULTS_DATA_DIR}")
     for m in METHODS:
@@ -22,6 +23,9 @@ def load_data(no_self=False):
         if os.path.exists(csv_path):
             try:
                 df = pd.read_csv(csv_path)
+                # Attach unified metadata (Source of Truth)
+                df = merge_biopsy_metadata(df, MIBI_GUT_DIR_PATH)
+                
                 if "Rule" not in df.columns:
                     df["Rule"] = df["Antecedents"] + " -> " + df["Consequents"]
                 if no_self:
@@ -166,7 +170,13 @@ def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False):
         ax_hm.grid(False)
         
         ax_hm.set_title(f"Interaction Strength ({m})\nRed: Lift > 1, Blue: Lift < 1 | Saturation: log2(Lift) | Muted if k < 3", fontsize=14, pad=35)
-        ax_hm.set_xticklabels([f"Stage {s}\n(N={stage_fov_counts.get(s, 0)})" for s in valid_stages], rotation=0)
+        
+        # Standardized tick labels: "Control" for 0, "Stage X" for others
+        def get_label(s):
+            if str(s) == '0': return "Control"
+            return f"Stage {s}"
+            
+        ax_hm.set_xticklabels([f"{get_label(s)}\n(N={stage_fov_counts.get(s, 0)})" for s in valid_stages], rotation=0)
         ax_hm.set_ylabel("Marker Rule")
 
         # Violin panel (global lift distribution)

@@ -4,35 +4,40 @@ import seaborn as sns
 import os
 import sys
 import numpy as np
-
-# Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
+from visualization.utils.visualization_util import merge_biopsy_metadata, get_stage_palette
+
+# Standard stage colors using our utility
+STAGE_PALETTE = get_stage_palette(n_stages=5)
 
 # --- Configuration ---
 RESULTS_DIR = constants.RESULTS_DATA_DIR
 OUTPUT_DIR = os.path.join(constants.RESULTS_PLOTS_DIR, 'raw_rules_report')
 METHODS = constants.METHODS
+MIBI_GUT_DIR_PATH = constants.MIBI_GUT_DIR_PATH
 
 sns.set_theme(style="whitegrid")
 
 def load_raw_data():
-    """Loads RAW results CSVs."""
+    """Loads RAW results CSVs and attaches fresh metadata."""
     raw_dfs = {}
     print(f"Loading RAW data from: {RESULTS_DIR}")
-    
+
     for m in METHODS:
         # Load Raw CSV
         csv_path = os.path.join(RESULTS_DIR, f"results_{m}_RAW.csv")
         if os.path.exists(csv_path):
             try:
                 df = pd.read_csv(csv_path)
+                # Attach unified metadata (Source of Truth)
+                df = merge_biopsy_metadata(df, MIBI_GUT_DIR_PATH)
                 raw_dfs[m] = df
             except Exception as e:
                 print(f"Error loading {m} RAW CSV: {e}")
         else:
             print(f"Warning: {csv_path} not found.")
-            
+
     return raw_dfs
 
 def plot_raw_volcano(dfs, output_dir):
@@ -46,15 +51,6 @@ def plot_raw_volcano(dfs, output_dir):
         print("Skipping Raw Volcano: 'FDR' column not found in raw data.")
         return
 
-    # Fixed Color Map for Stages
-    stage_colors = {
-        0: "forestgreen", # Control
-        1: "gold",
-        2: "orange",
-        3: "darkorange",
-        4: "firebrick"
-    }
-    
     # Setup Grid
     n_plots = len(valid_methods)
     cols = 3
@@ -71,14 +67,12 @@ def plot_raw_volcano(dfs, output_dir):
         # Log FDR
         df["log_fdr"] = -np.log10(df["FDR"] + 1e-10)
         
-        # Color Logic
+        # Color Logic - Unified
         hue_col = "Pathological stage" if "Pathological stage" in df.columns else "Group"
-        palette = stage_colors if hue_col == "Pathological stage" else "Spectral"
+        palette = STAGE_PALETTE if hue_col == "Pathological stage" else "Spectral"
         if hue_col not in df.columns: 
             hue_col = None
             palette = None
-        elif hue_col == "Pathological stage":
-             df[hue_col] = df[hue_col].fillna(-1).astype(int)
         
         sns.scatterplot(
             data=df, 

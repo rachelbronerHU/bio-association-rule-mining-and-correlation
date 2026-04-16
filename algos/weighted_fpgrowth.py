@@ -48,13 +48,15 @@ def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: 
 
     # PERFORMANCE OPTIMIZATION: Pre-calculate spatial labels once to avoid 
     # millions of f-string operations inside the permutation loop.
-    neighbor_labels = np.array([f"{ct}_NEIGHBOR" for ct in cell_types])
-    center_labels = np.array([f"{ct}_CENTER" for ct in cell_types])
+    # Keep Python str labels (not NumPy scalar strings) to avoid np.str_ leaking
+    # into mined rule tuples and persisted CSV text.
+    neighbor_labels = [f"{str(ct)}_NEIGHBOR" for ct in cell_types]
+    center_labels = [f"{str(ct)}_CENTER" for ct in cell_types]
     
     fn_labels = fc_labels = None
     if functional_subtypes is not None:
-        fn_labels = np.array([[f"{s}_NEIGHBOR" for s in st] for st in functional_subtypes], dtype=object)
-        fc_labels = np.array([[f"{s}_CENTER" for s in st] for st in functional_subtypes], dtype=object)
+        fn_labels = np.array([[f"{str(s)}_NEIGHBOR" for s in st] for st in functional_subtypes], dtype=object)
+        fc_labels = np.array([[f"{str(s)}_CENTER" for s in st] for st in functional_subtypes], dtype=object)
 
     trans, sizes, cell_counts = _build_transactions_from_cache(
         geo_cache, cell_types, neighbor_labels, center_labels, fn_labels, fc_labels
@@ -137,18 +139,18 @@ def _build_transactions_from_cache(geo_cache, cell_types, neighbor_labels, cente
 
         trans = {}
         for n_idx, w in zip(neighbor_idxs, weights):
-            ct = neighbor_labels[n_idx]
+            ct = str(neighbor_labels[n_idx])
             trans[ct] = trans.get(ct, 0.0) + w
             if fn_labels is not None:
                 for st in fn_labels[n_idx]:
-                    trans[st] = trans.get(st, 0.0) + w
+                    trans[str(st)] = trans.get(str(st), 0.0) + w
 
         # Center cell
-        ct_center = center_labels[center_i]
+        ct_center = str(center_labels[center_i])
         trans[ct_center] = 1.0
         if fc_labels is not None:
             for st in fc_labels[center_i]:
-                trans[st] = 1.0
+                trans[str(st)] = 1.0
 
         # Cap each neighbor weight at 1.0
         trans = {k: min(v, 1.0) for k, v in trans.items()}

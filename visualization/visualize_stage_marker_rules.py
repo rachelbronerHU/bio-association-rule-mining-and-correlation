@@ -1,295 +1,316 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import os
-import numpy as np
-import sys
 import argparse
-import ast
+import os
+import sys
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
 
 # Add project root to sys.path to import constants
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS, MIBI_GUT_DIR_PATH
-from visualization.utils.visualization_util import merge_biopsy_metadata
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from constants import MIBI_GUT_DIR_PATH, METHODS, RESULTS_DATA_DIR, RESULTS_PLOTS_DIR
+from visualization.utils.heatmap_util import (
+    add_shared_row_design,
+    build_rule_annotations,
+    create_metadata_figure,
+    get_stage_label,
+    get_stage_sort_key,
+    get_valid_stages,
+    plot_rule_lift_violin,
+    plot_stage_stats_table,
+    prepare_stage_heatmap_data,
+)
+from visualization.utils.visualization_util import filter_no_self_rules, merge_biopsy_metadata
 
 sns.set_theme(style="whitegrid")
 
+
 def load_data(no_self=False):
-    """Loads results CSVs, attaches fresh metadata, and splits by organ when available."""
-    dfs = {}
+    """Load method results, merge metadata, and split by organ when available."""
+    data_by_method = {}
     print(f"Loading data from: {RESULTS_DATA_DIR}")
-    for m in METHODS:
-        csv_path = os.path.join(RESULTS_DATA_DIR, f"results_{m}.csv")
-        if os.path.exists(csv_path):
-            try:
-                df = pd.read_csv(csv_path)
-                # Attach unified metadata (Source of Truth)
-                df = merge_biopsy_metadata(df, MIBI_GUT_DIR_PATH)
-                
-                if "Rule" not in df.columns:
-                    df["Rule"] = df["Antecedents"] + " -> " + df["Consequents"]
-                if no_self:
-                    from visualization.utils.visualization_util import filter_no_self_rules
-                    df = filter_no_self_rules(df)
-                if "Organ" in df.columns:
-                    organ_values = [
-                        organ for organ in sorted(df["Organ"].dropna().unique())
-                        if str(organ) != "Unknown"
-                    ]
-                    if organ_values:
-                        for organ in organ_values:
-                            organ_df = df[df["Organ"] == organ].copy()
-                            if organ_df.empty:
-                                continue
-                            safe_organ = str(organ).replace("/", "_").replace(" ", "_")
-                            dfs[f"{m}_{safe_organ}"] = organ_df
-                        continue
-                dfs[m] = df
-            except Exception as e:
-                print(f"Error loading {m} CSV: {e}")
-    return dfs
 
-def plot_stage_marker_rules(dfs, output_dir, rules_per_stage=10, no_self=False, min_n_stages=2):
-    """
-    Plots Stage-Specific Markers (Positive & Negative).
-    Color = Marker Score (Red = Enriched in stage, Blue = Depleted in stage).
-    Text = k/N (FOVs with rule / Total FOVs).
-    """
-    for m, df in dfs.items():
-        if df.empty: continue
-        
-        stage_col = "Pathological stage" if "Pathological stage" in df.columns else "Group"
-        df[stage_col] = df[stage_col].fillna(-1).astype(int).astype(str).replace('-1', 'Unknown')
-        
-        def _stage_sort_key(s):
-            try: return (0, int(s))
-            except: return (1, str(s))
-            
-        valid_stages = sorted([s for s in df[stage_col].unique() if s != 'Unknown'], key=_stage_sort_key)
-        if len(valid_stages) < 2: continue
-
-        # 1) Aggregate Statistics
-        stage_fov_counts = df.drop_duplicates("FOV")[stage_col].value_counts().to_dict()
-        
-        # Pre-calculate matrix of mean lift and prevalence
-        pivot_k = df.pivot_table(index="Rule", columns=stage_col, values="FOV", aggfunc="nunique", fill_value=0)
-        pivot_mu = df.pivot_table(index="Rule", columns=stage_col, values="Lift", aggfunc="mean", fill_value=0)
-        pivot_std = df.pivot_table(index="Rule", columns=stage_col, values="Lift", aggfunc="std", fill_value=0).fillna(0)
-        
-        # Ensure indices match exactly
-        all_method_rules = pivot_k.index
-        pivot_mu = pivot_mu.reindex(index=all_method_rules, columns=valid_stages, fill_value=0)
-        pivot_k = pivot_k.reindex(index=all_method_rules, columns=valid_stages, fill_value=0)
-        pivot_std = pivot_std.reindex(index=all_method_rules, columns=valid_stages, fill_value=0)
-        
-        # Keep only rules that appear in at least min_n_stages stages
-        stage_presence = (pivot_k[valid_stages] > 0).sum(axis=1)
-        eligible_rules = stage_presence[stage_presence >= min_n_stages].index
-        if len(eligible_rules) == 0:
-            print(f"[{m}] No rules meet min_n_stages={min_n_stages}. Skipping.")
+    for method in METHODS:
+        csv_path = os.path.join(RESULTS_DATA_DIR, f"results_{method}.csv")
+        if not os.path.exists(csv_path):
             continue
 
-        # 2) Calculate Interaction Strength Score
-        # Color (Red/Blue) determined by Lift > 1 or < 1
-        # Saturation determined by abs(log2(Lift)) * sqrt(Prevalence)
-        score_df = pd.DataFrame(index=all_method_rules, columns=valid_stages)
-        marker_rules = []
+        try:
+            method_data = pd.read_csv(csv_path)
+            method_data = merge_biopsy_metadata(method_data, MIBI_GUT_DIR_PATH)
 
-        for stage in valid_stages:
-            n_stage = stage_fov_counts.get(stage, 1)
-            # Prevalence (k/N)
-            p_target = pivot_k[stage] / n_stage
-            # Mean Lift in stage
-            mu_target = pivot_mu[stage]
-            
-            # Comparison for rule selection (still use relative markers to pick interesting rules)
-            others = [s for s in valid_stages if s != stage]
-            n_others = sum(stage_fov_counts.get(s, 0) for s in others)
-            p_other = pivot_k[others].sum(axis=1) / max(1, n_others)
-            mu_other = pivot_mu[others].mean(axis=1)
-            
-            # Score for SELECTION (not for color)
-            eps = 1e-6
-            prev_diff = p_target - p_other
-            lift_ratio = np.log2((mu_target + eps) / (mu_other + eps)).clip(-3, 3)
-            reliability = np.sqrt(pivot_k[stage] + pivot_k[others].sum(axis=1))
-            selection_score = prev_diff * np.abs(lift_ratio) * reliability
-            selection_score = selection_score.loc[eligible_rules]
+            if "Rule" not in method_data.columns:
+                method_data["Rule"] = method_data["Antecedents"] + " -> " + method_data["Consequents"]
 
-            # Pick Top N/2 Positive and Top N/2 Negative per stage
-            n_each = max(1, rules_per_stage // 2)
-            top_pos = selection_score.nlargest(n_each).index.tolist()
-            top_neg = selection_score.nsmallest(n_each).index.tolist()
-            
-            for r in top_pos + top_neg:
-                if r not in marker_rules: marker_rules.append(r)
+            if no_self:
+                method_data = filter_no_self_rules(method_data)
 
-        # Calculate actual Plotting Score (Interaction Strength)
-        # Color (Hue): Red for Lift > 1, Blue for Lift < 1
-        # Saturation (Intensity): Only penalize if k < 3 FOVs
-        for stage in valid_stages:
-            n_stage = stage_fov_counts.get(stage, 1)
-            p_target = pivot_k[stage] / n_stage
-            mu_target = pivot_mu[stage]
-            k_target = pivot_k[stage]
-            
-            # Simple piecewise logic:
-            # < 3 FOVs: Lower saturation (k/3) to hide noise.
-            # >= 3 FOVs: Normal saturation (weight = 1.0).
-            weight = np.where(k_target < 3, k_target / 3.0, 1.0)
-            
-            # Core score is log2(Lift)
-            score_df[stage] = np.log2(mu_target + 1e-6) * weight
+            if "Organ" in method_data.columns:
+                organ_values = [
+                    organ
+                    for organ in sorted(method_data["Organ"].dropna().unique())
+                    if str(organ) != "Unknown"
+                ]
+                if organ_values:
+                    for organ in organ_values:
+                        organ_data = method_data[method_data["Organ"] == organ].copy()
+                        if organ_data.empty:
+                            continue
+                        safe_organ = str(organ).replace("/", "_").replace(" ", "_")
+                        data_by_method[f"{method}_{safe_organ}"] = organ_data
+                    continue
 
-        if not marker_rules: continue
+            data_by_method[method] = method_data
 
-        # 3) Prep Plotting Data
-        plot_score = score_df.loc[marker_rules, valid_stages].astype(float)
-        
-        annot_data = pd.DataFrame(index=marker_rules, columns=valid_stages)
-        for r in marker_rules:
-            for s in valid_stages:
-                annot_data.loc[r, s] = f"{int(pivot_k.loc[r, s])}/{stage_fov_counts.get(s, 0)}"
+        except Exception as error:
+            print(f"Error loading {method} CSV: {error}")
 
-        # Sort rules for diagonal visualization: group by peak stage magnitude
-        peak_stage = plot_score.abs().idxmax(axis=1)
-        row_meta = pd.DataFrame({
-            "rule": marker_rules, 
-            "peak_stage": peak_stage, 
-            "peak_val": [plot_score.loc[r, peak_stage.loc[r]] for r in marker_rules]
-        })
-        row_meta["stage_key"] = row_meta["peak_stage"].map(_stage_sort_key)
-        # Sort by stage, then score (positives first, then negatives)
-        row_meta = row_meta.sort_values(["stage_key", "peak_val"], ascending=[True, False])
-        ordered_rules = row_meta["rule"].tolist()
+    return data_by_method
 
-        # 4) Plotting
-        fig_height = max(10, len(ordered_rules) * 0.4)
-        fig = plt.figure(figsize=(24, fig_height))
-        # 4 columns: Heatmap, Violins, Stage-wise Summary, Colorbar
-        gs = fig.add_gridspec(1, 4, width_ratios=[len(valid_stages)*1.5, 3, len(valid_stages)*1.1, 0.2], wspace=0.1)
-        ax_hm = fig.add_subplot(gs[0, 0])
-        ax_violin = fig.add_subplot(gs[0, 1])
-        ax_sum = fig.add_subplot(gs[0, 2])
-        ax_cb = fig.add_subplot(gs[0, 3])
 
-        # Heatmap Normalization
-        # Use the actual maximum in the plotting data as the scale ceiling
-        # This ensures the gradient covers the full range from min lift to max lift.
-        vmax = np.nanmax(plot_score.abs().values)
-        if vmax < 0.5: vmax = 0.5
-        
-        # Mask out cells where FOV count is 0
-        zero_mask = (pivot_k.loc[ordered_rules, valid_stages] == 0).values
-        
-        sns.heatmap(plot_score.loc[ordered_rules], annot=annot_data.loc[ordered_rules], fmt="", 
-                    cmap="RdBu_r", center=0, vmin=-vmax, vmax=vmax, ax=ax_hm, cbar_ax=ax_cb,
-                    mask=zero_mask, linewidths=0.5, linecolor="lightgray", annot_kws={"size": 8})
-        
-        # Color the background grey so masked cells show as grey
-        ax_hm.set_facecolor("whitesmoke")
-        ax_hm.grid(False)
-        
-        ax_hm.set_title(f"Interaction Strength ({m})\nRed: Lift > 1, Blue: Lift < 1 | Saturation: log2(Lift) | Muted if k < 3", fontsize=14, pad=35)
-        
-        # Standardized tick labels: "Control" for 0, "Stage X" for others
-        def get_label(s):
-            if str(s) == '0': return "Control"
-            return f"Stage {s}"
-            
-        ax_hm.set_xticklabels([f"{get_label(s)}\n(N={stage_fov_counts.get(s, 0)})" for s in valid_stages], rotation=0)
-        ax_hm.set_ylabel("Marker Rule")
+def select_stage_marker_rules(stage_heatmap_data, valid_stages, rules_per_stage):
+    """
+    Select marker rules by comparing each stage against all other stages.
+    The score combines stage prevalence difference, stage-vs-rest lift ratio, and
+    observation depth. For each stage, we keep top positive and top negative rules.
+    """
+    stage_fov_counts = stage_heatmap_data["stage_fov_counts"]
+    rule_stage_counts = stage_heatmap_data["rule_stage_counts"]
+    rule_stage_mean_lift = stage_heatmap_data["rule_stage_mean_lift"]
+    eligible_rules = stage_heatmap_data["eligible_rules"]
 
-        # Violin panel (global lift distribution)
-        violin_data = []
-        for rule in ordered_rules:
-            lifts = df[df["Rule"] == rule]["Lift"].dropna().values
-            violin_data.append(lifts if len(lifts) > 0 else np.array([0.0]))
+    selected_rules = []
+    rules_each_side = max(1, rules_per_stage // 2)
 
-        violin_positions = np.arange(len(ordered_rules)) + 0.5
-        parts = ax_violin.violinplot(violin_data, positions=violin_positions, vert=False, 
-                                     widths=0.8, showextrema=True, showmedians=True)
-        for pc in parts['bodies']:
-            pc.set_facecolor('#a6cee3'); pc.set_edgecolor('black'); pc.set_linewidth(0.5); pc.set_alpha(0.8)
-        for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
-            if partname in parts: parts[partname].set_edgecolor('black'); parts[partname].set_linewidth(1)
+    for stage in valid_stages:
+        stage_total_fovs = stage_fov_counts.get(stage, 1)
+        stage_prevalence = rule_stage_counts[stage] / stage_total_fovs
+        stage_mean_lift = rule_stage_mean_lift[stage]
 
-        for rule_idx, lifts in enumerate(violin_data):
-            if len(lifts) > 0:
-                y_jitter = (rule_idx + 0.5) + np.random.uniform(-0.1, 0.1, size=len(lifts))
-                ax_violin.scatter(lifts, y_jitter, color="black", alpha=0.35, s=2, zorder=3)
+        other_stages = [other_stage for other_stage in valid_stages if other_stage != stage]
+        other_total_fovs = sum(stage_fov_counts.get(other_stage, 0) for other_stage in other_stages)
+        other_prevalence = rule_stage_counts[other_stages].sum(axis=1) / max(1, other_total_fovs)
+        other_mean_lift = rule_stage_mean_lift[other_stages].mean(axis=1)
 
-        ax_violin.set_ylim(len(ordered_rules), 0)
-        ax_violin.set_yticks([]); ax_violin.set_yticklabels([])
-        ax_violin.spines["left"].set_visible(False); ax_violin.spines["right"].set_visible(False); ax_violin.spines["top"].set_visible(False)
-        ax_violin.set_title("Global Lift Distribution\n ", fontsize=14, pad=35)
-        ax_violin.set_xlabel("Lift")
-        ax_violin.grid(False)
+        prevalence_gap = stage_prevalence - other_prevalence
+        lift_ratio = np.log2((stage_mean_lift + 1e-6) / (other_mean_lift + 1e-6)).clip(-3, 3)
+        observation_depth = np.sqrt(
+            rule_stage_counts[stage] + rule_stage_counts[other_stages].sum(axis=1)
+        )
 
-        # Summary Panel (Stage Statistics)
-        ax_sum.axis("off")
-        ax_sum.set_ylim(len(ordered_rules), 0)
-        ax_sum.set_xlim(0, len(valid_stages))
-        ax_sum.grid(False)
-        
-        # Headers for Summary Panel columns
-        for j, s in enumerate(valid_stages):
-            ax_sum.text(j + 0.5, -0.1, f"Stage {s}\nMean \u00b1 STD", 
-                        fontweight="bold", fontsize=10, ha="center", va="bottom")
+        selection_score = prevalence_gap * np.abs(lift_ratio) * observation_depth
+        selection_score = selection_score.loc[eligible_rules]
 
-        for i, r in enumerate(ordered_rules):
-            for j, s in enumerate(valid_stages):
-                if pivot_k.loc[r, s] > 0:
-                    txt_stats = f"{pivot_mu.loc[r, s]:.2f}\n\u00b1{pivot_std.loc[r, s]:.2f}"
-                    ax_sum.text(j + 0.5, i + 0.5, txt_stats, fontsize=8, va="center", ha="center")
+        top_positive_rules = selection_score.nlargest(rules_each_side).index.tolist()
+        top_negative_rules = selection_score.nsmallest(rules_each_side).index.tolist()
 
-        ax_sum.set_title("Stage Statistics\nMean Lift \u00b1 STD", fontsize=14, pad=35)
+        for rule in top_positive_rules + top_negative_rules:
+            if rule not in selected_rules:
+                selected_rules.append(rule)
 
-        # Zebra striping and unified horizontal lines
-        for i in range(len(ordered_rules)):
-            if i % 2 == 1:
-                # Add light background for every second row to improve horizontal tracking
-                bg_rect = plt.Rectangle((0, i), len(valid_stages), 1, facecolor="whitesmoke", alpha=0.3, zorder=-1)
-                ax_hm.add_patch(plt.Rectangle((0, i), len(valid_stages), 1, facecolor="whitesmoke", alpha=0.3, zorder=-1))
-                ax_violin.axhspan(i, i+1, facecolor="whitesmoke", alpha=0.3, zorder=-1)
-                ax_sum.axhspan(i, i+1, facecolor="whitesmoke", alpha=0.3, zorder=-1)
+    return selected_rules
 
-        for y in range(len(ordered_rules) + 1):
-            ax_hm.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
-            ax_violin.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
-            ax_sum.axhline(y, color="lightgray", linewidth=0.5, alpha=0.5)
 
-        safe_stage_col = str(stage_col).replace('/', '_').replace(' ', '_')
+def build_interaction_score(rule_stage_mean_lift, rule_stage_counts, valid_stages):
+    """Compute stage-marker color values from mean lift with low-count muting."""
+    interaction_score = pd.DataFrame(index=rule_stage_counts.index, columns=valid_stages, dtype=float)
+
+    for stage in valid_stages:
+        stage_rule_count = rule_stage_counts[stage]
+        low_count_weight = np.where(stage_rule_count < 3, stage_rule_count / 3.0, 1.0)
+        interaction_score[stage] = np.log2(rule_stage_mean_lift[stage] + 1e-6) * low_count_weight
+
+    return interaction_score
+
+
+def order_rules_by_peak_stage(plot_score):
+    """Order rules by strongest stage signal to improve diagonal readability."""
+    peak_stage = plot_score.abs().idxmax(axis=1)
+    row_summary = pd.DataFrame(
+        {
+            "rule": plot_score.index.tolist(),
+            "peak_stage": peak_stage,
+            "peak_score": [plot_score.loc[rule, peak_stage.loc[rule]] for rule in plot_score.index],
+        }
+    )
+    row_summary["stage_sort_key"] = row_summary["peak_stage"].map(get_stage_sort_key)
+    row_summary = row_summary.sort_values(["stage_sort_key", "peak_score"], ascending=[True, False])
+    return row_summary["rule"].tolist()
+
+
+def render_stage_marker_heatmap(
+    method_data,
+    method_name,
+    valid_stages,
+    selected_rules,
+    stage_heatmap_data,
+    save_path,
+):
+    """Render stage-marker heatmap with metadata panels."""
+    available_rules = [
+        rule for rule in selected_rules if rule in stage_heatmap_data["rule_stage_counts"].index
+    ]
+    if not available_rules:
+        return False
+
+    stage_fov_counts = stage_heatmap_data["stage_fov_counts"]
+    rule_stage_counts = stage_heatmap_data["rule_stage_counts"]
+    rule_stage_mean_lift = stage_heatmap_data["rule_stage_mean_lift"]
+    rule_stage_lift_std = stage_heatmap_data["rule_stage_lift_std"]
+
+    interaction_score = build_interaction_score(rule_stage_mean_lift, rule_stage_counts, valid_stages)
+    plot_score = interaction_score.loc[available_rules, valid_stages].astype(float)
+    annotation_data = build_rule_annotations(
+        available_rules,
+        valid_stages,
+        rule_stage_counts,
+        stage_fov_counts,
+    )
+    ordered_rules = order_rules_by_peak_stage(plot_score)
+
+    figure, heatmap_axis, violin_axis, summary_axis, colorbar_axis = create_metadata_figure(
+        valid_stages,
+        len(ordered_rules),
+    )
+
+    max_score = np.nanmax(plot_score.abs().values)
+    if max_score < 0.5:
+        max_score = 0.5
+
+    zero_count_mask = (rule_stage_counts.loc[ordered_rules, valid_stages] == 0).values
+
+    sns.heatmap(
+        plot_score.loc[ordered_rules],
+        annot=annotation_data.loc[ordered_rules],
+        fmt="",
+        cmap="RdBu_r",
+        center=0,
+        vmin=-max_score,
+        vmax=max_score,
+        ax=heatmap_axis,
+        cbar_ax=colorbar_axis,
+        mask=zero_count_mask,
+        linewidths=0.5,
+        linecolor="lightgray",
+        annot_kws={"size": 8},
+    )
+
+    heatmap_axis.set_facecolor("whitesmoke")
+    heatmap_axis.grid(False)
+    heatmap_axis.set_title(
+        f"Interaction Strength ({method_name})\n"
+        "Red: Lift > 1, Blue: Lift < 1 | Saturation: log2(Lift) | Muted if k < 3",
+        fontsize=14,
+        pad=35,
+    )
+    heatmap_axis.set_xticklabels(
+        [f"{get_stage_label(stage)}\n(N={stage_fov_counts.get(stage, 0)})" for stage in valid_stages],
+        rotation=0,
+    )
+    heatmap_axis.set_ylabel("Marker Rule")
+
+    plot_rule_lift_violin(violin_axis, method_data, ordered_rules)
+    plot_stage_stats_table(
+        summary_axis,
+        ordered_rules,
+        valid_stages,
+        rule_stage_counts,
+        rule_stage_mean_lift,
+        rule_stage_lift_std,
+    )
+    add_shared_row_design(
+        heatmap_axis,
+        violin_axis,
+        summary_axis,
+        row_count=len(ordered_rules),
+        stage_count=len(valid_stages),
+    )
+
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close(figure)
+    return True
+
+
+def plot_stage_marker_rules(data_by_method, output_dir, rules_per_stage=10, no_self=False, min_n_stages=2):
+    """Create stage-marker heatmaps using local rendering and marker-specific selection."""
+    for method_name, method_data in data_by_method.items():
+        if method_data.empty:
+            continue
+
+        stage_column = "Pathological stage" if "Pathological stage" in method_data.columns else "Group"
+        method_data[stage_column] = (
+            method_data[stage_column].fillna(-1).astype(int).astype(str).replace("-1", "Unknown")
+        )
+        valid_stages = get_valid_stages(method_data, stage_column)
+        if len(valid_stages) < 2:
+            continue
+
+        stage_heatmap_data = prepare_stage_heatmap_data(
+            method_data,
+            stage_column,
+            valid_stages,
+            minimum_stage_count=min_n_stages,
+        )
+        if not stage_heatmap_data["eligible_rules"]:
+            print(f"[{method_name}] No rules meet min_n_stages={min_n_stages}. Skipping.")
+            continue
+
+        selected_rules = select_stage_marker_rules(stage_heatmap_data, valid_stages, rules_per_stage)
+        if not selected_rules:
+            print(f"[{method_name}] No marker rules were selected. Skipping.")
+            continue
+
+        safe_stage_column = str(stage_column).replace("/", "_").replace(" ", "_")
         no_self_suffix = "_no_self" if no_self else ""
-        save_path = os.path.join(output_dir, f"heatmap_stage_marker_rules_{safe_stage_col}_{m}{no_self_suffix}.png")
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close(fig)
-        print(f"Saved {save_path}")
+        save_path = os.path.join(
+            output_dir,
+            f"heatmap_stage_marker_rules_{safe_stage_column}_{method_name}{no_self_suffix}.png",
+        )
+
+        was_saved = render_stage_marker_heatmap(
+            method_data=method_data,
+            method_name=method_name,
+            valid_stages=valid_stages,
+            selected_rules=selected_rules,
+            stage_heatmap_data=stage_heatmap_data,
+            save_path=save_path,
+        )
+        if was_saved:
+            print(f"Saved {save_path}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Stage Marker Rules Heatmaps")
     parser.add_argument("--top_n", type=int, default=10, help="Top N rules per stage to display")
     parser.add_argument("--no_self", action="store_true", help="Filter out self-loops")
-    parser.add_argument("--min_n_stages", type=int, default=2, help="Minimum number of stages a rule must appear in.")
+    parser.add_argument(
+        "--min_n_stages",
+        type=int,
+        default=2,
+        help="Minimum number of stages a rule must appear in.",
+    )
     args = parser.parse_args()
-    
-    out_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
-    os.makedirs(out_dir, exist_ok=True)
-    
-    dfs = load_data(no_self=args.no_self)
-    if not dfs:
+
+    output_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
+    os.makedirs(output_dir, exist_ok=True)
+
+    data_by_method = load_data(no_self=args.no_self)
+    if not data_by_method:
         print("No data found. Exiting.")
         return
 
     min_n_stages = max(1, args.min_n_stages)
     plot_stage_marker_rules(
-        dfs,
-        out_dir,
+        data_by_method,
+        output_dir,
         rules_per_stage=args.top_n,
         no_self=args.no_self,
         min_n_stages=min_n_stages,
     )
     print("Visualization Complete.")
+
 
 if __name__ == "__main__":
     main()

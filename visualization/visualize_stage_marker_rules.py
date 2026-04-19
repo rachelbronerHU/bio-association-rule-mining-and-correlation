@@ -10,7 +10,7 @@ import seaborn as sns
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from constants import MIBI_GUT_DIR_PATH, METHODS, RESULTS_DATA_DIR, RESULTS_PLOTS_DIR
+from constants import METHODS, RESULTS_PLOTS_DIR
 from visualization.utils.heatmap_util import (
     add_shared_row_design,
     build_rule_annotations,
@@ -22,31 +22,32 @@ from visualization.utils.heatmap_util import (
     plot_stage_stats_table,
     prepare_stage_heatmap_data,
 )
-from visualization.utils.visualization_util import filter_no_self_rules, merge_biopsy_metadata
+from visualization.utils.rule_data_loader import add_subset_args, get_subset_tag, load_rule_results
 
 sns.set_theme(style="whitegrid")
 
 
-def load_data(no_self=False):
+def load_data(
+    no_self=False,
+    subset_rule_items_eq=None,
+    subset_min_support=None,
+):
     """Load method results, merge metadata, and split by organ when available."""
     data_by_method = {}
-    print(f"Loading data from: {RESULTS_DATA_DIR}")
+    print("Loading stage-marker source data...")
 
     for method in METHODS:
-        csv_path = os.path.join(RESULTS_DATA_DIR, f"results_{method}.csv")
-        if not os.path.exists(csv_path):
+        method_data = load_rule_results(
+            method=method,
+            merge_metadata=True,
+            no_self=no_self,
+            subset_rule_items_eq=subset_rule_items_eq,
+            subset_min_support=subset_min_support,
+        )
+        if method_data is None:
             continue
 
         try:
-            method_data = pd.read_csv(csv_path)
-            method_data = merge_biopsy_metadata(method_data, MIBI_GUT_DIR_PATH)
-
-            if "Rule" not in method_data.columns:
-                method_data["Rule"] = method_data["Antecedents"] + " -> " + method_data["Consequents"]
-
-            if no_self:
-                method_data = filter_no_self_rules(method_data)
-
             if "Organ" in method_data.columns:
                 organ_values = [
                     organ
@@ -291,12 +292,23 @@ def main():
         default=2,
         help="Minimum number of stages a rule must appear in.",
     )
+    add_subset_args(parser)
     args = parser.parse_args()
 
+    subset_tag = get_subset_tag(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
     output_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
+    if subset_tag:
+        output_dir = os.path.join(output_dir, subset_tag)
     os.makedirs(output_dir, exist_ok=True)
 
-    data_by_method = load_data(no_self=args.no_self)
+    data_by_method = load_data(
+        no_self=args.no_self,
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
     if not data_by_method:
         print("No data found. Exiting.")
         return

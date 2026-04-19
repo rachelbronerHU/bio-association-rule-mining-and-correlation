@@ -8,9 +8,9 @@ from matplotlib.lines import Line2D
 
 sys.path.append(os.getcwd())
 import constants
+from visualization.utils.rule_data_loader import add_subset_args, get_subset_tag, load_rule_results
 from visualization.utils.visualization_util import (
     merge_biopsy_metadata,
-    filter_no_self_rules,
     parse_rule_list,
     format_rule_for_display,
     normalize_cell_table,
@@ -254,23 +254,41 @@ def plot_evolution_grid(rule_id, representative_fovs, group_order, cell_df, outp
     plt.savefig(output_path, dpi=300)
     plt.close()
 
-def run_visualizations(top_n=TOP_N_RULES, method="CN", stage_col=STAGE_COL, time_col=TIME_COL, min_n_stages=2):
+def run_visualizations(
+    top_n=TOP_N_RULES,
+    method="CN",
+    stage_col=STAGE_COL,
+    time_col=TIME_COL,
+    min_n_stages=2,
+    subset_rule_items_eq=None,
+    subset_min_support=None,
+):
     # Use constants.py for paths
-    results_path = os.path.join(constants.RESULTS_DATA_DIR, f"results_{method}.csv")
     cell_table_path = os.path.join(constants.MIBI_GUT_DIR_PATH, "cell_table.csv")
     output_dir = os.path.join(constants.RESULTS_PLOTS_DIR, "evolution_plots")
+    subset_tag = get_subset_tag(
+        subset_rule_items_eq=subset_rule_items_eq,
+        subset_min_support=subset_min_support,
+    )
+    if subset_tag:
+        output_dir = os.path.join(output_dir, subset_tag)
     os.makedirs(output_dir, exist_ok=True)
 
-    if not os.path.exists(results_path):
+    print("Loading Rule Results and Cell Data...")
+    results_df = load_rule_results(
+        method=method,
+        no_self=True,
+        subset_rule_items_eq=subset_rule_items_eq,
+        subset_min_support=subset_min_support,
+    )
+    if results_df is None:
+        results_path = os.path.join(constants.RESULTS_DATA_DIR, f"results_{method}.csv")
         print(f"Error: Results file not found at {results_path}")
         return
 
-    print("Loading Rule Results and Cell Data...")
-    results_df = pd.read_csv(results_path)
     if 'Biopsy_ID' not in results_df.columns and 'Patient' in results_df.columns:
         results_df = results_df.rename(columns={'Patient': 'Biopsy_ID'})
     results_df = merge_biopsy_metadata(results_df, constants.MIBI_GUT_DIR_PATH)
-    results_df = filter_no_self_rules(results_df)
     results_df['Rule_ID'] = results_df['Antecedents'] + " -> " + results_df['Consequents']
     results_df = results_df.dropna(subset=['Rule_Count_Global'])
     if 'Organ' not in results_df.columns:
@@ -389,6 +407,7 @@ def main():
     parser.add_argument("--stage_col", type=str, default=STAGE_COL)
     parser.add_argument("--time_col", type=str, default=TIME_COL)
     parser.add_argument("--min_n_stages", type=int, default=2, help="Minimum number of stages a rule must appear in.")
+    add_subset_args(parser)
     args = parser.parse_args()
     run_visualizations(
         top_n=args.top_n,
@@ -396,6 +415,8 @@ def main():
         stage_col=args.stage_col,
         time_col=args.time_col,
         min_n_stages=args.min_n_stages,
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
     )
 
 if __name__ == "__main__":

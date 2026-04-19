@@ -9,6 +9,7 @@ import argparse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from constants import CONSENSUS_RESULTS_EXPLORATION_DIR, RESULTS_DATA_DIR, METHODS
+from visualization.utils.rule_data_loader import add_subset_args, get_subset_tag, load_rule_results
 
 # Import organ stratification loader
 from data_exploration.check_data_bias import load_stratified_biopsies
@@ -48,19 +49,21 @@ INPUT_DIR = RESULTS_DATA_DIR
 OUTPUT_DIR = CONSENSUS_RESULTS_EXPLORATION_DIR
 TOP_N_PRINT = 5
 
-def load_data(method):
+def load_data(method, subset_rule_items_eq=None, subset_min_support=None):
     """
     Load results CSV and merge with organ stratification data.
     Returns DataFrame with Organ column added.
     """
-    # Construct absolute path to ensure it works from any CWD
-    file_path = os.path.join(PROJECT_ROOT, INPUT_DIR, f"results_{method}.csv")
-    if not os.path.exists(file_path):
+    df = load_rule_results(
+        method=method,
+        subset_rule_items_eq=subset_rule_items_eq,
+        subset_min_support=subset_min_support,
+    )
+    if df is None:
+        file_path = os.path.join(PROJECT_ROOT, INPUT_DIR, f"results_{method}.csv")
         print(f"Warning: File not found {file_path}")
         return None
-    
-    df = pd.read_csv(file_path)
-    
+
     # Load organ stratification data
     biopsy_df = load_stratified_biopsies()
     
@@ -154,18 +157,28 @@ def main():
     parser.add_argument("--top_n", type=int, default=None, help="Optional: Number of top rules to save per table. If not provided, saves ALL rules.")
     parser.add_argument("--no_self", action="store_true", help="Exclude rules where Antecedents contain Consequents (or overlap).")
     parser.add_argument("--organs", nargs='+', help="Optional: Specific organs to process (e.g., --organs Colon Duodenum). If not provided, auto-discovers all organs.")
+    add_subset_args(parser)
     
     args = parser.parse_args()
     
     suffix = "_no_self" if args.no_self else ""
     top_n = args.top_n
+    subset_tag = get_subset_tag(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
     
     abs_output_dir = os.path.join(PROJECT_ROOT, OUTPUT_DIR)
+    if subset_tag:
+        abs_output_dir = os.path.join(abs_output_dir, subset_tag)
     if not os.path.exists(abs_output_dir):
         os.makedirs(abs_output_dir)
     
     top_n_desc = f"Top {top_n}" if top_n else "ALL"
-    print(f"Configuration: Top N={top_n_desc}, No Self={args.no_self}, Organs Filter={args.organs}")
+    print(
+        f"Configuration: Top N={top_n_desc}, No Self={args.no_self}, "
+        f"Organs Filter={args.organs}, Subset={subset_tag or 'None'}"
+    )
     print(f"Output Directory: {abs_output_dir}")
     
     # Load bias flags for reliability context
@@ -173,7 +186,11 @@ def main():
 
     for method in METHODS:
         print(f"\n{'='*20} PROCESSING METHOD: {method} {'='*20}")
-        df = load_data(method)
+        df = load_data(
+            method,
+            subset_rule_items_eq=args.subset_rule_items_eq,
+            subset_min_support=args.subset_min_support,
+        )
         if df is None:
             continue
             

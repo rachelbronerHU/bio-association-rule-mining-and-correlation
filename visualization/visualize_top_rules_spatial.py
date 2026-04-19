@@ -8,6 +8,7 @@ import argparse
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
+from visualization.utils.rule_data_loader import add_subset_args, get_subset_tag, load_rule_results
 from visualization.utils.visualization_util import (
     parse_rule_list,
     normalize_cell_table,
@@ -22,7 +23,6 @@ from visualization.utils.visualization_util import (
 
 # --- Configuration ---
 CELL_TABLE_PATH = os.path.join(constants.MIBI_GUT_DIR_PATH, 'cell_table.csv')
-RESULTS_DIR = constants.RESULTS_DATA_DIR
 OUTPUT_DIR = os.path.join(constants.RESULTS_PLOTS_DIR, 'top_rules_spatial')
 METHODS = constants.METHODS
 
@@ -125,14 +125,28 @@ def _save_individual_plot(method_name, idx, df_fov, highlight_labels, color_map,
     plt.close(fig_single)
     print(f"   -> Saved individual asset: {single_out_path}")
 
-def visualize_method(method_name, cell_df, top_n, exclude_self_loops=False, exclude_shared_items=False, show_tissue_background=False):
-    results_path = os.path.join(RESULTS_DIR, f"results_{method_name}.csv")
-    if not os.path.exists(results_path):
+def visualize_method(
+    method_name,
+    cell_df,
+    output_dir,
+    top_n,
+    exclude_self_loops=False,
+    exclude_shared_items=False,
+    show_tissue_background=False,
+    subset_rule_items_eq=None,
+    subset_min_support=None,
+    save_readme_assets=True,
+):
+    rules_df = load_rule_results(
+        method=method_name,
+        subset_rule_items_eq=subset_rule_items_eq,
+        subset_min_support=subset_min_support,
+    )
+    if rules_df is None:
         print(f"Skipping {method_name}: File not found.")
         return
 
     print(f"Processing {method_name} (Top {top_n})...")
-    rules_df = pd.read_csv(results_path)
     
     if 'Lift' not in rules_df.columns:
         print(f"Skipping {method_name}: 'Lift' column missing.")
@@ -262,7 +276,7 @@ def visualize_method(method_name, cell_df, top_n, exclude_self_loops=False, excl
                  fontsize=12, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='lightgray'))
 
         # Save individual plots for top 3 rules of specific methods
-        if method_name in ["BAG", "KNN_R"] and idx < 3:
+        if save_readme_assets and method_name in ["BAG", "KNN_R"] and idx < 3:
             _save_individual_plot(
                 method_name, idx, df_fov, highlight_labels, color_map, color_labels, title_str, show_tissue_background
             )
@@ -276,7 +290,7 @@ def visualize_method(method_name, cell_df, top_n, exclude_self_loops=False, excl
     elif exclude_self_loops:
         suffix += "_no_self_loops"
 
-    out_path = os.path.join(OUTPUT_DIR, f"{method_name}_top_rules{suffix}.png")
+    out_path = os.path.join(output_dir, f"{method_name}_top_rules{suffix}.png")
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved visualization to {out_path}")
@@ -287,10 +301,19 @@ def main():
     parser.add_argument("--exclude_self_loops", action="store_true", help="Filter out rules where antecedent set EQUALS consequent set.")
     parser.add_argument("--exclude_shared_items", action="store_true", help="Filter out rules where ANY cell type appears in both antecedent and consequent.")
     parser.add_argument("--show_tissue_background", action="store_true", help="Show tissue compartment backgrounds (convex hulls)")
+    add_subset_args(parser)
     args = parser.parse_args()
 
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
+    subset_tag = get_subset_tag(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
+    output_dir = OUTPUT_DIR
+    if subset_tag:
+        output_dir = os.path.join(output_dir, subset_tag)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
 
     if not os.path.exists(CELL_TABLE_PATH):
         print(f"Error: Cell table not found at {CELL_TABLE_PATH}")
@@ -298,12 +321,20 @@ def main():
 
     cell_df = load_cell_data(CELL_TABLE_PATH)
 
+    save_readme_assets = subset_tag is None
     for method in METHODS:
-        visualize_method(method, cell_df, 
-                         top_n=args.top_n, 
-                         exclude_self_loops=args.exclude_self_loops,
-                         exclude_shared_items=args.exclude_shared_items,
-                         show_tissue_background=args.show_tissue_background)
+        visualize_method(
+            method,
+            cell_df,
+            output_dir=output_dir,
+            top_n=args.top_n,
+            exclude_self_loops=args.exclude_self_loops,
+            exclude_shared_items=args.exclude_shared_items,
+            show_tissue_background=args.show_tissue_background,
+            subset_rule_items_eq=args.subset_rule_items_eq,
+            subset_min_support=args.subset_min_support,
+            save_readme_assets=save_readme_assets,
+        )
 
 if __name__ == "__main__":
     main()

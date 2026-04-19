@@ -4,39 +4,41 @@ import seaborn as sns
 import os
 import sys
 import numpy as np
+import argparse
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import constants
-from visualization.utils.visualization_util import merge_biopsy_metadata, get_stage_palette
+from visualization.utils.rule_data_loader import add_subset_args, get_subset_tag, load_rule_results
+from visualization.utils.visualization_util import get_stage_palette
 
 # Standard stage colors using our utility
 STAGE_PALETTE = get_stage_palette(n_stages=5)
 
 # --- Configuration ---
-RESULTS_DIR = constants.RESULTS_DATA_DIR
 OUTPUT_DIR = os.path.join(constants.RESULTS_PLOTS_DIR, 'raw_rules_report')
 METHODS = constants.METHODS
-MIBI_GUT_DIR_PATH = constants.MIBI_GUT_DIR_PATH
 
 sns.set_theme(style="whitegrid")
 
-def load_raw_data():
+def load_raw_data(subset_rule_items_eq=None, subset_min_support=None):
     """Loads RAW results CSVs and attaches fresh metadata."""
     raw_dfs = {}
-    print(f"Loading RAW data from: {RESULTS_DIR}")
+    print("Loading RAW rules data...")
 
     for m in METHODS:
-        # Load Raw CSV
-        csv_path = os.path.join(RESULTS_DIR, f"results_{m}_RAW.csv")
-        if os.path.exists(csv_path):
-            try:
-                df = pd.read_csv(csv_path)
-                # Attach unified metadata (Source of Truth)
-                df = merge_biopsy_metadata(df, MIBI_GUT_DIR_PATH)
+        try:
+            df = load_rule_results(
+                method=m,
+                raw=True,
+                merge_metadata=True,
+                subset_rule_items_eq=subset_rule_items_eq,
+                subset_min_support=subset_min_support,
+            )
+            if df is None:
+                print(f"Warning: results_{m}_RAW.csv not found.")
+            else:
                 raw_dfs[m] = df
-            except Exception as e:
-                print(f"Error loading {m} RAW CSV: {e}")
-        else:
-            print(f"Warning: {csv_path} not found.")
+        except Exception as e:
+            print(f"Error loading {m} RAW CSV: {e}")
 
     return raw_dfs
 
@@ -131,17 +133,32 @@ def plot_raw_volcano(dfs, output_dir):
     print(f"Saved raw volcano plot to {output_dir}/raw_volcano_grid.png")
 
 def main():
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        print(f"Created directory: {OUTPUT_DIR}")
+    parser = argparse.ArgumentParser(description="Generate raw-rules visualizations.")
+    add_subset_args(parser)
+    args = parser.parse_args()
 
-    raw_dfs = load_raw_data()
+    subset_tag = get_subset_tag(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
+    output_dir = OUTPUT_DIR
+    if subset_tag:
+        output_dir = os.path.join(output_dir, subset_tag)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        print(f"Created directory: {output_dir}")
+
+    raw_dfs = load_raw_data(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
     
     if not raw_dfs:
         print("No raw data found. Exiting.")
         return
 
-    plot_raw_volcano(raw_dfs, OUTPUT_DIR)
+    plot_raw_volcano(raw_dfs, output_dir)
 
 if __name__ == "__main__":
     main()

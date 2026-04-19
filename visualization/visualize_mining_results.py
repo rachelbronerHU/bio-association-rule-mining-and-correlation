@@ -6,6 +6,7 @@ import os
 import numpy as np
 import json
 import sys
+import argparse
 
 import ast
 from sklearn.decomposition import PCA
@@ -13,6 +14,7 @@ from sklearn.decomposition import PCA
 # Add project root to sys.path to import constants
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from constants import RESULTS_DATA_DIR, RESULTS_PLOTS_DIR, METHODS, MIBI_GUT_DIR_PATH
+from visualization.utils.rule_data_loader import add_subset_args, get_subset_tag, load_rule_results
 from visualization.utils.visualization_util import add_organ_column, get_stage_palette
 
 # Define standard stage colors using our utility
@@ -20,23 +22,24 @@ STAGE_PALETTE = get_stage_palette(n_stages=5)
 
 sns.set_theme(style="whitegrid")
 
-def load_data():
+def load_data(subset_rule_items_eq=None, subset_min_support=None):
     """Loads results CSVs and Stats JSONs."""
     dfs = {}
     stats = {}
     
-    print(f"Loading data from: {RESULTS_DATA_DIR}")
+    print("Loading mining results data...")
     
     for m in METHODS:
         # Load CSV
-        csv_path = os.path.join(RESULTS_DATA_DIR, f"results_{m}.csv")
-        if os.path.exists(csv_path):
-            try:
-                df = pd.read_csv(csv_path)
-                # Create Rule ID if missing
-                if "Rule" not in df.columns:
-                    df["Rule"] = df["Antecedents"] + " -> " + df["Consequents"]
-                
+        try:
+            df = load_rule_results(
+                method=m,
+                subset_rule_items_eq=subset_rule_items_eq,
+                subset_min_support=subset_min_support,
+            )
+            if df is None:
+                print(f"Warning: results_{m}.csv not found.")
+            else:
                 # Rule Length (Total Items)
                 # Safely parse string representation of list/tuple
                 def get_len(x):
@@ -46,12 +49,9 @@ def load_data():
                         return 1 # Fallback
                         
                 df["Rule_Len"] = df["Antecedents"].apply(get_len) + df["Consequents"].apply(get_len)
-                
                 dfs[m] = df
-            except Exception as e:
-                print(f"Error loading {m} CSV: {e}")
-        else:
-            print(f"Warning: {csv_path} not found.")
+        except Exception as e:
+            print(f"Error loading {m} CSV: {e}")
 
         # Load Stats
         json_path = os.path.join(RESULTS_DATA_DIR, f"stats_{m}.json")
@@ -659,12 +659,26 @@ def plot_pca_rule_families(dfs, output_dir):
                                       pca_organ, output_dir, f"pca_rule_families_stage_{organ_val}_{m}.png", stage_col)
 
 def main():
+    parser = argparse.ArgumentParser(description="Generate mining result visualizations.")
+    add_subset_args(parser)
+    args = parser.parse_args()
+
+    subset_tag = get_subset_tag(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
+
     # Setup Output Dir
     out_dir = os.path.join(RESULTS_PLOTS_DIR, "mining_report")
+    if subset_tag:
+        out_dir = os.path.join(out_dir, subset_tag)
     os.makedirs(out_dir, exist_ok=True)
     print(f"Saving plots to: {out_dir}")
     
-    dfs, stats = load_data()
+    dfs, stats = load_data(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
     
     if not dfs:
         print("No data found. Exiting.")

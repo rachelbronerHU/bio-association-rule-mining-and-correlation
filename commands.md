@@ -35,14 +35,15 @@
 * python visualization\visualize_top_rules_spatial.py [--top_n 20] [--exclude_shared_items / --exclude_self_loops] [--show_tissue_background] (results/full_run/plots/top_rules_spatial)
 * python visualization\visualize_transaction_distributions.py (results/full_run/plots/transaction_distributions)
 * python visualization\visualize_dynamic_spatial_evolution.py [--top_n 3] [--method CN] [--stage_col "GI stage"] [--time_col "Days after Transplant grouped"] [--min_n_stages 2] (results/full_run/plots/evolution_plots, organ-stratified; filenames include organ)
-* python visualization\run_all_visualizations.py (runs fixed post-mining pipeline line-by-line: exploration, mining visualizations, NEW spatial visualizations, consensus with/without no_self, and stage-marker variants)
+* Shared subset flags for rule-based visualizations: [--subset_rule_items_eq N] [--subset_min_support X]
+* python visualization\run_all_visualizations.py [--subset_rule_items_eq N] [--subset_min_support X] (runs fixed post-mining pipeline line-by-line: exploration, mining visualizations, NEW spatial visualizations, consensus with/without no_self, and stage-marker variants)
 
 # Step no. 5: Consensus Report:
 **(Run each one with and without --no_self flag. Auto-discovers and processes all organs by default.)**
-* *step 1* python result_exploration/generate_consensus_tables.py [--top_n 100] [--no_self] [--organs Colon Duodenum] (tables under: results/full_run/data/consensus_tables, organ-stratified)
+* *step 1* python result_exploration/generate_consensus_tables.py [--top_n 100] [--no_self] [--organs Colon Duodenum] [--subset_rule_items_eq N] [--subset_min_support X] (tables under: results/full_run/data/consensus_tables[/subset_*], organ-stratified)
   - Omit --top_n to save ALL rules (recommended for complete analysis)
   - Use --top_n N to save only top N rules (faster, but may miss stage-specific rules)
-* *step 2* python visualization\visualize_consensus.py [--no_self] [--organs Colon Duodenum] (results/full_run/plots/consensus_report, organ-stratified)
+* *step 2* python visualization\visualize_consensus.py [--no_self] [--organs Colon Duodenum] [--subset_rule_items_eq N] [--subset_min_support X] (results/full_run/plots/consensus_report[/subset_*], organ-stratified)
 
 ##### RULE CORRELATION FLOW #####
 

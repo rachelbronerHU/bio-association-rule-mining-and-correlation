@@ -15,8 +15,6 @@ sys.path.append(PROJECT_ROOT)
 from constants import (
     CONSENSUS_RESULTS_EXPLORATION_DIR,
     METHODS,
-    MIBI_GUT_DIR_PATH,
-    RESULTS_DATA_DIR,
     RESULTS_PLOTS_DIR,
 )
 from visualization.utils.heatmap_util import (
@@ -26,7 +24,7 @@ from visualization.utils.heatmap_util import (
     plot_stage_stats_table,
     prepare_stage_heatmap_data,
 )
-from visualization.utils.visualization_util import filter_no_self_rules, merge_biopsy_metadata
+from visualization.utils.rule_data_loader import add_subset_args, get_subset_tag, load_rule_results
 
 # Input Directory from where we just saved the consensus tables
 CONSENSUS_DIR = os.path.join(PROJECT_ROOT, CONSENSUS_RESULTS_EXPLORATION_DIR)
@@ -41,7 +39,7 @@ def ensure_dir(path):
         os.makedirs(path)
 
 
-def load_data(method, level, organ=None, suffix=""):
+def load_data(method, level, consensus_dir, organ=None, suffix=""):
     """
     Loads consensus data.
     level: 'global', 'stage', or 'biopsy'
@@ -52,7 +50,7 @@ def load_data(method, level, organ=None, suffix=""):
     else:
         filename = f"{method}_top_consensus_{level}{suffix}.csv"
 
-    filepath = os.path.join(CONSENSUS_DIR, filename)
+    filepath = os.path.join(consensus_dir, filename)
     if os.path.exists(filepath):
         return pd.read_csv(filepath)
 
@@ -60,23 +58,22 @@ def load_data(method, level, organ=None, suffix=""):
     return None
 
 
-def load_method_results(method, no_self=False, organ=None):
+def load_method_results(
+    method,
+    no_self=False,
+    organ=None,
+    subset_rule_items_eq=None,
+    subset_min_support=None,
+):
     """Load raw method results used for metadata panels (violin + mean/std table)."""
-    method_file = os.path.join(PROJECT_ROOT, RESULTS_DATA_DIR, f"results_{method}.csv")
-    if not os.path.exists(method_file):
-        print(f"Warning: File not found {method_file}")
-        return None
-
-    method_data = pd.read_csv(method_file)
-    method_data = merge_biopsy_metadata(method_data, os.path.join(PROJECT_ROOT, MIBI_GUT_DIR_PATH))
-
-    if no_self:
-        method_data = filter_no_self_rules(method_data)
-
-    if organ and "Organ" in method_data.columns:
-        method_data = method_data[method_data["Organ"] == organ].copy()
-
-    return method_data
+    return load_rule_results(
+        method=method,
+        merge_metadata=True,
+        no_self=no_self,
+        organ=organ,
+        subset_rule_items_eq=subset_rule_items_eq,
+        subset_min_support=subset_min_support,
+    )
 
 
 def clean_rule_name(ant, con):
@@ -130,12 +127,20 @@ def select_consensus_rules(stage_consensus_data, stage_column, rules_per_stage=1
     return selected_rules, stage_rule_matrix
 
 
-def plot_stage_consensus_heatmap(method, suffix, output_dir, organ=None):
+def plot_stage_consensus_heatmap(
+    method,
+    suffix,
+    output_dir,
+    consensus_dir,
+    organ=None,
+    subset_rule_items_eq=None,
+    subset_min_support=None,
+):
     """
     Plots stage consensus heatmap with metadata panels.
     Heatmap color is Consensus Score (old behavior), while side panels show lift metadata.
     """
-    stage_data = load_data(method, "stage", organ=organ, suffix=suffix)
+    stage_data = load_data(method, "stage", consensus_dir=consensus_dir, organ=organ, suffix=suffix)
     if stage_data is None or stage_data.empty:
         return
 
@@ -166,7 +171,13 @@ def plot_stage_consensus_heatmap(method, suffix, output_dir, organ=None):
     stage_rule_matrix["max_score"] = stage_rule_matrix.max(axis=1)
     stage_rule_matrix = stage_rule_matrix.sort_values("max_score", ascending=False).drop(columns="max_score")
 
-    method_data = load_method_results(method, no_self=(suffix == "_no_self"), organ=organ)
+    method_data = load_method_results(
+        method,
+        no_self=(suffix == "_no_self"),
+        organ=organ,
+        subset_rule_items_eq=subset_rule_items_eq,
+        subset_min_support=subset_min_support,
+    )
     if method_data is None or method_data.empty:
         print(f"[{method}] No raw result data for metadata panels. Skipping.")
         return
@@ -265,11 +276,11 @@ def plot_stage_consensus_heatmap(method, suffix, output_dir, organ=None):
     print(f"Saved {save_path}")
 
 
-def plot_biopsy_jaccard_similarity(method, suffix, output_dir, organ=None):
+def plot_biopsy_jaccard_similarity(method, suffix, output_dir, consensus_dir, organ=None):
     """
     Calculates and plots Jaccard Similarity between Biopsies based on their consensus rules.
     """
-    data_frame = load_data(method, "biopsy", organ=organ, suffix=suffix)
+    data_frame = load_data(method, "biopsy", consensus_dir=consensus_dir, organ=organ, suffix=suffix)
     if data_frame is None or data_frame.empty:
         return
 
@@ -317,11 +328,11 @@ def plot_biopsy_jaccard_similarity(method, suffix, output_dir, organ=None):
         print(f"Error plotting clustermap for {method}: {error}")
 
 
-def plot_global_consensus_bar(method, suffix, output_dir, organ=None):
+def plot_global_consensus_bar(method, suffix, output_dir, consensus_dir, organ=None):
     """
     Plots top global consensus rules with counts.
     """
-    data_frame = load_data(method, "global", organ=organ, suffix=suffix)
+    data_frame = load_data(method, "global", consensus_dir=consensus_dir, organ=organ, suffix=suffix)
     if data_frame is None or data_frame.empty:
         return
 
@@ -379,17 +390,28 @@ def main():
         nargs="+",
         help="Optional: Specific organs to visualize (e.g., --organs Colon Duodenum). If not provided, auto-discovers from files.",
     )
+    add_subset_args(parser)
     args = parser.parse_args()
 
     suffix = "_no_self" if args.no_self else ""
+    subset_tag = get_subset_tag(
+        subset_rule_items_eq=args.subset_rule_items_eq,
+        subset_min_support=args.subset_min_support,
+    )
+    consensus_dir = CONSENSUS_DIR
+    plots_dir = PLOTS_DIR
+    if subset_tag:
+        consensus_dir = os.path.join(consensus_dir, subset_tag)
+        plots_dir = os.path.join(plots_dir, subset_tag)
 
-    ensure_dir(PLOTS_DIR)
-    print(f"Saving plots to: {PLOTS_DIR}")
+    ensure_dir(plots_dir)
+    print(f"Saving plots to: {plots_dir}")
+    print(f"Consensus input directory: {consensus_dir}")
     print(f"Using suffix: '{suffix}'")
 
     import glob
 
-    pattern = os.path.join(CONSENSUS_DIR, f"*_top_consensus_global_*{suffix}.csv")
+    pattern = os.path.join(consensus_dir, f"*_top_consensus_global_*{suffix}.csv")
     files = glob.glob(pattern)
 
     discovered_organs = set()
@@ -409,9 +431,16 @@ def main():
         print("No organ-stratified files found. Falling back to legacy (non-stratified) mode.")
         for method in METHODS:
             print(f"\n--- Visualizing {method} (Legacy) ---")
-            plot_stage_consensus_heatmap(method, suffix, PLOTS_DIR)
-            plot_biopsy_jaccard_similarity(method, suffix, PLOTS_DIR)
-            plot_global_consensus_bar(method, suffix, PLOTS_DIR)
+            plot_stage_consensus_heatmap(
+                method,
+                suffix,
+                plots_dir,
+                consensus_dir=consensus_dir,
+                subset_rule_items_eq=args.subset_rule_items_eq,
+                subset_min_support=args.subset_min_support,
+            )
+            plot_biopsy_jaccard_similarity(method, suffix, plots_dir, consensus_dir=consensus_dir)
+            plot_global_consensus_bar(method, suffix, plots_dir, consensus_dir=consensus_dir)
     else:
         print(f"\nDiscovered organs: {discovered_organs}")
         print(f"Processing organs: {organs_to_process}")
@@ -423,9 +452,29 @@ def main():
 
             for method in METHODS:
                 print(f"\n--- Visualizing {method} - {organ} ---")
-                plot_stage_consensus_heatmap(method, suffix, PLOTS_DIR, organ=organ)
-                plot_biopsy_jaccard_similarity(method, suffix, PLOTS_DIR, organ=organ)
-                plot_global_consensus_bar(method, suffix, PLOTS_DIR, organ=organ)
+                plot_stage_consensus_heatmap(
+                    method,
+                    suffix,
+                    plots_dir,
+                    consensus_dir=consensus_dir,
+                    organ=organ,
+                    subset_rule_items_eq=args.subset_rule_items_eq,
+                    subset_min_support=args.subset_min_support,
+                )
+                plot_biopsy_jaccard_similarity(
+                    method,
+                    suffix,
+                    plots_dir,
+                    consensus_dir=consensus_dir,
+                    organ=organ,
+                )
+                plot_global_consensus_bar(
+                    method,
+                    suffix,
+                    plots_dir,
+                    consensus_dir=consensus_dir,
+                    organ=organ,
+                )
 
 
 if __name__ == "__main__":

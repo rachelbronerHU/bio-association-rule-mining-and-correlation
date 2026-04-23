@@ -243,6 +243,7 @@ def save_results(results, df_biopsy, df_fovs, suffix, data_key="Rules"):
                 "Antecedents": str([str(x) for x in row["antecedents"]]),
                 "Consequents": str([str(x) for x in row["consequents"]]),
                 "Lift": row["lift"],
+                "Leverage": row["leverage"],
                 "Confidence": row["confidence"],
                 "Conviction": row["conviction"],
                 "Support": row["support"],

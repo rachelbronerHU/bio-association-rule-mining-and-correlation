@@ -10,6 +10,8 @@ data/
 results/debug_run
 results/full_run/data
 results/full_run/rare_filtering_stats
+
+visualization/notebooks/reports
 # Logs
 *.log
 

@@ -11,7 +11,7 @@ _DEFAULT_ALGO = "weighted_fpgrowth"
 ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
 
 # Functional Markers Expansion
-USE_FUNCTIONAL_MARKERS = True
+USE_FUNCTIONAL_MARKERS = False
 
 CELLTYPE_MARKER_THRESHOLDS = {
     'Epithelial': {'Ki67': 2.5, 'HLADRDPDQ': 1.75},
@@ -67,7 +67,7 @@ if ALGO == "weighted_fpgrowth":
         "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
         "MIN_ABS_SUPPORT": 5,      # Rule must hold in at least this many transactions (absolute floor)
         # Positive-rule rescue: allow lower support only when confidence is high.
-        "HIGH_CONFIDENCE_THRESHOLD": 0.8,
+        "HIGH_CONFIDENCE_THRESHOLD": 0.9,
         "HIGH_CONF_MIN_SUPPORT": 0.005,
         "MIN_CONFIDENCE": 0.3,      # Same as binary — weighted confidence already requires intensity match, not just presence
         "MIN_LIFT": 1.2,            # Slightly stricter to compensate for finer-grained support scale

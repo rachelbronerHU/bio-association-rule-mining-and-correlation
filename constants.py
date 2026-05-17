@@ -11,7 +11,7 @@ _DEFAULT_ALGO = "weighted_fpgrowth"
 ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
 
 # Functional Markers Expansion
-USE_FUNCTIONAL_MARKERS = False
+USE_FUNCTIONAL_MARKERS = True
 
 CELLTYPE_MARKER_THRESHOLDS = {
     'Epithelial': {'Ki67': 2.5, 'HLADRDPDQ': 1.75},

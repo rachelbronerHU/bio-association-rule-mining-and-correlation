@@ -76,7 +76,7 @@ if ALGO == "weighted_fpgrowth":
         "MIN_CONVICTION": 1.3,
         "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
         "MAX_NEGATIVE_LIFT": 0.8,
-        "MAX_RULE_LENGTH": 5,
+        "MAX_RULE_LENGTH": 2,
         "TARGET_CELLS": 30,
         "MIN_CELLS_PER_PATCH": 2,
         "N_PERMUTATIONS": 5 if DEBUG else 1000,

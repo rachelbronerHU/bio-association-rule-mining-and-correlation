@@ -221,13 +221,14 @@ def get_subtype_mask(df, subtype_str):
     base = _extract_base_lineage(subtype_str)
     mask = (df['cell_type'] == base)
 
-    # Marker-aware subtype only when explicitly encoded as "<base>_<marker>+"
-    if "+" in subtype_str and "_" in subtype_str:
-        marker_plus = subtype_str.rsplit('_', 1)[-1]
+    # Marker-aware subtype only when explicitly encoded as "<base>_<marker1+>_<marker2+>..."
+    marker_tokens = [part for part in subtype_str.split('_') if part.endswith('+')]
+    for marker_plus in marker_tokens:
         marker = marker_plus.rstrip('+')
+        if marker not in df.columns:
+            return pd.Series(False, index=df.index)
         threshold = constants.CELLTYPE_MARKER_THRESHOLDS.get(base, {}).get(marker, 0)
-        if marker in df.columns:
-            mask &= (df[marker] > threshold)
+        mask &= (df[marker] > threshold)
     return mask
 
 def get_rule_cells_mask(df, rule_items):

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 from statsmodels.stats.multitest import multipletests
-from utils.rules import filter_rule_by_scores_mask
+from utils.rules import filter_rule_by_scores_mask, passes_rule_support_policy
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,6 @@ def check_rules_batch(rules_df, trans_mat, item_idx_map, config):
 
     num_trans = trans_mat.shape[0]
     results = np.zeros(len(rules_df), dtype=bool)
-    min_sup = config["MIN_SUPPORT"]
-
     for r_idx, (_, row) in enumerate(rules_df.iterrows()):
         ant_cols = [item_idx_map[i] for i in row["antecedents"] if i in item_idx_map]
         con_cols = [item_idx_map[i] for i in row["consequents"] if i in item_idx_map]
@@ -94,10 +92,14 @@ def check_rules_batch(rules_df, trans_mat, item_idx_map, config):
         sup_con = float(con_weights[has_con].min(axis=1).sum()) / num_trans if has_con.any() else 0.0
         sup_both = float(rule_weights[has_both].min(axis=1).sum()) / num_trans if has_both.any() else 0.0
 
-        if sup_both < min_sup or sup_ant == 0 or sup_con == 0:
+        if sup_ant == 0 or sup_con == 0:
             continue
 
         confidence, lift, leverage, conviction = calculate_metrics(sup_both, sup_ant, sup_con)
+        if not passes_rule_support_policy(
+            config, sup_both, confidence, lift, num_transactions=num_trans
+        ):
+            continue
         results[r_idx] = filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)
 
     return results

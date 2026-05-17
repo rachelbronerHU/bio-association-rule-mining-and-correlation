@@ -5,7 +5,7 @@ from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import fpgrowth, association_rules
 
 from utils.spatial import MIN_CELLS, is_dominated
-from utils.rules import filter_rule_by_scores_mask
+from utils.rules import build_cell_item_token, filter_rule_by_scores_mask
 from utils.validation import prepare_validation_matrices, run_matrix_permutation_test
 
 from typing import Optional
@@ -17,13 +17,21 @@ def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: 
     """
     Entry point for standard binary FP-Growth.
     """
+    encoded_cell_labels = np.array([
+        build_cell_item_token(
+            cell_types[i],
+            functional_subtypes[i] if functional_subtypes is not None else None,
+        )
+        for i in range(len(cell_types))
+    ], dtype=object)
+
     trans, stats = _build_transactions(neighborhoods, cell_types, method, config, functional_subtypes)
     mined_rules = _mine(trans, config, method)
 
     # PRE-COMPUTE ONCE PER FOV:
     # Capture the physical structure and labels before returning the hook
     adj_center, adj_neighbor, label_mat, label_names = prepare_validation_matrices(
-        neighborhoods, len(cell_types), cell_types, functional_subtypes
+        neighborhoods, len(cell_types), encoded_cell_labels, functional_subtypes=None
     )
     n_perms = config["N_PERMUTATIONS"]
 
@@ -65,20 +73,25 @@ def _build_transactions(neighborhoods, cell_types, method, config, functional_su
                 continue
 
             # Center logic - use set to avoid duplicates immediately
-            trans = {f"{cell_types[center_i]}_CENTER"}
-            if functional_subtypes is not None:
-                for s in functional_subtypes[center_i]:
-                    trans.add(f"{s}_CENTER")
+            trans = {
+                build_cell_item_token(
+                    cell_types[center_i],
+                    functional_subtypes[center_i] if functional_subtypes is not None else None,
+                    suffix="CENTER",
+                )
+            }
 
             # Neighbors logic
             for n in idxs:
                 if n == center_i:
                     continue
-                n_type = cell_types[n]
-                trans.add(f"{n_type}_NEIGHBOR")
-                if functional_subtypes is not None:
-                    for s in functional_subtypes[n]:
-                        trans.add(f"{s}_NEIGHBOR")
+                trans.add(
+                    build_cell_item_token(
+                        cell_types[n],
+                        functional_subtypes[n] if functional_subtypes is not None else None,
+                        suffix="NEIGHBOR",
+                    )
+                )
             
             trans_list = list(trans)
         else:
@@ -91,10 +104,12 @@ def _build_transactions(neighborhoods, cell_types, method, config, functional_su
             
             trans = set()
             for idx in idxs:
-                trans.add(cell_types[idx])
-                if functional_subtypes is not None:
-                    for s in functional_subtypes[idx]:
-                        trans.add(s)
+                trans.add(
+                    build_cell_item_token(
+                        cell_types[idx],
+                        functional_subtypes[idx] if functional_subtypes is not None else None,
+                    )
+                )
             
             trans_list = list(trans)
 

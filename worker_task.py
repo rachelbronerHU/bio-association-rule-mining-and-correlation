@@ -30,8 +30,7 @@ def _apply_rule_filters(rules: pd.DataFrame, cell_type_counts: dict, config: dic
     """
     Shared pipeline for filtering rules:
     1. Rare cell types (calculated against n_cells_total)
-    2. Hierarchical redundancy (Apple is a Fruit)
-    3. Occam's Razor redundancy
+    2. Occam's Razor redundancy
     """
     if rules.empty:
         return rules, 0, 0
@@ -41,15 +40,15 @@ def _apply_rule_filters(rules: pd.DataFrame, cell_type_counts: dict, config: dic
     if rules.empty:
         return rules, 0, n_rare_filtered
 
-    # 2. Hierarchical Pruning
-    rules, n_hier_removed = remove_hierarchical_redundancy(rules, config)
-    if rules.empty:
-        return rules, n_hier_removed, n_rare_filtered
+    # Disabled: one-token-per-cell encoding can make this prune over-aggressive.
+    # rules, n_hier_removed = remove_hierarchical_redundancy(rules, config)
+    # if rules.empty:
+    #     return rules, n_hier_removed, n_rare_filtered
 
-    # 3. Occam's Razor
+    # 2. Occam's Razor
     rules, n_occ_removed = filter_redundant_rules(rules, config)
     
-    total_removed = n_hier_removed + n_occ_removed
+    total_removed = n_occ_removed
     return rules, total_removed, n_rare_filtered
 
 

@@ -8,6 +8,49 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _normalize_marker_label(base_type: str, subtype_label: str) -> str:
+    """
+    Extract marker token from a functional subtype label.
+    Expected input shape: "<base_type>_<marker>+".
+    """
+    s = str(subtype_label)
+    if not s:
+        return ""
+
+    prefix = f"{base_type}_"
+    if s.startswith(prefix):
+        return s[len(prefix):]
+
+    # Fallback for unexpected formats.
+    if "_" in s:
+        return s.rsplit("_", 1)[-1]
+    return s
+
+
+def build_cell_item_token(cell_type: str, subtypes: Optional[np.ndarray], suffix: Optional[str] = None) -> str:
+    """
+    Build one token per physical cell.
+    - No markers: "<cell_type>[_<suffix>]"
+    - With markers: "<cell_type>_<sorted_unique_markers>[_<suffix>]"
+    """
+    base = str(cell_type)
+    markers = []
+    if subtypes is not None:
+        for st in subtypes:
+            marker = _normalize_marker_label(base, str(st))
+            if marker:
+                markers.append(marker)
+
+    if markers:
+        core = f"{base}_{'_'.join(sorted(set(markers)))}"
+    else:
+        core = base
+
+    if suffix:
+        return f"{core}_{suffix}"
+    return core
+
+
 def select_top_rules(rules, n=2000):
     if len(rules) <= n:
         return rules
@@ -52,12 +95,15 @@ def _extract_base_lineage(item):
     # 1. Strip spatial suffix
     clean = item.replace("_CENTER", "").replace("_NEIGHBOR", "")
     
-    # 2. Handle functional markers (identified by '+')
+    # 2. Handle functional markers (identified by '+').
+    # Keep only non-marker segments, so:
+    #   CD8T_CD69+_Ki67+        -> CD8T
+    #   Neutrophil_CD15_CD103+  -> Neutrophil_CD15
     if "+" in clean:
         parts = clean.split("_")
-        # Base is everything except the last marker segment
-        if len(parts) > 1:
-            return "_".join(parts[:-1])
+        base_parts = [p for p in parts if "+" not in p]
+        if base_parts:
+            return "_".join(base_parts)
     return clean
 
 
@@ -138,6 +184,7 @@ def _is_hierarchical_redundant(itemset, markers):
     return False
 
 
+# Legacy helper: currently not called in worker pipeline after one-token-per-cell encoding.
 def remove_hierarchical_redundancy(rules, config):
     """
     Deletes rules that contain both a base lineage and its own subtype
@@ -234,3 +281,26 @@ def filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence):
     is_negative = (lift <= config["MAX_NEGATIVE_LIFT"]) & (leverage <= config["MAX_NEGATIVE_LEVERAGE"])
     
     return is_positive | is_negative
+
+
+def passes_rule_support_policy(config, support, confidence, lift, num_transactions):
+    """
+    Confidence-aware support policy:
+    - Positive rules: lower support is allowed only when confidence is high.
+    - Negative rules: keep conservative support floor.
+    - Absolute floor (MIN_ABS_SUPPORT) is always enforced.
+    """
+    if num_transactions <= 0:
+        raise ValueError(f"num_transactions must be > 0, got {num_transactions}")
+
+    standard_min_support = config["MIN_SUPPORT"]
+    high_conf_threshold = config.get("HIGH_CONFIDENCE_THRESHOLD", 1.01)
+    high_conf_min_support = config.get("HIGH_CONF_MIN_SUPPORT", standard_min_support)
+    negative_min_support = config.get("NEGATIVE_MIN_SUPPORT", standard_min_support)
+    absolute_min_support = float(config.get("MIN_ABS_SUPPORT", 0)) / float(num_transactions)
+
+    if lift < 1.0:
+        return support >= max(negative_min_support, absolute_min_support)
+
+    required_support = high_conf_min_support if confidence >= high_conf_threshold else standard_min_support
+    return support >= max(required_support, absolute_min_support)

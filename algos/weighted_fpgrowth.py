@@ -4,7 +4,7 @@ import pandas as pd
 from itertools import combinations
 
 from utils.spatial import MIN_CELLS, is_dominated
-from utils.rules import filter_rule_by_scores_mask
+from utils.rules import build_cell_item_token, filter_rule_by_scores_mask, passes_rule_support_policy
 from utils.validation import (
     prepare_validation_matrices, 
     run_matrix_permutation_test, 
@@ -46,20 +46,20 @@ def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: 
     # sample regardless of how many times cell type labels are shuffled.
     geo_cache = _precompute_geometry(neighborhoods, coords, config)
 
-    # PERFORMANCE OPTIMIZATION: Pre-calculate spatial labels once to avoid 
-    # millions of f-string operations inside the permutation loop.
-    # Keep Python str labels (not NumPy scalar strings) to avoid np.str_ leaking
-    # into mined rule tuples and persisted CSV text.
-    neighbor_labels = [f"{str(ct)}_NEIGHBOR" for ct in cell_types]
-    center_labels = [f"{str(ct)}_CENTER" for ct in cell_types]
-    
-    fn_labels = fc_labels = None
-    if functional_subtypes is not None:
-        fn_labels = np.array([[f"{str(s)}_NEIGHBOR" for s in st] for st in functional_subtypes], dtype=object)
-        fc_labels = np.array([[f"{str(s)}_CENTER" for s in st] for st in functional_subtypes], dtype=object)
+    # Pre-calculate one token per physical cell. These labels are reused for
+    # transactions and permutation validation to keep representations aligned.
+    state_labels = np.array([
+        build_cell_item_token(
+            cell_types[i],
+            functional_subtypes[i] if functional_subtypes is not None else None,
+        )
+        for i in range(len(cell_types))
+    ], dtype=object)
+    neighbor_labels = [f"{str(label)}_NEIGHBOR" for label in state_labels]
+    center_labels = [f"{str(label)}_CENTER" for label in state_labels]
 
     trans, sizes, cell_counts = _build_transactions_from_cache(
-        geo_cache, cell_types, neighbor_labels, center_labels, fn_labels, fc_labels
+        geo_cache, cell_types, neighbor_labels, center_labels
     )
     stats = {
         "sizes": sizes,
@@ -72,7 +72,7 @@ def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: 
     # PRE-COMPUTE ONCE PER FOV:
     # Capture the physical structure and labels before returning the hook
     adj_center, adj_neighbor, label_mat, label_names = prepare_validation_matrices(
-        None, len(cell_types), cell_types, fn_labels, weighted_geo=geo_cache
+        None, len(cell_types), state_labels, functional_subtypes=None, weighted_geo=geo_cache
     )
     n_perms = config["N_PERMUTATIONS"]
 
@@ -124,7 +124,7 @@ def _precompute_geometry(neighborhoods, coords, config):
     return cache
 
 
-def _build_transactions_from_cache(geo_cache, cell_types, neighbor_labels, center_labels, fn_labels=None, fc_labels=None):
+def _build_transactions_from_cache(geo_cache, cell_types, neighbor_labels, center_labels):
     """
     Builds weighted transactions using pre-computed geometry and pre-calculated labels.
     """
@@ -141,16 +141,10 @@ def _build_transactions_from_cache(geo_cache, cell_types, neighbor_labels, cente
         for n_idx, w in zip(neighbor_idxs, weights):
             ct = str(neighbor_labels[n_idx])
             trans[ct] = trans.get(ct, 0.0) + w
-            if fn_labels is not None:
-                for st in fn_labels[n_idx]:
-                    trans[str(st)] = trans.get(str(st), 0.0) + w
 
         # Center cell
         ct_center = str(center_labels[center_i])
         trans[ct_center] = 1.0
-        if fc_labels is not None:
-            for st in fc_labels[center_i]:
-                trans[str(st)] = 1.0
 
         # Cap each neighbor weight at 1.0
         trans = {k: min(v, 1.0) for k, v in trans.items()}
@@ -236,10 +230,17 @@ def _mine(transactions, config):
         return pd.DataFrame()
 
     num_trans = len(transactions)
-    min_support_raw = max(
+    standard_min_support_raw = max(
         config["MIN_SUPPORT"] * num_trans,
         config.get("MIN_ABS_SUPPORT", 0),
     )
+    high_conf_min_support_raw = max(
+        config.get("HIGH_CONF_MIN_SUPPORT", config["MIN_SUPPORT"]) * num_trans,
+        config.get("MIN_ABS_SUPPORT", 0),
+    )
+
+    # Mining floor is bounded by the rescue support floor for high-confidence positives.
+    min_support_raw = min(standard_min_support_raw, high_conf_min_support_raw)
 
     tree = WeightedFPTree()
     tree.first_pass(transactions)
@@ -276,7 +277,7 @@ def _mine(transactions, config):
         return pd.DataFrame()
 
     support_map = {fs: sup for fs, sup in itemsets}
-    return _itemsets_to_rules(itemsets, support_map, config)
+    return _itemsets_to_rules(itemsets, support_map, config, num_trans)
 
 
 def _mine_tree(tree, min_support, prefix):
@@ -325,7 +326,7 @@ def _mine_tree(tree, min_support, prefix):
     return frequent
 
 
-def _itemsets_to_rules(itemsets, support_map, config):
+def _itemsets_to_rules(itemsets, support_map, config, num_trans):
     """Generate and filter association rules from frequent weighted itemsets."""
     rows = []
 
@@ -351,6 +352,11 @@ def _itemsets_to_rules(itemsets, support_map, config):
                 assert sup_ant > 0 and sup_con > 0, f"Closure violation for {itemset}"
 
                 confidence, lift, leverage, conviction = calculate_metrics(sup_both, sup_ant, sup_con)
+
+                if not passes_rule_support_policy(
+                    config, sup_both, confidence, lift, num_transactions=num_trans
+                ):
+                    continue
 
                 if not filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence):
                     continue

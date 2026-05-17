@@ -66,6 +66,9 @@ if ALGO == "weighted_fpgrowth":
         "BANDWIDTH": 15.0,          # Gaussian decay (µm). At d=BANDWIDTH weight ≈ 0.6. Defaults to RADIUS if absent.
         "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
         "MIN_ABS_SUPPORT": 5,      # Rule must hold in at least this many transactions (absolute floor)
+        # Positive-rule rescue: allow lower support only when confidence is high.
+        "HIGH_CONFIDENCE_THRESHOLD": 0.8,
+        "HIGH_CONF_MIN_SUPPORT": 0.005,
         "MIN_CONFIDENCE": 0.3,      # Same as binary — weighted confidence already requires intensity match, not just presence
         "MIN_LIFT": 1.2,            # Slightly stricter to compensate for finer-grained support scale
         "MIN_LEVERAGE": 0.005,

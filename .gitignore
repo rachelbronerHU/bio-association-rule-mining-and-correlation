@@ -23,3 +23,4 @@ results/full_run/weighted_fpgrowth_old
 results/full_run/fpgrowth_old
 results/full_run/weighted_fpgrowth
 results/full_run/fpgrowth
+results/full_run/min_support_runs

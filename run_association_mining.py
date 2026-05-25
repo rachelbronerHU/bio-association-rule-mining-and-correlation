@@ -19,11 +19,11 @@ from constants import (
     USE_FUNCTIONAL_MARKERS,
     CELLTYPE_MARKER_THRESHOLDS
 )
-from utils.logging_setup import setup_logging
+from utils.logging_setup import setup_logging, archive_previous_run, save_run_config
 from utils.config_validation import validate_config
 import worker_task
+from constants import RESULTS_ALGO_DIR, RESULTS_DIR
 
-setup_logging(f"run_association_mining_{ALGO}")
 logger = logging.getLogger("manager")
 warnings.filterwarnings('ignore')
 
@@ -274,12 +274,28 @@ def save_results(results, df_biopsy, df_fovs, suffix, data_key="Rules"):
     logger.info(f"Saved {filename}")
 
 def run_pipeline():
+    archive_previous_run(RESULTS_ALGO_DIR, RESULTS_DIR, ALGO)
+    setup_logging(f"run_association_mining_{ALGO}", log_dir=RESULTS_ALGO_DIR)
+    
     logger.info("========================================================================================================")
     logger.info("================================= STARTING ASSOCIATION MINING PIPELINE =================================")
     logger.info("========================================================================================================")
 
     start_time = time.time()
     validate_config(CONFIG, ALGO, METHODS)
+    
+    run_config = {
+        "ALGO": ALGO,
+        "DEBUG": DEBUG,
+        "DEBUG_FOVS_PER_GROUP": DEBUG_FOVS_PER_GROUP,
+        "USE_FUNCTIONAL_MARKERS": USE_FUNCTIONAL_MARKERS,
+        "CELLTYPE_MARKER_THRESHOLDS": CELLTYPE_MARKER_THRESHOLDS,
+        "METHODS": METHODS,
+        "CONFIG": CONFIG
+    }
+    
+    save_run_config(RESULTS_ALGO_DIR, run_config, logger)
+
     df, df_biopsy, df_fovs = load_data()
     samples = get_samples_to_process(df)
 
@@ -305,7 +321,7 @@ def run_pipeline():
         results_collection = []
         stats_collection = {"sizes": [], "orig_counts": [], "kept_counts": [], "redundant_removed": []}
         
-        with ProcessPoolExecutor(initializer=setup_logging, initargs=(f"run_association_mining_{ALGO}",)) as executor:
+        with ProcessPoolExecutor(initializer=setup_logging, initargs=(f"run_association_mining_{ALGO}", 5 * 1024 * 1024, 3, RESULTS_ALGO_DIR)) as executor:
             # Map returns iterator in order
             # Note: df_sample pickling might be slow if huge, but here it's small per FOV.
             futures = [executor.submit(worker_task.process_single_sample, *t) for t in tasks]

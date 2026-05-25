@@ -1,12 +1,19 @@
 ##### MINING FLOW #####
 
-# --- Algorithm Selection ---
+# --- Algorithm Selection & Configuration ---
 # Option A — edit constants.py:
 #   ALGO = "fpgrowth"           → runs on BAG, CN, KNN_R
 #   ALGO = "weighted_fpgrowth"  → runs on CN, KNN_R only
 # Option B — env variable override (no file edit needed): see Step 2 commands below.
 # DEBUG=True/False also toggleable via constants.py (debug_run vs full_run).
 # CONFIG and METHODS are set automatically in constants.py based on ALGO.
+#
+# Archive on Run
+# Running `run_association_mining.py` automatically archives any existing results
+# folder for that algorithm to `results/full_run/<algo>_ARCHIVE_<timestamp>/`.
+# A fresh `results/full_run/<algo>/` folder is then created for the new run,
+# including a `run_config.json` containing all parameters (like ALGO and Marker Thresholds)
+# and the main log file. Downstream scripts automatically read this new folder.
 
 # --- Output Files (per method) ---
 # results/<run_type>/<algo>/data/results_<METHOD>.csv         — final rules with metadata
@@ -15,6 +22,7 @@
 # results/<run_type>/<algo>/data/transaction_data/            — per-FOV transaction distributions
 # results/<run_type>/<algo>/data/rare_filtering_stats/        — rare cell filtering logs
 # results/<run_type>/<algo>/plots/evolution_plots/            — Vis 1/2 stage+temporal evolution plots
+# results/<run_type>/<algo>/run_config.json                   — full configuration used for the run
 
 # Step no. 1:
 * python data_exploration/check_data_bias.py (results/full_run/plots/data_bias_report)

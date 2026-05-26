@@ -8,6 +8,17 @@
 # DEBUG=True/False also toggleable via constants.py (debug_run vs full_run).
 # CONFIG and METHODS are set automatically in constants.py based on ALGO.
 #
+# --- Runtime Flags (env overrides) ---
+# USE_FUNCTIONAL_MARKERS=1|0 → enable functional marker expansion
+# USE_PERMUTATION_EXCLUDE=1|0 → exclude selected cell labels from permutation shuffling
+# PERMUTATION_EXCLUDE_CELL_TYPES=Epithelial,Epithelial* (comma-separated; "*" matches lineage prefix)
+#   - "Epithelial" matches only the plain label
+#   - "Epithelial*" matches Epithelial + Epithelial_<marker>
+# Linux/Mac example:
+#   USE_FUNCTIONAL_MARKERS=true USE_PERMUTATION_EXCLUDE=true PERMUTATION_EXCLUDE_CELL_TYPES=Epithelial* python run_association_mining.py
+# Windows example:
+#   set USE_FUNCTIONAL_MARKERS=true && set USE_PERMUTATION_EXCLUDE=true && set PERMUTATION_EXCLUDE_CELL_TYPES=Epithelial* && python run_association_mining.py
+#
 # Archive on Run
 # Running `run_association_mining.py` automatically archives any existing results
 # folder for that algorithm to `results/full_run/<algo>_ARCHIVE_<timestamp>/`.
@@ -71,7 +82,6 @@
 # Step no. 2: Comparison
 * python visualization/clinical_correlations/plot_performance_comparisons.py (results/full_run/plots/clinical_correlation_report)
 * python visualization/clinical_correlations/plot_rule_target_value_heatmap.py [--num_strategies 5] [--no_self] [--method KNN_R / CN / BAG] (results/full_run/plots/clinical_correlation_report)
-
 
 
 

@@ -1,5 +1,11 @@
 import os as _os
 
+def _parse_list_env(env_var: str, default: list) -> list:
+    raw = _os.environ.get(env_var)
+    if raw is None:
+        return list(default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
 # Debugging Configurations
 DEBUG = False # Set to True for quick test
 DEBUG_FOVS_PER_GROUP = 10
@@ -13,6 +19,12 @@ ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
 # Functional Markers Expansion
 _DEFAULT_USE_FUNCTIONAL_MARKERS = True
 USE_FUNCTIONAL_MARKERS = _os.environ.get("USE_FUNCTIONAL_MARKERS", str(_DEFAULT_USE_FUNCTIONAL_MARKERS)).lower() in ("true", "1", "yes")
+
+# Permutation Label Exclusion
+_DEFAULT_USE_PERMUTATION_EXCLUDE = True
+USE_PERMUTATION_EXCLUDE = _os.environ.get("USE_PERMUTATION_EXCLUDE", str(_DEFAULT_USE_PERMUTATION_EXCLUDE)).lower() in ("true", "1", "yes")
+_DEFAULT_PERMUTATION_EXCLUDE_CELL_TYPES = ["Epithelial"]
+PERMUTATION_EXCLUDE_CELL_TYPES = _parse_list_env("PERMUTATION_EXCLUDE_CELL_TYPES", _DEFAULT_PERMUTATION_EXCLUDE_CELL_TYPES)
 
 CELLTYPE_MARKER_THRESHOLDS = {
     'Epithelial': {'Ki67': 2.5, 'HLADRDPDQ': 1.75},

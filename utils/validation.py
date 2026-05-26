@@ -9,6 +9,30 @@ from utils.rules import filter_rule_by_scores_mask, passes_rule_support_policy
 logger = logging.getLogger(__name__)
 
 
+def _matches_exclusion_pattern(label: str, pattern: str) -> bool:
+    if pattern.endswith("*"):
+        prefix = pattern[:-1]
+        if not prefix:
+            return True
+        return label == prefix or label.startswith(f"{prefix}_")
+    return label == pattern
+
+
+def _build_exclusion_mask(cell_labels, exclude_patterns):
+    patterns = [str(p).strip() for p in (exclude_patterns or []) if str(p).strip()]
+    if not patterns:
+        return np.zeros(len(cell_labels), dtype=bool), []
+
+    mask = np.zeros(len(cell_labels), dtype=bool)
+    for idx, label in enumerate(cell_labels):
+        label_str = str(label)
+        for pattern in patterns:
+            if _matches_exclusion_pattern(label_str, pattern):
+                mask[idx] = True
+                break
+    return mask, patterns
+
+
 def apply_fdr_correction(p_values):
     """Applies Benjamini-Hochberg correction. Returns adjusted p-values."""
     if len(p_values) == 0:
@@ -168,7 +192,18 @@ def prepare_validation_matrices(neighborhoods, num_cells, cell_types, functional
     return adj_center, adj_neighbor, label_mat, all_labels
 
 
-def run_matrix_permutation_test(rules_df, adj_center, adj_neighbor, label_mat, label_names, n_perms, config):
+def run_matrix_permutation_test(
+    rules_df,
+    adj_center,
+    adj_neighbor,
+    label_mat,
+    label_names,
+    n_perms,
+    config,
+    cell_labels=None,
+    use_permutation_exclude=False,
+    exclude_patterns=None,
+):
     """
     High-Speed Validation using Matrix Multiplication (Adjacency @ Labels).
     """
@@ -183,6 +218,23 @@ def run_matrix_permutation_test(rules_df, adj_center, adj_neighbor, label_mat, l
     better_counts = np.zeros(len(rules_df))
     num_cells = label_mat.shape[0]
     indices = np.arange(num_cells)
+    use_exclusion = bool(use_permutation_exclude and exclude_patterns)
+    exclude_mask = None
+    eligible_indices = None
+    if use_exclusion:
+        if cell_labels is None:
+            raise ValueError("cell_labels must be provided when permutation exclusion is enabled.")
+        exclude_mask, cleaned_patterns = _build_exclusion_mask(cell_labels, exclude_patterns)
+        eligible_indices = indices[~exclude_mask]
+        if exclude_mask.any():
+            logger.info(
+                f"Permutation exclusion enabled: {exclude_mask.sum()} cells fixed "
+                f"({len(cleaned_patterns)} patterns)."
+            )
+        else:
+            logger.warning(
+                "Permutation exclusion enabled, but no cells matched the exclusion patterns."
+            )
     
     # Pre-build item-to-column mapping
     center_cols = {f"{name}_CENTER": i for i, name in enumerate(label_names)}
@@ -199,8 +251,13 @@ def run_matrix_permutation_test(rules_df, adj_center, adj_neighbor, label_mat, l
         start_perm = time.time()
         
         # 1. SHUFFLE: Randomize labels across physical cell locations
-        np.random.shuffle(indices)
-        shuffled_labels = label_mat[indices, :]
+        if use_exclusion:
+            shuffled_indices = indices.copy()
+            if eligible_indices.size > 1:
+                shuffled_indices[eligible_indices] = np.random.permutation(eligible_indices)
+        else:
+            shuffled_indices = np.random.permutation(indices)
+        shuffled_labels = label_mat[shuffled_indices, :]
         
         # 2. MULTIPLY: Rebuild transaction weights via A @ L
         center_mat = adj_center @ shuffled_labels

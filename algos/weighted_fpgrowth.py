@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from itertools import combinations
 
+from constants import USE_PERMUTATION_EXCLUDE, PERMUTATION_EXCLUDE_CELL_TYPES
 from utils.spatial import MIN_CELLS, is_dominated
 from utils.rules import build_cell_item_token, filter_rule_by_scores_mask, passes_rule_support_policy
 from utils.validation import (
@@ -80,7 +81,16 @@ def run(neighborhoods, coords, cell_types, config, method, functional_subtypes: 
         if rules_df.empty:
             return rules_df
         return run_matrix_permutation_test(
-            rules_df, adj_center, adj_neighbor, label_mat, label_names, n_perms, config
+            rules_df,
+            adj_center,
+            adj_neighbor,
+            label_mat,
+            label_names,
+            n_perms,
+            config,
+            cell_labels=state_labels,
+            use_permutation_exclude=USE_PERMUTATION_EXCLUDE,
+            exclude_patterns=PERMUTATION_EXCLUDE_CELL_TYPES,
         )
 
     return mined_rules, validate_fn, stats

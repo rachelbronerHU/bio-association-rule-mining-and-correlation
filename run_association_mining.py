@@ -17,7 +17,9 @@ from constants import (
     CONFIG, 
     METHODS,
     USE_FUNCTIONAL_MARKERS,
-    CELLTYPE_MARKER_THRESHOLDS
+    CELLTYPE_MARKER_THRESHOLDS,
+    USE_PERMUTATION_EXCLUDE,
+    PERMUTATION_EXCLUDE_CELL_TYPES
 )
 from utils.logging_setup import setup_logging, archive_previous_run, save_run_config
 from utils.config_validation import validate_config
@@ -289,6 +291,8 @@ def run_pipeline():
         "DEBUG": DEBUG,
         "DEBUG_FOVS_PER_GROUP": DEBUG_FOVS_PER_GROUP,
         "USE_FUNCTIONAL_MARKERS": USE_FUNCTIONAL_MARKERS,
+        "USE_PERMUTATION_EXCLUDE": USE_PERMUTATION_EXCLUDE,
+        "PERMUTATION_EXCLUDE_CELL_TYPES": PERMUTATION_EXCLUDE_CELL_TYPES,
         "CELLTYPE_MARKER_THRESHOLDS": CELLTYPE_MARKER_THRESHOLDS,
         "METHODS": METHODS,
         "CONFIG": CONFIG

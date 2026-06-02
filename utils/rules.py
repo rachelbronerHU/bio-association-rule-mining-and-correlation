@@ -283,12 +283,12 @@ def filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence):
     return is_positive | is_negative
 
 
-def passes_rule_support_policy(config, support, confidence, lift, num_transactions):
+def passes_rule_support_policy(config, support, sup_ant, sup_con, confidence, lift, num_transactions):
     """
     Confidence-aware support policy:
     - Positive rules: lower support is allowed only when confidence is high.
-    - Negative rules: keep conservative support floor.
-    - Absolute floor (MIN_ABS_SUPPORT) is always enforced.
+    - Negative rules: ignore joint support, ensure base cells meet minimum absolute frequency.
+    - Absolute floor (MIN_ABS_SUPPORT) is always enforced for base cells.
     """
     if num_transactions <= 0:
         raise ValueError(f"num_transactions must be > 0, got {num_transactions}")
@@ -296,11 +296,13 @@ def passes_rule_support_policy(config, support, confidence, lift, num_transactio
     standard_min_support = config["MIN_SUPPORT"]
     high_conf_threshold = config.get("HIGH_CONFIDENCE_THRESHOLD", 1.01)
     high_conf_min_support = config.get("HIGH_CONF_MIN_SUPPORT", standard_min_support)
-    negative_min_support = config.get("NEGATIVE_MIN_SUPPORT", standard_min_support)
     absolute_min_support = float(config.get("MIN_ABS_SUPPORT", 0)) / float(num_transactions)
 
     if lift < 1.0:
-        return support >= max(negative_min_support, absolute_min_support)
+        # Negative rules represent spatial exclusion, meaning joint support will be inherently low.
+        # We drop the joint support requirement entirely, but ensure the base cells (antecedent 
+        # and consequent) are frequent enough in the FOV that their failure to co-occur is statistically meaningful.
+        return sup_ant >= absolute_min_support and sup_con >= absolute_min_support
 
     required_support = high_conf_min_support if confidence >= high_conf_threshold else standard_min_support
     return support >= max(required_support, absolute_min_support)

@@ -364,7 +364,7 @@ def _itemsets_to_rules(itemsets, support_map, config, num_trans):
                 confidence, lift, leverage, conviction = calculate_metrics(sup_both, sup_ant, sup_con)
 
                 if not passes_rule_support_policy(
-                    config, sup_both, confidence, lift, num_transactions=num_trans
+                    config, sup_both, sup_ant, sup_con, confidence, lift, num_transactions=num_trans
                 ):
                     continue
 

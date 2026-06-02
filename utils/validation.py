@@ -121,7 +121,7 @@ def check_rules_batch(rules_df, trans_mat, item_idx_map, config):
 
         confidence, lift, leverage, conviction = calculate_metrics(sup_both, sup_ant, sup_con)
         if not passes_rule_support_policy(
-            config, sup_both, confidence, lift, num_transactions=num_trans
+            config, sup_both, sup_ant, sup_con, confidence, lift, num_transactions=num_trans
         ):
             continue
         results[r_idx] = filter_rule_by_scores_mask(config, lift, leverage, conviction, confidence)

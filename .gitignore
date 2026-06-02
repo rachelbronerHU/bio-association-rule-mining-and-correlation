@@ -7,9 +7,9 @@ __pycache__/
 data/
 
 # Experiment Results & Plots
+results/*
 results/debug_run
-results/full_run/data
-results/full_run/rare_filtering_stats
+
 
 visualization/notebooks/reports
 # Logs
@@ -18,9 +18,4 @@ visualization/notebooks/reports
 # Reference of different code
 references/
 
-# temp
-results/full_run/weighted_fpgrowth_old
-results/full_run/fpgrowth_old
-results/full_run/weighted_fpgrowth
-results/full_run/fpgrowth
-results/full_run/min_support_runs
+*.egg-info/

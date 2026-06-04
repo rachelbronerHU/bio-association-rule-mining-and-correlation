@@ -166,6 +166,15 @@ def _build_transactions_from_cache(geo_cache, cell_types, neighbor_labels, cente
     return transactions, sizes, cell_counts
 
 
+def _is_highly_abundant(item, prefix, global_support_map, marginal_min_support):
+    """Checks if both the item and all items in the prefix are globally abundant."""
+    if global_support_map is None or marginal_min_support is None:
+        return False
+    global_support_item = global_support_map.get(item, 0.0)
+    global_support_prefix = min([global_support_map.get(p, 0.0) for p in prefix]) if prefix else float('inf')
+    return (global_support_item >= marginal_min_support) and (global_support_prefix >= marginal_min_support)
+
+
 # ---------------------------------------------------------------------------
 # Phase B: Custom Weighted FP-Tree
 # ---------------------------------------------------------------------------
@@ -202,11 +211,11 @@ class WeightedFPTree:
                     self.header[item] = [0.0, None]
                 self.header[item][0] += w
 
-    def prune(self, min_support):
-        """Remove items whose total weight is below min_support."""
+    def prune(self, min_support, global_support_map=None, marginal_min_support=None, prefix=None):
+        """Remove items whose total weight is below min_support, unless they are globally abundant."""         
         self.header = {
             item: v for item, v in self.header.items()
-            if v[0] >= min_support
+            if v[0] >= min_support or _is_highly_abundant(item, prefix, global_support_map, marginal_min_support)
         }
 
     def insert(self, transaction):
@@ -251,15 +260,21 @@ def _mine(transactions, config):
 
     # Mining floor is bounded by the rescue support floor for high-confidence positives.
     min_support_raw = min(standard_min_support_raw, high_conf_min_support_raw)
+    marginal_min_support_raw = max(
+        config.get("MIN_MARGINAL_SUPPORT_FOR_NEGATIVE_RULES", 0.05) * num_trans,
+        config.get("MIN_ABS_SUPPORT", 0),
+    )
 
     tree = WeightedFPTree()
     tree.first_pass(transactions)
-    tree.prune(min_support_raw)
+    
+    global_support_map = {item: v[0] for item, v in tree.header.items()}
+    tree.prune(min_support_raw, global_support_map, marginal_min_support_raw, prefix=[])
 
     for trans in transactions:
         tree.insert(trans)
 
-    itemsets_raw = _mine_tree(tree, min_support_raw, [])
+    itemsets_raw = _mine_tree(tree, min_support_raw, [], global_support_map, marginal_min_support_raw)
 
     if not itemsets_raw:
         return pd.DataFrame()
@@ -280,8 +295,11 @@ def _mine(transactions, config):
     for fs, _ in itemsets_raw:
         # Uses high-performance unified Matrix Engine
         sup = calculate_support_vectorized(fs, trans_mat, item_idx_map)
-        if sup >= effective_min_support:
+        is_abundant = all(global_support_map.get(item, 0.0) >= marginal_min_support_raw for item in fs)
+
+        if sup >= effective_min_support or (is_abundant):
             itemsets.append((fs, sup))
+        
 
     if not itemsets:
         return pd.DataFrame()
@@ -290,17 +308,18 @@ def _mine(transactions, config):
     return _itemsets_to_rules(itemsets, support_map, config, num_trans)
 
 
-def _mine_tree(tree, min_support, prefix):
+def _mine_tree(tree, min_support, prefix, global_support_map=None, marginal_min_support=None):
     """
     Recursively mine the FP-tree via conditional pattern bases.
 
     Pruning: item i is skipped if its accumulated conditional weight is below
-    min_support. Under min-based support, downward closure holds, so this is
-    an exact condition (not just an upper bound).
+    min_support, UNLESS both the prefix and the item are globally abundant.
     """
     frequent = []
     for item in sorted(tree.header.keys(), key=lambda x: tree.header[x][0]):
-        if tree.header[item][0] < min_support:
+        local_joint_support = tree.header[item][0]
+        
+        if local_joint_support < min_support and not _is_highly_abundant(item, prefix, global_support_map, marginal_min_support):
             continue
 
         new_prefix = prefix + [item]
@@ -326,12 +345,12 @@ def _mine_tree(tree, min_support, prefix):
         # holds (support({A,B}) ≤ support({A})), so standard pruning is exact.
         cond_tree = WeightedFPTree()
         cond_tree.first_pass(cond_patterns)
-        cond_tree.prune(min_support)
+        cond_tree.prune(min_support, global_support_map, marginal_min_support, new_prefix)
 
         for pattern in cond_patterns:
             cond_tree.insert(pattern)
 
-        frequent.extend(_mine_tree(cond_tree, min_support, new_prefix))
+        frequent.extend(_mine_tree(cond_tree, min_support, new_prefix, global_support_map, marginal_min_support))
 
     return frequent
 

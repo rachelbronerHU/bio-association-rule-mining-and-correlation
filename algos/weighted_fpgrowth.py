@@ -295,8 +295,11 @@ def _mine(transactions, config):
     for fs, _ in itemsets_raw:
         # Uses high-performance unified Matrix Engine
         sup = calculate_support_vectorized(fs, trans_mat, item_idx_map)
-        if sup >= effective_min_support:
+        is_abundant = all(global_support_map.get(item, 0.0) >= marginal_min_support_raw for item in fs)
+
+        if sup >= effective_min_support or (is_abundant):
             itemsets.append((fs, sup))
+        
 
     if not itemsets:
         return pd.DataFrame()

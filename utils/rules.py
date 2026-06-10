@@ -238,8 +238,13 @@ def filter_redundant_rules(rules, config):
     threshold_factor = config.get("MIN_REDUNDANCY_LIFT_IMPROVEMENT", 1.1)
     indices_to_drop = set()
 
-    rules["ant_frozen"] = rules["antecedents"].apply(frozenset)
-    grouped = rules.groupby("consequents")
+    # Use pure lineages (strip _CENTER/_NEIGHBOR) for redundancy comparison
+    rules["ant_pure"] = rules["antecedents"].apply(lambda x: frozenset(_extract_base_lineage(i) for i in x))
+    rules["con_pure"] = rules["consequents"].apply(lambda x: frozenset(_extract_base_lineage(i) for i in x))
+    grouped = rules.groupby("con_pure")
+    
+    # rules["ant_frozen"] = rules["antecedents"].apply(frozenset)
+    # grouped = rules.groupby("consequents")
 
     for _, group in grouped:
         sorted_group = group.sort_values(by="len_ant", ascending=True)
@@ -251,7 +256,7 @@ def filter_redundant_rules(rules, config):
                 continue
             for j in range(i):
                 r_simple = rows[j]
-                if r_simple.ant_frozen < r_complex.ant_frozen:
+                if r_simple.ant_pure < r_complex.ant_pure:
                     is_neg_simple = r_simple.lift < 1.0
                     is_neg_complex = r_complex.lift < 1.0
                     if is_neg_simple != is_neg_complex:
@@ -271,7 +276,7 @@ def filter_redundant_rules(rules, config):
                             break
 
     count_removed = len(indices_to_drop)
-    filtered_rules = rules.drop(index=list(indices_to_drop)).drop(columns=["ant_frozen"])
+    filtered_rules = rules.drop(index=list(indices_to_drop)).drop(columns=["ant_pure", "con_pure"])
 
     return filtered_rules, count_removed
 

@@ -47,7 +47,11 @@ if DEBUG:
 else:
     RESULTS_DIR = RESULTS_BASE_DIR + 'full_run/'
 
-RESULTS_ALGO_DIR = RESULTS_DIR + ALGO + '/'
+markers_str = "with_markers" if USE_FUNCTIONAL_MARKERS else "no_markers"
+ex_per_str = "with_ex_per" if USE_PERMUTATION_EXCLUDE else "no_ex_per"
+run_name = f"{ALGO}_{MAX_RULE_LENGTH}_items_{markers_str}_{ex_per_str}"
+
+RESULTS_ALGO_DIR = RESULTS_DIR + run_name + '/'
 RESULTS_DATA_DIR = RESULTS_ALGO_DIR + 'data/'
 RESULTS_PLOTS_DIR = RESULTS_ALGO_DIR + 'plots/'
 

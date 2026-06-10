@@ -6,15 +6,12 @@ import datetime
 import json
 
 
-def archive_previous_run(results_algo_dir: str, results_base_dir: str, algo: str):
+def clear_previous_run(results_algo_dir: str):
     """
-    Archives the existing result directory by appending a timestamp to its name.
-    Then ensures a fresh directory is created.
+    Removes the existing result directory if it exists, then ensures a fresh directory is created.
     """
     if os.path.exists(results_algo_dir):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        archive_dir = os.path.join(results_base_dir, f"{algo}_ARCHIVE_{timestamp}")
-        shutil.move(results_algo_dir, archive_dir)
+        shutil.rmtree(results_algo_dir)
 
     os.makedirs(results_algo_dir, exist_ok=True)
 

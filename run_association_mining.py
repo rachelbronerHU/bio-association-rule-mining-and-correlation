@@ -21,7 +21,7 @@ from constants import (
     USE_PERMUTATION_EXCLUDE,
     PERMUTATION_EXCLUDE_CELL_TYPES
 )
-from utils.logging_setup import setup_logging, archive_previous_run, save_run_config
+from utils.logging_setup import setup_logging, clear_previous_run, save_run_config
 from utils.config_validation import validate_config
 import worker_task
 from constants import RESULTS_ALGO_DIR, RESULTS_DIR
@@ -276,7 +276,7 @@ def save_results(results, df_biopsy, df_fovs, suffix, data_key="Rules"):
     logger.info(f"Saved {filename}")
 
 def run_pipeline():
-    archive_previous_run(RESULTS_ALGO_DIR, RESULTS_DIR, ALGO)
+    clear_previous_run(RESULTS_ALGO_DIR)
     setup_logging(f"run_association_mining_{ALGO}", log_dir=RESULTS_ALGO_DIR)
     
     logger.info("========================================================================================================")

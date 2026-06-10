@@ -261,7 +261,7 @@ def _mine(transactions, config):
     # Mining floor is bounded by the rescue support floor for high-confidence positives.
     min_support_raw = min(standard_min_support_raw, high_conf_min_support_raw)
     marginal_min_support_raw = max(
-        config.get("MIN_MARGINAL_SUPPORT_FOR_NEGATIVE_RULES", 0.05) * num_trans,
+        config.get("MIN_MARGINAL_SUPPORT_FOR_NEGATIVE_RULES", 0.1) * num_trans,
         config.get("MIN_ABS_SUPPORT", 0),
     )
 

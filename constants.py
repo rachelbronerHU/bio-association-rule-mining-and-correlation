@@ -85,7 +85,8 @@ if ALGO == "weighted_fpgrowth":
         "K_NEIGHBORS": 30,
         "BANDWIDTH": 15.0,          # Gaussian decay (µm). At d=BANDWIDTH weight ≈ 0.6. Defaults to RADIUS if absent.
         "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
-        "MIN_ABS_SUPPORT": 5,      # Rule must hold in at least this many transactions (absolute floor)
+        "MIN_ABS_SUPPORT":10,      # Rule must hold in at least this many transactions (absolute floor)
+        "MIN_MARGINAL_SUPPORT_FOR_NEGATIVE_RULES": 0.1, # Negative rules must meet this fraction of total transactions to be considered (prevents very rare negatives from dominating rescue)
         # Positive-rule rescue: allow lower support only when confidence is high.
         "HIGH_CONFIDENCE_THRESHOLD": 0.9,
         "HIGH_CONF_MIN_SUPPORT": 0.005,

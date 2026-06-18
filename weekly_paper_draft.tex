@@ -10,6 +10,11 @@
 \usepackage{float}
 \usepackage{xcolor} % Required for defining and using colors
 \usepackage{hyperref} % Keep this as your last \usepackage
+\usepackage{color}
+\usepackage{soul}
+
+% ברירת המחדל של המרקור היא צהוב. אם תרצי לשנות למשל לטורקיז/תכלת, הוסיפי גם את השורה הזו:
+% \sethlcolor{cyan}
 
 \hypersetup{
     colorlinks=true, % Removes the default boxes and colors the text instead
@@ -31,21 +36,19 @@
 \usepackage{fancyhdr}
 \pagestyle{fancy}
 \fancyhf{} % מנקה את הגדרות ברירת המחדל
-\fancyhead[L]{\footnotesize Weekly Summary \#1 \today} % יופיע למעלה בשמאל
+\fancyhead[L]{\footnotesize Weekly Summary \#3 \today} % יופיע למעלה בשמאל
 \fancyhead[R]{\footnotesize Rachel Broner $\vert$ Miri Adler's Lab} % יופיע למעלה בימין
 \fancyfoot[C]{\thepage} % מספר עמוד למטה באמצע
 
 % \usepackage{mathptmx}
 
 \usepackage{setspace}
-
-% Choose one of the following options:
 \onehalfspacing % For 1.5 line spacing
 
 \begin{document}
 
 \begin{center}
-    {\Large \textbf{Weekly Summary \#1 $\vert$ Association Rule Mining}} \\[0.5em]
+    {\Large \textbf{Weekly Summary \#3 $\vert$ Association Rule Mining}} \\[0.5em]
     \textit{GVHD Analysis} $\vert$ Week of: \today
 \end{center}
 \vspace{0.2cm}
@@ -53,147 +56,264 @@
 \vspace{0.5cm}
 
 % ---------------------------------------------------------
-\section*{1. Current Status \& Executive Summary}
-\subsection*{1.1 Goal}
+\section{Current Status \& Highlights}
 
-Our ongoing goal is to mine spatial association rules from MIBI-TOF imaging to map cell-distance dynamics in acute GVHD \cite{ref_gvhd}. Currently, our Weighted FP-Growth pipeline is failing to retrieve the biological rules expected from the reference paper.
+\subsection*{General Goal}
+Our ongoing goal is to mine spatial association rules from MIBI-TOF imaging to map cell-distance dynamics in acute GVHD \cite{ref_gvhd} dataset. 
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.5\linewidth]{duodenum_histology.jpg}
-    \caption{Intestinal Epithelial Histology \cite{ref_biology}}
-    \label{fig:biology}
-\end{figure}
-
-\subsection*{1.2 The Weighted FP-Growth Math}
-Standard association rule mining treats cell co-occurrence as binary. To capture the continuous nature of biological diffusion, our pipeline uses a Weighted FP-Growth approach \cite{ref_weighted_fpgrowth}.
-
-\textbf{1. Building the Transaction:} 
-For every center cell, we define a neighborhood using a fixed radius $R$. Instead of a binary list, we assign each neighbor a continuous weight $w_i$ based on its distance $d_i$ from the center, using a Gaussian decay function with bandwidth $\sigma$:
-\begin{equation}
-    w_i = \exp\left(-\frac{d_i^2}{2\sigma^2}\right)
-    \label{eq:weight}
-\end{equation}
-A single transaction is therefore a dictionary of cell-weights (e.g. \textit{[Macrophage-Center: 1.0, Epithelial-Neighbor: 0.9, CD8T-Neighbor: 0.1]}). For each cell type in the neighborhood we sum the Gaussian weights and then \textbf{cap it} at $1.0$.
-
-\textbf{\textit{Capping at $1.0$}} is necessary to constrain the values within standard  probability bounds ($[0,1]$), ensuring metrics like Lift and Conviction do not break from values exceeding 100\% support. 
-
-We use this independent capping rather than fractional normalization to prevent abundant structural cells from artificially diluting the spatial signals of rare immune cells, at the cost of saturating density signals.
-
-\vspace{0.5cm}
-\textbf{2. Calculating the Metrics:} 
-In standard binary data, finding cells that co-occur is identical to multiplication ($1 \times 1 = 1$). However, with continuous weights, we must use the $\min()$ function (the "fuzzy AND" operator). This is crucial to preserve the \textbf{Anti-Monotone Property} (the Apriori principle \cite{ref_weighted_fpgrowth}), which guaranties that the support of a combined rule ($A \cup B$) can never exceed the support of its individual components.
-
-\begin{itemize}
-    \item \textbf{Support ($\mathcal{S}$):} For a specific rule, we take the lowest weight among the items involved in that rule, and average this value across all $N$ neighborhoods in the FOV:
-    \begin{equation}
-        \mathcal{S}(A \cup B) = \frac{1}{N} \sum_{j=1}^{N} \min_{i \in A \cup B} (w_{i,j})
-        \label{eq:support}
-    \end{equation}
-    \textit{Intuition:} If we evaluate $A \rightarrow B$, where A is at the center ($w=1.0$) and B is at the edge of the radius ($w=0.1$), the score is $\min(1.0, 0.1) = 0.1$. The cell furthest away acts as a bottleneck, ensuring the rule only achieves high support if \textit{all} cells in the rule are physically close together.
-    \item \textbf{Confidence ($\frac{\mathcal{S}(A \cup B)}{\mathcal{S}(A)}$):} Measures weight matching. It asks: "When A is strongly present, how strong is B?"
-    \item \textbf{Lift ($\frac{\mathcal{S}(A \cup B)}{\mathcal{S}(A) \times \mathcal{S}(B)}$):} Measures co-diffusion over random chance. A Lift $> 1$ means A and B cluster together more closely than expected independently.
-    \item \textbf{Conviction ($\frac{1 - \mathcal{S}(B)}{1 - \text{Confidence}}$):} Measures how often A occurs \textit{without} B. In our continuous space, a high conviction means finding A with a high weight while B has a low weight is extremely rare.
-\end{itemize}
 
 % ---------------------------------------------------------
-\section*{2. The Week's Narrative}
-
-\subsection*{2.1 Open Issues (Entering the Week)}
-We entered the week with two problems:
+\subsection*{This Week's Objectives}
+Our primary target this week was:
 \begin{enumerate}
-    \item \textbf{Alignment Failure:} Our mined results do not match the insights from the spatial atlas reference paper \cite{ref_gvhd}. Specifically, we expect to see healthy homeostasis (Paneth $\rightarrow$ Epi $\downarrow$), barrier loss (Plasma $\rightarrow$ Epi $\downarrow$), and pathogenic swarms (CD8T\_GZMB+ $\rightarrow$ Epi $\uparrow$).
-    \item \textbf{Independent Validation:} If the mismatch's caused by the data itself rather than algorithmic bias, we currently lack a robust framework to validate our results independently of the reference paper's specific findings.
+    \item \textbf{Validating patches logic and metrics} with complex rule (3+ items). Understanding and validating the impact of overlapping patches and suffix (\_NEIGHBOR, \_CENTER) to the mertics' calculations.
+
 \end{enumerate}
 
-\subsection*{2.2 This Week's Objectives}
-Our primary target this week was tackling the first issue: debugging the pipeline to determine why it fails to capture the known biological signatures.
-
 % ---------------------------------------------------------
-\section*{3. Results \& Interpretations}
 
-\textbf{The Empirical Mismatch:}
-Despite the nuanced metric, the current pipeline is systematically missing the biological signal. As we can see in the Stage consensus heatmap (Figure \ref{fig:heatmap}), the spatial algorithm does not differentiate the stages by rule's rank / prevalence per stage.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1\linewidth]{consensus_duodenum_no_markerspng.png}
-    \caption{\textbf{Prevalence of Rule Per Stage for Target Rules}. The algorithm struggles to differentiate critical disease markers from the baseline tissue architecture.}
-    \label{fig:heatmap}
-\end{figure}
-
-Figure \ref{fig:specific_rule_representative} shows the \{Plasma $\rightarrow$ Epithelial\} rule per stage - for the most plasma-abundant FOVs per stage while figure \ref{fig:specific_rule_random} shows random FOV per stage. 
-This suggests that although in some of the FOVs we can see the behavior described in the paper, the data are very noisy and hard to generalize. 
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1\linewidth]{representive_fov_by_stage_duodenum_plasma_rule_2.png}
-    \caption{\{Plasma $\rightarrow$ Epithelial\} rule per stage - for the most plasma-abundant FOVs per stage}
-    \label{fig:specific_rule_representative}
-\end{figure}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1\linewidth]{random_fov_by_stage_duodenum_plasma_rule_2.png}
-    \caption{\{Plasma $\rightarrow$ Epithelial\} rule per stage - for random chosen FOVs per stage}
-    \label{fig:specific_rule_random}
-\end{figure}
-% ---------------------------------------------------------
-\section*{4. Next Steps \& Questions for Next Weeks}
-In the next weeks, we need to (1) refine the pipeline, (2) validate algorithm's results, independently of the biological paper's findings.
-
-\subsection*{4.1 Primary Focus - Upcoming Week:}
+\subsection*{Week's Highlights}
 
 \begin{itemize}
-    \item \textbf{Sanity Check:} We will perform visual sanity checks on obvious FOVs by plotting the raw coordinates. 
-    
-    \item \textbf{Rule Visualization:} We will visualize our highest-ranked rules to see if they make sense.
+\item \textbf{\hl{Metrics with overlapping patches + suffix logic}} seem to work correctly
+\item \textbf{\hl{Multi-Metric Threshold Framework:}} A strategy to resolve density artifacts and rule redundancy.
+\begin{itemize}
+    \item \textbf{Prevalence Pivot:} Lift $>$ 2.0 (sparse) vs. \{Conviction $>$ 1.2 and Confidence $>$ 0.8\} (dense).
+    \item \textbf{Sample Size Floor:} Antecedent cell count $\geq 10$.
+    \item \textbf{Occam's Razor:} Confidence Ratio $>$ 1.1.
+    \item \textbf{Stability Gate:} Antecedent Support $>$ 0.05.
 \end{itemize}
-
-\subsection*{4.2 Further Investigation Ideas:}
-
-\begin{itemize}
-    
-    \item Alternative Validation Strategies:
-    
-    \begin{itemize}
-        \item \textbf{Result Investigation:} (a) Mine the rules for grouped FOVs per stage, instead of mining them per FOV (maybe group them not just per stage but per metadata-features?) (b) Evaluate Fold Changes between stages (instead of absolute Lift variance), (c) test alternative metrics like Conviction, and (d) cross-reference our significant rules against other established literature.
-    \end{itemize}
-    
-    \item Refining the Pipeline:
-    
-    Based on literature review, we suspect two algorithmic biases are causing the mismatch, which we will address:
-    
-    \begin{itemize}
-        \item \textbf{Rare Items:} Target immune cells are rare. We will evaluate \textbf{MISFP-Growth} \cite{ref_misfp} to assign lower support thresholds specifically to rare cells without exploding trivial background rules.
-        \item \textbf{Abundance \& Overcounting:} We will test the \textbf{Participation Index} \cite{ref_participation} and \textbf{Fraction-Score} \cite{ref_fraction} to prevent dense background structural cells from dominating the continuous metric space.
-    \end{itemize}
 \end{itemize}
 
 
 % ---------------------------------------------------------
-\section*{5. References}
+
+\subsection*{Next Week's Plan}
+
+\begin{itemize}
+\item \textbf{PCA analysis} with all the new threshold filtering, for FOV x Rule matrix. See if it can capture the complexity of organ / stages of disease.
+\item \textbf{Highest rule heatmap} to see what best-rules for each FOV are overlapped with best-rules of the other FOVs. 
+\item \textbf{Highest rules with highest overlapping} - try to find well known rules and new biological insights 
+\end{itemize}
+
+
+% ---------------------------------------------------------
+
+\vspace{0.5cm}
+\hrule
+\vspace{0.5cm}
+
+\section{Transaction Building Discussion - Overcoming Spatial Overlap Bias}
+
+\subsection{The Problem: Overlapping Transactions in Standard Algorithms}
+In standard, unconstrained association rule mining, defining transactions as patches around every cell creates severe spatial overlap. In dense regions, an interaction between Cell A and Cell B is redundantly captured by the overlapping patches of many surrounding bystander cells. This naive approach artificially inflates the Joint Support and generates false positive associations.
+
+\subsection{The Solution: Role-Restricted Rules}
+To prevent double-counting, each patch is assigned exactly one \texttt{CENTER} and multiple \texttt{NEIGHBOR}s. We constrain the algorithm to only mine directional rules:
+\begin{equation}
+    A\_\text{CENTER} \rightarrow B\_\text{NEIGHBOR}
+\end{equation}
+
+\begin{quote}
+\textbf{Note (Weighted variant):} \textit{In the \textbf{binary pipeline}, a \texttt{NEIGHBOR} item is 1 if any cell of that type exists within radius $r$, and 0 otherwise. In the \textbf{weighted pipeline}, each neighbor contributes a Gaussian-decayed weight $w = \exp\!\bigl(-\tfrac{d^2}{2b^2}\bigr) \in [0,1]$; weights from multiple cells of the same type accumulate and are capped at 1.0. The proof below is stated in binary terms and holds equally for the weighted case.}
+\end{quote}
+
+\subsection*{Mathematical Proof of Unbiased Confidence}
+Let $N$ be the number of \textbf{valid patches} (cells whose neighborhood passes the minimum-size and dominance filters). Because the rule strictly requires cell $A$ to be the \texttt{CENTER}, the FP-Growth metrics behave as follows:
+
+\paragraph{1. Antecedent Support:}
+Counts the proportion of valid patches where A is the exact center:
+\begin{equation}
+    Support(A\_\text{CENTER}) = \frac{\text{A cells in valid patches}}{N}
+\end{equation}
+
+\paragraph{2. Joint Support:}
+Counts the proportion of patches centered on A that also contain B. Bystander patches are ignored because their center is not A:
+\begin{equation}
+    Support(A\_\text{CENTER} \cap B\_\text{NEIGHBOR}) = \frac{\text{A cells with a B neighbour}}{N}
+\end{equation}
+
+\paragraph{3. Confidence (The Unbiased Metric):}
+Confidence is mathematically defined as the ratio of Joint Support to Antecedent Support. $N$ cancels out:
+\begin{equation}
+    Confidence = \frac{Support(A\_\text{CENTER} \cap B\_\text{NEIGHBOR})}{Support(A\_\text{CENTER})} = \frac{\text{A cells with a B neighbour}}{\text{A cells in valid patches}}
+\end{equation}
+
+\paragraph{Concrete Example:}
+Consider a tissue with $N = 100$ valid patches, of which 10 are centred on $A$ cells. Exactly 4 of these $A$ cells have a $B$ cell in their neighbourhood.
+\begin{itemize}
+    \item $Support(A\_\text{CENTER}) = \frac{10}{100} = 0.10$
+    \item $Support(A\_\text{CENTER} \cap B\_\text{NEIGHBOR}) = \frac{4}{100} = 0.04$
+    \item $Confidence = \frac{0.04}{0.10} = \frac{4}{10} = 0.40$ (exactly 40\% of $A$ cells have a $B$ neighbour).
+\end{itemize}
+Because $N$ cancels out, the calculation discards the redundant bystander patches, leaving a pure, unbiased ratio of spatial colocation.
+
+\subsection*{The Effect of Spatial Density on Neighborhood Support}
+When calculating the $Support(\text{Consequent}\_\text{NEIGHBOR})$, the algorithm caps the weight per patch at a maximum of 1.0. Because of this cap, dense, clustered cells "waste" their absolute cell count. Tightly packed cells hit the 1.0 limit immediately, resulting in a small spatial footprint. In contrast, the same number of cells spread evenly across the tissue trigger the 1.0 score in many different patches, creating a much larger footprint.
+
+Figure \ref{fig:demo_clustered_dispersed} empirically proves this. In \textit{Control\_01\_FOV\_3}, clustered Muscle cells and dispersed CD8T cells have identical absolute counts ($\sim130$ cells, $\sim6\%$ of the FOV). However, due to density, the Muscle footprint covers only 13.3\% of the tissue, while the dispersed CD8T footprint covers 50.2\%.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo_clustered_vs_dispersed.png}
+    \caption{\textbf{The Footprint Paradox.} \textit{Control\_01\_FOV\_3}. Muscle (clustered) vs. CD8T (dispersed). Despite identical absolute cell counts, the dispersed CD8T cells create a footprint nearly 4 times larger than the clustered Muscle cells due to the 1.0 weight cap per patch.}
+    \label{fig:demo_clustered_dispersed}
+\end{figure}
+
+\subsection*{The Geometric Baseline: What Lift Measures}
+Lift normalizes Confidence by $B$'s overall tissue accessibility:
+\begin{equation}
+    Lift = \frac{Confidence}{Support(B\_\text{NEIGHBOR})}
+\end{equation}
+
+$Support(B\_\text{NEIGHBOR})$ is the fraction of valid patches that contain at least one $B$ cell within radius $r$. This is entirely determined by $B$'s \textbf{spatial footprint} — the fraction of tissue area covered by a radius-$r$ disc around any $B$ cell. Crucially, in binary, \textbf{the count of $B$ cells per patch does not affect Support} — only presence matters. Two options:
+
+\begin{itemize}
+    \item \textbf{Dispersed $B$} (cells spread throughout tissue) $\Rightarrow$ large footprint $\Rightarrow$ high $Support(B\_\text{NEIGHBOR})$ $\Rightarrow$ Lift suppressed toward 1 (Fig~\ref{fig:demo_dispersed}).
+    \item \textbf{Spatially restricted $B$} (cells confined to a small region) $\Rightarrow$ small footprint $\Rightarrow$ low $Support(B\_\text{NEIGHBOR})$ $\Rightarrow$ high Lift (Fig \ref{fig:demo_dense}).
+\end{itemize}
+
+\textbf{Implication:} High Lift signals that $B$ is spatially rare - not that the association is stronger than a rule with moderate Lift. When $B$ is dispersed, Confidence is the more diagnostic metric. Fig~\ref{fig:demo_dispersed} illustrates the concept.
+
+\subsection*{Metric Verification: Visualization}
+Each rule can be inspected with the 8-panel verification plot (Figures~\ref{fig:demo_dispersed}--\ref{fig:demo_complex}; notebook \texttt{investigation\_11}):
+
+\begin{itemize}
+    \item \textbf{(A)} Full FOV — spatial context.
+    \item \textbf{(B)} Absolute antecedent cells — raw locations of all $A$ cells.
+    \item \textbf{(C)} Antecedent occurrences — patches where the full antecedent fires. For complex antecedents, a strict spatial subset of (B). For single antecedent - same as (B).
+    \item \textbf{(D)} Missed antecedents — antecedent fired but consequent did not (the Confidence ``misses'').
+    \item \textbf{(E)} Absolute consequent cells — raw locations of all $B$ cells.
+    \item \textbf{(F)} \textbf{Consequent occurrences} — patches containing $B$ as a neighbor. \textbf{This is $B$'s spatial footprint}; its area directly sets $Support(B\_\text{NEIGHBOR})$.
+    \item \textbf{(G)} Joint occurrences — patches where both antecedent and consequent fire (numerator of Confidence).
+\end{itemize}
+
+
+\begin{figure}[H]
+    \centering    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 1 epithelial to goblet.png}
+    \caption{\textbf{Dispersed consequent.} \textbf{Epithelial $\to$ Goblet}, \textit{GVHD\_50\_FOV\_3}. \textbf{(F)} covers most of the tissue. Confidence $= 0.88$; Lift $= 1.42$.}
+    \label{fig:demo_dispersed}
+\end{figure}
+
+\begin{figure}[H]
+    \centering    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 2 dense consequent.png}
+    \caption{\textbf{Dense consequent.} \textbf{Epithelial $\to$ Goblet}, \textit{GVHD\_32\_FOV\_3}. \textbf{(F)} covers a very strict location in the tissue. Confidence $= 0.69$; Lift $= 4.35$.}
+    \label{fig:demo_dense}
+\end{figure}
+
+
+
+
+\subsection*{Complex antecedents and data fragmentation.}
+The architecture extends naturally to multi-item antecedents:
+\begin{equation}
+    A\_\text{CENTER},\;B\_\text{NEIGHBOR} \rightarrow C\_\text{NEIGHBOR}
+\end{equation}
+$N$ still cancels, and Confidence becomes the fraction of A cells that have \emph{both} B and C neighbors, among those that already have B:
+\begin{equation}
+    Confidence = \frac{\text{A cells with both B and C neighbors}}{\text{A cells with a B neighbor}}
+\end{equation}
+In the verification plot, Panel C (antecedent occurrences) is now a strict spatial subset of Panel B (all absolute antecedent cells): only A cells that already satisfy the full antecedent condition appear in C, and C is the Confidence denominator. As the antecedent grows, Panel C shrinks — hence the need for strict minimum support thresholds.
+\end{figure}
+\begin{figure}[H]
+    \centering
+   \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo complex rule.png}
+    \caption{\textbf{Complex antecedent.} \textbf{[Plasma, Fibroblast] $\to$ Macrophage}, \textit{Control\_Colon\_01\_FOV\_5}.  \textbf{(B)}: all Plasma and Fibroblast cells. \textbf{(C)}: only Plasma cells that already have a Fibroblast neighbor: the conditional subset that forms the Confidence denominator. Confidence = (\textbf{(G)}joint occurrences) / (\textbf{(C)} antecedent occurrences), not / \textbf{(B)}.}
+    \label{fig:demo_complex}
+\end{figure}
+
+\subsection*{Notes}\label{sec:notes}
+
+\paragraph{1. Small absolute count}
+\texttt{MIN\_ABS\_SUPPORT} sets a transaction floor but does not prevent spuriously high metrics when a cell type is very rare in a FOV. With only $\sim$10 A cells, Confidence $= 1.0$ and extreme Lift are trivially achievable by chance. \texttt{Rule\_Count\_Global} (the number of FOVs that independently carry the rule) is the key robustness indicator (Fig \ref{fig:demo_smallcount}).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 3 endocrine to eplithelial.png}
+
+    \caption{\textbf{Small count.} Rule \textbf{Endocrine $\to$ Epithelial}, \textit{GVHD\_08\_FOV\_2}. \textbf{(B) and (C)} (in this case they are the same because there's only a single antecedent) shows only a handful of Endocrine cells. Confidence $= 1.0$; Lift $= 11.25$ — but the rule appears in only 5 FOVs globally.}
+    \label{fig:demo_smallcount}
+\end{figure}
+
+\paragraph{2. Dense consequent throughout the tissue: Lift becomes uninformative or misleading.}
+When $B$ is globally abundant, $Support(B\_\text{NEIGHBOR})$ is very high — most patches in the FOV have $B$ as a neighbor regardless of their center cell type. This suppresses Lift even for strong positive associations: if Confidence $<$ $Support(B\_\text{NEIGHBOR})$, Lift drops \emph{below 1}, making the rule appear as a negative/avoidance pattern when it is actually genuine co-localization. \textbf{When $B$ is globally dense, use Confidence as the primary metric — Lift is not interpretable} (Fig \ref{fig:demo_dense_negative}).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/confidence high but negative lift.png}
+    \caption{\textbf{Dense consequent, Lift $< 1$ despite genuine association.} Rule \textbf{Plasma $\to$ Epithelial}, \textit{Control\_06\_FOV\_2}. \textbf{(B)}: only 21 Plasma cells (1.3\% of FOV). \textbf{(E/F)}: Epithelial cells blanket 98.1\% of the tissue. Confidence $= 0.674$ — 67\% of Plasma patches genuinely have an Epithelial neighbor. Lift $= 0.687 < 1$ — the rule appears as avoidance, because achieving Lift $\geq 1$ would require Confidence $> 0.981$. Plasma does not avoid Epithelial: Lift is uninformative when B is this globally dense.}
+    \label{fig:demo_dense_negative}
+\end{figure}
+
+\paragraph{3. Edge neighborhood truncation.}
+Cells near the FOV boundary have truncated neighborhoods - the radius-$r$ disc extends partly outside the imaged area. Both the joint-support numerator and the antecedent-support denominator shrink by the same factor, so \textbf{Confidence is approximately preserved}. However, $Support(B\_\text{NEIGHBOR})$ from edge patches is suppressed, which \textbf{inflates Lift} for rules where $A$ preferentially occupies tissue boundaries. The permutation test is unaffected (it preserves physical positions), so FDR is valid - but Lift values for boundary-associated $A$ types should not be compared directly with those from interior-associated types (Fig \ref{fig:demo_edge}).
+
+\begin{figure}[H]
+    \centering    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 5 edge neighborhoods.png}
+    \caption{\textbf{Edge truncation.} Rule \textbf{Muscle $\to$ Neuron}, \textit{GVHD\_54\_FOV\_2}. \textbf({B)}: Muscle cells sit at the sub-mucosal boundary. Their radius-$r$ neighbourhoods are truncated half-discs — fewer Neurons are accessible from these edge patches than from equivalent interior positions, suppressing $Support(\text{Neuron\_NEIGHBOR}) = 0.279$ and inflating Lift. Confidence $= 0.87$ (robust to truncation); Lift $= 3.10$ (not directly comparable to Lift from interior-associated rules).}
+    \label{fig:demo_edge}
+\end{figure}
+
+
+% ---------------------------------------------------------
+
+
+
+\section{Proposed Threshold Framework}
+
+We propose a multi-metric framework to filter spatial noise and identify relevant patterns based on tissue context.
+
+\subsection{Simple Rules (One-to-One): Addressing Density Artifacts}
+High global density of consequent cell ($B$) suppresses Lift toward 1.0 or below, mislabeling co-localization as avoidance. We resolve this by pivoting metrics based on prevalence.
+
+\begin{itemize}
+    \item \textbf{Context-Aware Gating:} 
+    \begin{itemize}
+        \item \textbf{Sparse Consequent ($Supp(B) < 0.5$):} Use \textbf{Lift $>$ 2.0}.
+        \item \textbf{Dense Consequent ($Supp(B) \geq 0.5$):} Use \textbf{Conviction $>$ 1.2} and \textbf{Confidence $>$ 0.8}. 
+        \item \textit{Why:} Conviction identifies dependencies by measuring the reduction in ``misses'' ($A$ without $B$), remaining sensitive when high density breaks Lift.
+    \end{itemize}
+    \item \textbf{Rare Cell Floor:} 
+    \begin{itemize}
+        \item \textbf{Threshold:} \textbf{Antecedent Count $\geq 10$}.
+        \item \textit{Why:} Prevents accidental alignments of rare cells from generating fragile metrics.
+    \end{itemize}
+\end{itemize}
+
+\subsection{Complex Rules (3+ items): Addressing Redundancy and Stability}
+Complex rules suffer from denominator fragmentation and redundancy over simpler subsets.
+
+\begin{itemize}
+    \item \textbf{Redundancy Filter (Occam's razor):} 
+    \begin{itemize}
+        \item \textbf{Threshold:} \textbf{Confidence Ratio $>$ 1.1}.
+        \item \textit{Why:} Discards complex rules unless the combination is at least 10\% more predictive than its best simple subset.
+    \end{itemize}
+    \item \textbf{Stability Gate (Antecedent Support):} 
+    \begin{itemize}
+        \item \textbf{Threshold:} \textbf{Antecedent Support $>$ 0.05} (scaled by length).
+        \item \textit{Why:} Gating the denominator (the conditional subset) ensures Confidence is calculated from a robust sample.
+    \end{itemize}
+\end{itemize}
+
+
+% ---------------------------------------------------------
+
+\section{Yet Open Issues (Entering the New Week)}
+We enter the next week with yet one main issues in mind:
+
+\begin{itemize}
+\item \textbf{Independent Validation:} Find known rules from the literature and see if our pipeline identifies them.
+
+\end{itemize}
+
+
+\section{References}
 \begin{thebibliography}{9}
-    \bibitem{ref_biology}
-    Antfolk, M., \& Jensen, K.B. (2020). A bioengineering perspective on modelling the intestinal epithelial physiology in vitro. \textit{Nat Commun}, 11, 6244. \url{https://doi.org/10.1038/s41467-020-20052-z}
     
     \bibitem{ref_gvhd}
     Azulay, N., Milo, I., Bussi, Y., Ben-Uri, R., Haran, T. K., Eldar, M., ... & Keren, L. (2025). A spatial atlas of human gastrointestinal acute GVHD reveals epithelial and immune dynamics underlying disease pathophysiology. \textit{Science Translational Medicine}, 17(823), eadu6032.
 
-    \bibitem{ref_weighted_fpgrowth}
-    Li, Y., & Yin, S. (2019). Mining algorithm for weighted FP-growth frequent item sets based on ordered FP-tree. \textit{International Journal of Engineering and Management Research}.
-    
-    \bibitem{ref_misfp}
-    Wang, C. S., & Chang, J. Y. (2019). MISFP-growth: Hadoop-based frequent pattern mining with multiple item support. \textit{Applied Sciences}, 9(10), 2075.
-    
-    \bibitem{ref_participation}
-    Venkatesan, M., Thangavelu, A., & Prabhavathy, P. (2011). Event Centric Modeling Approach in Colocation Pattern Snalysis from Spatial Data. \textit{arXiv preprint} arXiv:1109.1144.
-    
-    \bibitem{ref_fraction}
-    Chan, H. K. H., Long, C., Yan, D., & Wong, R. C. W. (2019, April). Fraction-score: A new support measure for co-location pattern mining. In \textit{2019 IEEE 35th international conference on data engineering (ICDE)} (pp. 1514-1525). IEEE.
-    
-    % \bibitem{ref_bayardo}
-    % Bayardo Jr, R. J., Agrawal, R., \& Gunopulos, D. (2000). Constraint-based rule mining in large, dense databases. \textit{Data mining and knowledge discovery}, 4(2), 217-240.
 \end{thebibliography}
 
 \end{document}

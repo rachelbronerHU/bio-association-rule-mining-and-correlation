@@ -256,7 +256,7 @@ def filter_redundant_rules(rules, config):
                 continue
             for j in range(i):
                 r_simple = rows[j]
-                if r_simple.ant_pure < r_complex.ant_pure:
+                if r_simple.len_ant < r_complex.len_ant and r_simple.ant_pure <= r_complex.ant_pure:
                     is_neg_simple = r_simple.lift < 1.0
                     is_neg_complex = r_complex.lift < 1.0
                     if is_neg_simple != is_neg_complex:

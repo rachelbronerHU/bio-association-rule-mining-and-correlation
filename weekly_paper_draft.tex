@@ -13,7 +13,7 @@
 \usepackage{color}
 \usepackage{soul}
 
-% ברירת המחדל של המרקור היא צהוב. אם תרצי לשנות למשל לטורקיז/תכלת, הוסיפי גם את השורה הזו:
+% Default highlight color is yellow, you can change it to blue
 % \sethlcolor{cyan}
 
 \hypersetup{
@@ -35,10 +35,10 @@
 
 \usepackage{fancyhdr}
 \pagestyle{fancy}
-\fancyhf{} % מנקה את הגדרות ברירת המחדל
-\fancyhead[L]{\footnotesize Weekly Summary \#3 \today} % יופיע למעלה בשמאל
-\fancyhead[R]{\footnotesize Rachel Broner $\vert$ Miri Adler's Lab} % יופיע למעלה בימין
-\fancyfoot[C]{\thepage} % מספר עמוד למטה באמצע
+\fancyhf{} % Clears default settings
+\fancyhead[L]{\footnotesize Weekly Summary \#4 \today} % Top left
+\fancyhead[R]{\footnotesize Rachel Broner $\vert$ Miri Adler's Lab} % Top right
+\fancyfoot[C]{\thepage} % Bottom middle (page no.)
 
 % \usepackage{mathptmx}
 
@@ -48,7 +48,7 @@
 \begin{document}
 
 \begin{center}
-    {\Large \textbf{Weekly Summary \#3 $\vert$ Association Rule Mining}} \\[0.5em]
+    {\Large \textbf{Weekly Summary \#5 $\vert$ Association Rule Mining}} \\[0.5em]
     \textit{GVHD Analysis} $\vert$ Week of: \today
 \end{center}
 \vspace{0.2cm}
@@ -66,8 +66,9 @@ Our ongoing goal is to mine spatial association rules from MIBI-TOF imaging to m
 \subsection*{This Week's Objectives}
 Our primary target this week was:
 \begin{enumerate}
-    \item \textbf{Validating patches logic and metrics} with complex rule (3+ items). Understanding and validating the impact of overlapping patches and suffix (\_NEIGHBOR, \_CENTER) to the mertics' calculations.
+    \item \textbf{Validating pipeline's results via Information Theory.} Creating a mathematical framework to "compress" the tissue into information bits and evaluating how accurately our FP-Growth rules describe the tissue's true micro and macro architecture.
 
+    
 \end{enumerate}
 
 % ---------------------------------------------------------
@@ -75,229 +76,125 @@ Our primary target this week was:
 \subsection*{Week's Highlights}
 
 \begin{itemize}
-\item \textbf{\hl{Metrics with overlapping patches + suffix logic}} seem to work correctly
-\item \textbf{\hl{Multi-Metric Threshold Framework:}} A strategy to resolve density artifacts and rule redundancy.
-\begin{itemize}
-    \item \textbf{Prevalence Pivot:} Lift $>$ 2.0 (sparse) vs. \{Conviction $>$ 1.2 and Confidence $>$ 0.8\} (dense).
-    \item \textbf{Sample Size Floor:} Antecedent cell count $\geq 10$.
-    \item \textbf{Occam's Razor:} Confidence Ratio $>$ 1.1.
-    \item \textbf{Stability Gate:} Antecedent Support $>$ 0.05.
+\item \textbf{\hl{TBD}} TBD
 \end{itemize}
-\end{itemize}
-
 
 % ---------------------------------------------------------
 
-\subsection*{Next Week's Plan}
-
+\section{Next Steps - Primary Focus for the Coming Week:}
+Over the next week, we plan to focus on TBD.
 \begin{itemize}
-\item \textbf{PCA analysis} with all the new threshold filtering, for FOV x Rule matrix. See if it can capture the complexity of organ / stages of disease.
-\item \textbf{Highest rule heatmap} to see what best-rules for each FOV are overlapped with best-rules of the other FOVs. 
-\item \textbf{Highest rules with highest overlapping} - try to find well known rules and new biological insights 
+    \item \textbf{TBD} TBD.
+
 \end{itemize}
 
-
 % ---------------------------------------------------------
+\vspace{0.5cm}
+\hrule
+\section{From Tissue to Information: Validating Rules}
 
+\subsection{The Concept: Why Information Theory?}
+FP-Growth provides us with isolated local motifs (e.g., 'Cell A is often next to Cell B'). However, the mere existence of a frequent motif does not quantify its actual contribution to the tissue's overall architecture. To measure this 'structural value', we adapt classical Information Theory \cite{Schumacher2015}. Specifically, we measure how much a rule reduces our "surprise" (or error) \cite[Lecture 4, p. 62]{Schumacher2015} when attempting to reconstruct the full tissue map. This information loss is uniquely quantified in bits using \textbf{Kullback-Leibler (KL) Divergence ( $D_{KL}$ )} \cite[Lecture 5, pp. 76-78]{Schumacher2015}.
+
+\subsection{The Problem: Scale and Emergence}
+Information theory demonstrates that spatial data can be decomposed into spatial frequencies \cite[Lecture 6, pp. 106-108]{Schumacher2015}:
+\begin{itemize}
+    \item \textbf{Low Frequencies (Macro):} Highly structured and predictable, these layers possess low entropy and carry minimal "surprise" regarding the tissue's fundamental architecture.
+    \item \textbf{High Frequencies (Micro):} These local motifs and precise cell-to-cell interactions carry the high entropy—the true "surprise"—that defines the active biological state of the tissue.
+\end{itemize}
+
+If we evaluate our local rules against a naive random baseline, we conflate these scales. The rules "steal credit" by predicting the low-entropy macro-anatomy, artificially inflating their Information Gain. 
+
+
+\paragraph{The Solution (Multi-Scale Validation):} Analogous to perceptual coding (e.g., JPEG compression), which isolates and prioritizes specific frequencies to measure their true informational value, we must decouple the scales. We establish a baseline ($P_{macro}$) using local spatial permutation \cite{Goltsev2018, Littman2021} that preserves the low-entropy macro-anatomy while intentionally destroying the high-entropy micro-interactions. This isolation enables our \textbf{Emergence Test}, allowing us to evaluate the rules across two scales:
+\begin{itemize}
+    \item \textbf{Micro-Scale:} Can the rules resolve the high-entropy "surprise" of the local interactions?
+    \item \textbf{Macro-Scale:} Can these local micro-rules organically scale up (emerge) to reconstruct the low-entropy global topology, or is the macro-anatomy dictated by top-down external forces?
+\end{itemize}
+
+\subsection{The Mathematical Framework: Four Levels of Organization}
+To precisely measure information at both scales, we construct four progressively constrained probability distributions, analogous to hierarchical $N^{th}$-order entropy models \cite[Lecture 4, pp. 63-68]{Schumacher2015}. 
+
+\textbf{Critical Safeguard (Laplace Smoothing):} To prevent the mathematical collapse of KL Divergence when encountering unobserved motifs, we apply Laplace Smoothing uniformly across all distributions. We set $\alpha \ll 1$ (e.g., $\alpha = 0.01$) to prevent standard Add-One smoothing from artificially inflating the entropy of rare states \cite[Lecture 4, p. 62]{Schumacher2015}.
+
+\begin{equation}
+P(m) = \frac{\text{Count}(m) + \alpha}{N + \alpha \cdot |M|}
+\end{equation}
+\textit{Where $N$ is the total number of neighborhoods and $|M|$ is the number of possible states in our feature space.}
+
+\paragraph{1. The Absolute Chaos Baseline ($P_{global}$)}
+Our "zero-information" baseline. Generated by a completely random global permutation of all cells across the FOV. It destroys both macro-gradients and micro-interactions, while realistically preserving the baseline proportions of the different cell types.
+
+\paragraph{2. The Macro Anatomy Baseline ($P_{macro}$)}
+Our Null Model. We shuffle cell locations \textit{locally}. This distribution knows the tissue's "anatomy" (preserving global density gradients) but knows zero interaction rules (destroying micro-motifs). 
+
+\paragraph{3. The Ground Truth ($P_{real}$)}
+The actual, empirical distribution of cell motifs in the tissue, generated by counting the exact occurrences of mutually exclusive cell combinations.
+
+\paragraph{4. The Rule-Integrated Model ($P_k$)}
+This is where our extracted rules enter the equation. We use \textbf{Iterative Proportional Fitting (IPF)} \cite{Deming1940}. This Maximum Entropy approach effectively predicts global network states based solely on local pairwise interactions \cite{Schneidman2006}. IPF finds the most unbiased probability distribution that perfectly and simultaneously satisfies our set of FP-Growth rule constraints by iteratively updating the states:
+\begin{equation}
+P_k^{(t+1)}(m) = P_k^{(t)}(m) \times \frac{\text{Rule\_Target\_Probability}}{\text{Current\_Model\_Probability}}
+\end{equation}
+
+
+\subsection{The Ultimate Metric: Multi-Scale Information Gain (IG)}
+To prove our rules are biologically meaningful, we measure how much they improve our understanding of the tissue. We do this by calculating the \textbf{Residual Information Gain (IG)}, which is the reduction in error when we upgrade our model from purely anatomical to rule-integrated.
+
+\paragraph{The Core Equations:}
+\begin{enumerate}
+\item \textbf{Baseline Error ($I_{baseline}$):} How far is the basic anatomical model from reality?
+\begin{equation}
+I_{baseline} = D_{KL}(P_{real} \parallel P_{macro}) = \sum_{m} P_{real}(m) \log_2 \left( \frac{P_{real}(m)}{P_{macro}(m)} \right)
+\end{equation}
+\item \textbf{Information Loss ($I_{loss}$):} How far is the new, rule-integrated model from reality?
+\begin{equation}
+I_{loss} = D_{KL}(P_{real} \parallel P_k) = \sum_{m} P_{real}(m) \log_2 \left( \frac{P_{real}(m)}{P_k(m)} \right)
+\end{equation}
+\item \textbf{Residual Information Gain (IG):} The actual structural value added by our rules.
+\begin{equation}
+IG = I_{baseline} - I_{loss}
+\end{equation}
+\end{enumerate}
+
+\subsection{Multi-Scale Validation (Evaluating Emergence)}
+
+To mathematically test if our local rules accurately explain the micro-environment without corrupting the global tissue macro-architecture, we separate our validation into two distinct Information-Theoretic tests:
+
+\paragraph{Test 1: Macro-Preservation Test}
+First, we quantify the total structural information contained strictly in the overarching anatomy relative to absolute chaos:
+\begin{equation}
+    I_{macro} = D_{KL}(P_{macro} \parallel P_{global}) = \sum_{m} P_{macro}(m) \log_2 \left( \frac{P_{macro}(m)}{P_{global}(m)} \right)
+\end{equation}
+We then measure the distance between our rule-integrated model ($P_k$) and the global random baseline ($P_{global}$):
+\begin{equation}
+    I_{macro\_model} = D_{KL}(P_k \parallel P_{global}) = \sum_{m} P_k(m) \log_2 \left( \frac{P_k(m)}{P_{global}(m)} \right)
+\end{equation}
+\textit{The Test:} If $I_{macro\_model} \approx I_{macro}$, it mathematically proves that enforcing our local micro-rules did not contradict or destroy the natural density gradients of the tissue.
+
+\paragraph{Test 2: Micro-Information Gain Test}
+Assuming the macro-structure is preserved, we ask: how much "surprise" did our rules eliminate at the local level? We calculate the Information Loss ($I_{loss}$) between the true tissue and our rule-integrated model:
+\begin{equation}
+    I_{loss} = D_{KL}(P_{real} \parallel P_k) = \sum_{m} P_{real}(m) \log_2 \left( \frac{P_{real}(m)}{P_k(m)} \right)
+\end{equation}
+\textit{The Test:} A lower $I_{loss}$ (and thus a higher Information Gain) proves the rules are capturing true biological micro-interactions.
+
+\subsection{Biological Interpretation of the Results}
+
+\begin{itemize}
+    \item \textbf{Micro-Victory / Macro-Failure ($I_{loss}$ is low, but $I_{macro\_model}$ diverges significantly from $I_{macro}$):} The rules explain the local neighborhoods perfectly but destroy the global tissue distribution. \textit{Conclusion:} The tissue is governed by top-down external constraints (e.g., blood vessels, strict morphogen gradients) that local cell-to-cell rules do not capture.
+    
+    \item \textbf{Multi-Scale Victory (Macro is preserved, and $I_{loss}$ is near zero):} The rules reconstruct both the local motifs and the global anatomy. \textit{Conclusion:} The macro-architecture is an emergent property of the local micro-rules. The tissue functions as a self-organizing system.
+    
+    \item \textbf{Zero Gain ($I_{loss}$ is identical to baseline):} The rules add no new information. \textit{Conclusion:} The extracted rules are merely statistical noise driven by the tissue's existing physical density.
+\end{itemize}
+% ---------------------------------------------------------
 \vspace{0.5cm}
 \hrule
 \vspace{0.5cm}
 
-\section{Transaction Building Discussion - Overcoming Spatial Overlap Bias}
-
-\subsection{The Problem: Overlapping Transactions in Standard Algorithms}
-In standard, unconstrained association rule mining, defining transactions as patches around every cell creates severe spatial overlap. In dense regions, an interaction between Cell A and Cell B is redundantly captured by the overlapping patches of many surrounding bystander cells. This naive approach artificially inflates the Joint Support and generates false positive associations.
-
-\subsection{The Solution: Role-Restricted Rules}
-To prevent double-counting, each patch is assigned exactly one \texttt{CENTER} and multiple \texttt{NEIGHBOR}s. We constrain the algorithm to only mine directional rules:
-\begin{equation}
-    A\_\text{CENTER} \rightarrow B\_\text{NEIGHBOR}
-\end{equation}
-
-\begin{quote}
-\textbf{Note (Weighted variant):} \textit{In the \textbf{binary pipeline}, a \texttt{NEIGHBOR} item is 1 if any cell of that type exists within radius $r$, and 0 otherwise. In the \textbf{weighted pipeline}, each neighbor contributes a Gaussian-decayed weight $w = \exp\!\bigl(-\tfrac{d^2}{2b^2}\bigr) \in [0,1]$; weights from multiple cells of the same type accumulate and are capped at 1.0. The proof below is stated in binary terms and holds equally for the weighted case.}
-\end{quote}
-
-\subsection*{Mathematical Proof of Unbiased Confidence}
-Let $N$ be the number of \textbf{valid patches} (cells whose neighborhood passes the minimum-size and dominance filters). Because the rule strictly requires cell $A$ to be the \texttt{CENTER}, the FP-Growth metrics behave as follows:
-
-\paragraph{1. Antecedent Support:}
-Counts the proportion of valid patches where A is the exact center:
-\begin{equation}
-    Support(A\_\text{CENTER}) = \frac{\text{A cells in valid patches}}{N}
-\end{equation}
-
-\paragraph{2. Joint Support:}
-Counts the proportion of patches centered on A that also contain B. Bystander patches are ignored because their center is not A:
-\begin{equation}
-    Support(A\_\text{CENTER} \cap B\_\text{NEIGHBOR}) = \frac{\text{A cells with a B neighbour}}{N}
-\end{equation}
-
-\paragraph{3. Confidence (The Unbiased Metric):}
-Confidence is mathematically defined as the ratio of Joint Support to Antecedent Support. $N$ cancels out:
-\begin{equation}
-    Confidence = \frac{Support(A\_\text{CENTER} \cap B\_\text{NEIGHBOR})}{Support(A\_\text{CENTER})} = \frac{\text{A cells with a B neighbour}}{\text{A cells in valid patches}}
-\end{equation}
-
-\paragraph{Concrete Example:}
-Consider a tissue with $N = 100$ valid patches, of which 10 are centred on $A$ cells. Exactly 4 of these $A$ cells have a $B$ cell in their neighbourhood.
-\begin{itemize}
-    \item $Support(A\_\text{CENTER}) = \frac{10}{100} = 0.10$
-    \item $Support(A\_\text{CENTER} \cap B\_\text{NEIGHBOR}) = \frac{4}{100} = 0.04$
-    \item $Confidence = \frac{0.04}{0.10} = \frac{4}{10} = 0.40$ (exactly 40\% of $A$ cells have a $B$ neighbour).
-\end{itemize}
-Because $N$ cancels out, the calculation discards the redundant bystander patches, leaving a pure, unbiased ratio of spatial colocation.
-
-\subsection*{The Effect of Spatial Density on Neighborhood Support}
-When calculating the $Support(\text{Consequent}\_\text{NEIGHBOR})$, the algorithm caps the weight per patch at a maximum of 1.0. Because of this cap, dense, clustered cells "waste" their absolute cell count. Tightly packed cells hit the 1.0 limit immediately, resulting in a small spatial footprint. In contrast, the same number of cells spread evenly across the tissue trigger the 1.0 score in many different patches, creating a much larger footprint.
-
-Figure \ref{fig:demo_clustered_dispersed} empirically proves this. In \textit{Control\_01\_FOV\_3}, clustered Muscle cells and dispersed CD8T cells have identical absolute counts ($\sim130$ cells, $\sim6\%$ of the FOV). However, due to density, the Muscle footprint covers only 13.3\% of the tissue, while the dispersed CD8T footprint covers 50.2\%.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo_clustered_vs_dispersed.png}
-    \caption{\textbf{The Footprint Paradox.} \textit{Control\_01\_FOV\_3}. Muscle (clustered) vs. CD8T (dispersed). Despite identical absolute cell counts, the dispersed CD8T cells create a footprint nearly 4 times larger than the clustered Muscle cells due to the 1.0 weight cap per patch.}
-    \label{fig:demo_clustered_dispersed}
-\end{figure}
-
-\subsection*{The Geometric Baseline: What Lift Measures}
-Lift normalizes Confidence by $B$'s overall tissue accessibility:
-\begin{equation}
-    Lift = \frac{Confidence}{Support(B\_\text{NEIGHBOR})}
-\end{equation}
-
-$Support(B\_\text{NEIGHBOR})$ is the fraction of valid patches that contain at least one $B$ cell within radius $r$. This is entirely determined by $B$'s \textbf{spatial footprint} — the fraction of tissue area covered by a radius-$r$ disc around any $B$ cell. Crucially, in binary, \textbf{the count of $B$ cells per patch does not affect Support} — only presence matters. Two options:
-
-\begin{itemize}
-    \item \textbf{Dispersed $B$} (cells spread throughout tissue) $\Rightarrow$ large footprint $\Rightarrow$ high $Support(B\_\text{NEIGHBOR})$ $\Rightarrow$ Lift suppressed toward 1 (Fig~\ref{fig:demo_dispersed}).
-    \item \textbf{Spatially restricted $B$} (cells confined to a small region) $\Rightarrow$ small footprint $\Rightarrow$ low $Support(B\_\text{NEIGHBOR})$ $\Rightarrow$ high Lift (Fig \ref{fig:demo_dense}).
-\end{itemize}
-
-\textbf{Implication:} High Lift signals that $B$ is spatially rare - not that the association is stronger than a rule with moderate Lift. When $B$ is dispersed, Confidence is the more diagnostic metric. Fig~\ref{fig:demo_dispersed} illustrates the concept.
-
-\subsection*{Metric Verification: Visualization}
-Each rule can be inspected with the 8-panel verification plot (Figures~\ref{fig:demo_dispersed}--\ref{fig:demo_complex}; notebook \texttt{investigation\_11}):
-
-\begin{itemize}
-    \item \textbf{(A)} Full FOV — spatial context.
-    \item \textbf{(B)} Absolute antecedent cells — raw locations of all $A$ cells.
-    \item \textbf{(C)} Antecedent occurrences — patches where the full antecedent fires. For complex antecedents, a strict spatial subset of (B). For single antecedent - same as (B).
-    \item \textbf{(D)} Missed antecedents — antecedent fired but consequent did not (the Confidence ``misses'').
-    \item \textbf{(E)} Absolute consequent cells — raw locations of all $B$ cells.
-    \item \textbf{(F)} \textbf{Consequent occurrences} — patches containing $B$ as a neighbor. \textbf{This is $B$'s spatial footprint}; its area directly sets $Support(B\_\text{NEIGHBOR})$.
-    \item \textbf{(G)} Joint occurrences — patches where both antecedent and consequent fire (numerator of Confidence).
-\end{itemize}
-
-
-\begin{figure}[H]
-    \centering    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 1 epithelial to goblet.png}
-    \caption{\textbf{Dispersed consequent.} \textbf{Epithelial $\to$ Goblet}, \textit{GVHD\_50\_FOV\_3}. \textbf{(F)} covers most of the tissue. Confidence $= 0.88$; Lift $= 1.42$.}
-    \label{fig:demo_dispersed}
-\end{figure}
-
-\begin{figure}[H]
-    \centering    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 2 dense consequent.png}
-    \caption{\textbf{Dense consequent.} \textbf{Epithelial $\to$ Goblet}, \textit{GVHD\_32\_FOV\_3}. \textbf{(F)} covers a very strict location in the tissue. Confidence $= 0.69$; Lift $= 4.35$.}
-    \label{fig:demo_dense}
-\end{figure}
-
-
-
-
-\subsection*{Complex antecedents and data fragmentation.}
-The architecture extends naturally to multi-item antecedents:
-\begin{equation}
-    A\_\text{CENTER},\;B\_\text{NEIGHBOR} \rightarrow C\_\text{NEIGHBOR}
-\end{equation}
-$N$ still cancels, and Confidence becomes the fraction of A cells that have \emph{both} B and C neighbors, among those that already have B:
-\begin{equation}
-    Confidence = \frac{\text{A cells with both B and C neighbors}}{\text{A cells with a B neighbor}}
-\end{equation}
-In the verification plot, Panel C (antecedent occurrences) is now a strict spatial subset of Panel B (all absolute antecedent cells): only A cells that already satisfy the full antecedent condition appear in C, and C is the Confidence denominator. As the antecedent grows, Panel C shrinks — hence the need for strict minimum support thresholds.
-\end{figure}
-\begin{figure}[H]
-    \centering
-   \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo complex rule.png}
-    \caption{\textbf{Complex antecedent.} \textbf{[Plasma, Fibroblast] $\to$ Macrophage}, \textit{Control\_Colon\_01\_FOV\_5}.  \textbf{(B)}: all Plasma and Fibroblast cells. \textbf{(C)}: only Plasma cells that already have a Fibroblast neighbor: the conditional subset that forms the Confidence denominator. Confidence = (\textbf{(G)}joint occurrences) / (\textbf{(C)} antecedent occurrences), not / \textbf{(B)}.}
-    \label{fig:demo_complex}
-\end{figure}
-
-\subsection*{Notes}\label{sec:notes}
-
-\paragraph{1. Small absolute count}
-\texttt{MIN\_ABS\_SUPPORT} sets a transaction floor but does not prevent spuriously high metrics when a cell type is very rare in a FOV. With only $\sim$10 A cells, Confidence $= 1.0$ and extreme Lift are trivially achievable by chance. \texttt{Rule\_Count\_Global} (the number of FOVs that independently carry the rule) is the key robustness indicator (Fig \ref{fig:demo_smallcount}).
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 3 endocrine to eplithelial.png}
-
-    \caption{\textbf{Small count.} Rule \textbf{Endocrine $\to$ Epithelial}, \textit{GVHD\_08\_FOV\_2}. \textbf{(B) and (C)} (in this case they are the same because there's only a single antecedent) shows only a handful of Endocrine cells. Confidence $= 1.0$; Lift $= 11.25$ — but the rule appears in only 5 FOVs globally.}
-    \label{fig:demo_smallcount}
-\end{figure}
-
-\paragraph{2. Dense consequent throughout the tissue: Lift becomes uninformative or misleading.}
-When $B$ is globally abundant, $Support(B\_\text{NEIGHBOR})$ is very high — most patches in the FOV have $B$ as a neighbor regardless of their center cell type. This suppresses Lift even for strong positive associations: if Confidence $<$ $Support(B\_\text{NEIGHBOR})$, Lift drops \emph{below 1}, making the rule appear as a negative/avoidance pattern when it is actually genuine co-localization. \textbf{When $B$ is globally dense, use Confidence as the primary metric — Lift is not interpretable} (Fig \ref{fig:demo_dense_negative}).
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/confidence high but negative lift.png}
-    \caption{\textbf{Dense consequent, Lift $< 1$ despite genuine association.} Rule \textbf{Plasma $\to$ Epithelial}, \textit{Control\_06\_FOV\_2}. \textbf{(B)}: only 21 Plasma cells (1.3\% of FOV). \textbf{(E/F)}: Epithelial cells blanket 98.1\% of the tissue. Confidence $= 0.674$ — 67\% of Plasma patches genuinely have an Epithelial neighbor. Lift $= 0.687 < 1$ — the rule appears as avoidance, because achieving Lift $\geq 1$ would require Confidence $> 0.981$. Plasma does not avoid Epithelial: Lift is uninformative when B is this globally dense.}
-    \label{fig:demo_dense_negative}
-\end{figure}
-
-\paragraph{3. Edge neighborhood truncation.}
-Cells near the FOV boundary have truncated neighborhoods - the radius-$r$ disc extends partly outside the imaged area. Both the joint-support numerator and the antecedent-support denominator shrink by the same factor, so \textbf{Confidence is approximately preserved}. However, $Support(B\_\text{NEIGHBOR})$ from edge patches is suppressed, which \textbf{inflates Lift} for rules where $A$ preferentially occupies tissue boundaries. The permutation test is unaffected (it preserves physical positions), so FDR is valid - but Lift values for boundary-associated $A$ types should not be compared directly with those from interior-associated types (Fig \ref{fig:demo_edge}).
-
-\begin{figure}[H]
-    \centering    \includegraphics[width=1\linewidth]{Weekly Summary #3 (07.06.2026)/demo 5 edge neighborhoods.png}
-    \caption{\textbf{Edge truncation.} Rule \textbf{Muscle $\to$ Neuron}, \textit{GVHD\_54\_FOV\_2}. \textbf({B)}: Muscle cells sit at the sub-mucosal boundary. Their radius-$r$ neighbourhoods are truncated half-discs — fewer Neurons are accessible from these edge patches than from equivalent interior positions, suppressing $Support(\text{Neuron\_NEIGHBOR}) = 0.279$ and inflating Lift. Confidence $= 0.87$ (robust to truncation); Lift $= 3.10$ (not directly comparable to Lift from interior-associated rules).}
-    \label{fig:demo_edge}
-\end{figure}
-
-
 % ---------------------------------------------------------
 
-
-
-\section{Proposed Threshold Framework}
-
-We propose a multi-metric framework to filter spatial noise and identify relevant patterns based on tissue context.
-
-\subsection{Simple Rules (One-to-One): Addressing Density Artifacts}
-High global density of consequent cell ($B$) suppresses Lift toward 1.0 or below, mislabeling co-localization as avoidance. We resolve this by pivoting metrics based on prevalence.
-
-\begin{itemize}
-    \item \textbf{Context-Aware Gating:} 
-    \begin{itemize}
-        \item \textbf{Sparse Consequent ($Supp(B) < 0.5$):} Use \textbf{Lift $>$ 2.0}.
-        \item \textbf{Dense Consequent ($Supp(B) \geq 0.5$):} Use \textbf{Conviction $>$ 1.2} and \textbf{Confidence $>$ 0.8}. 
-        \item \textit{Why:} Conviction identifies dependencies by measuring the reduction in ``misses'' ($A$ without $B$), remaining sensitive when high density breaks Lift.
-    \end{itemize}
-    \item \textbf{Rare Cell Floor:} 
-    \begin{itemize}
-        \item \textbf{Threshold:} \textbf{Antecedent Count $\geq 10$}.
-        \item \textit{Why:} Prevents accidental alignments of rare cells from generating fragile metrics.
-    \end{itemize}
-\end{itemize}
-
-\subsection{Complex Rules (3+ items): Addressing Redundancy and Stability}
-Complex rules suffer from denominator fragmentation and redundancy over simpler subsets.
-
-\begin{itemize}
-    \item \textbf{Redundancy Filter (Occam's razor):} 
-    \begin{itemize}
-        \item \textbf{Threshold:} \textbf{Confidence Ratio $>$ 1.1}.
-        \item \textit{Why:} Discards complex rules unless the combination is at least 10\% more predictive than its best simple subset.
-    \end{itemize}
-    \item \textbf{Stability Gate (Antecedent Support):} 
-    \begin{itemize}
-        \item \textbf{Threshold:} \textbf{Antecedent Support $>$ 0.05} (scaled by length).
-        \item \textit{Why:} Gating the denominator (the conditional subset) ensures Confidence is calculated from a robust sample.
-    \end{itemize}
-\end{itemize}
-
-
-% ---------------------------------------------------------
 
 \section{Yet Open Issues (Entering the New Week)}
 We enter the next week with yet one main issues in mind:
@@ -307,12 +204,28 @@ We enter the next week with yet one main issues in mind:
 
 \end{itemize}
 
+% ---------------------------------------------------------
 
-\section{References}
+
 \begin{thebibliography}{9}
-    
-    \bibitem{ref_gvhd}
-    Azulay, N., Milo, I., Bussi, Y., Ben-Uri, R., Haran, T. K., Eldar, M., ... & Keren, L. (2025). A spatial atlas of human gastrointestinal acute GVHD reveals epithelial and immune dynamics underlying disease pathophysiology. \textit{Science Translational Medicine}, 17(823), eadu6032.
+
+\bibitem{ref_gvhd}
+Azulay, N., Milo, I., Bussi, Y., Ben-Uri, R., Haran, T. K., Eldar, M., ... \& Keren, L. (2025). A spatial atlas of human gastrointestinal acute GVHD reveals epithelial and immune dynamics underlying disease pathophysiology. \textit{Science Translational Medicine}, 17(823), eadu6032.
+
+\bibitem{Schumacher2015}
+Schumacher, B. (2015). \textit{The Science of Information: From Language to Black Holes}. The Great Courses. (Specifically Lectures 4, 5, and 6: Entropy, Surprise, KL Divergence, and Spatial Frequencies).
+
+\bibitem{Goltsev2018}
+Goltsev, Y., Samusik, N., Kennedy-Darling, J., Bhate, S., Hale, M., Vazquez, G., ... \& Nolan, G. P. (2018). Deep profiling of mouse splenic architecture with CODEX multiplexed imaging. \textit{Cell}, 174(4), 968-981.
+
+\bibitem{Littman2021}
+Littman, R., Hemminger, Z., Foreman, R., Arneson, D., Zhang, G., Gómez-Pinilla, F., Yang, X., \& Wollman, R. (2021). Joint cell segmentation and cell type annotation for spatial transcriptomics. \textit{Molecular Systems Biology}, 17(6), e10108.
+
+\bibitem{Deming1940}
+Deming, W. E., \& Stephan, F. F. (1940). On a least squares adjustment of a sampled frequency table when the expected marginal totals are known. \textit{The Annals of Mathematical Statistics}, 11(4), 427-444.
+
+\bibitem{Schneidman2006}
+Schneidman, E., Berry, M. J., Segev, R., \& Bialek, W. (2006). Weak pairwise correlations imply strongly correlated network states in a neural population. \textit{Nature}, 440(7087), 1007-1012.
 
 \end{thebibliography}
 

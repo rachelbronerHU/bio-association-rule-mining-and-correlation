@@ -101,7 +101,7 @@ if ALGO == "weighted_fpgrowth":
         "TARGET_CELLS": 30,
         "MIN_CELLS_PER_PATCH": 2,
         "N_PERMUTATIONS": 5 if DEBUG else 1000,
-        "N_TOP_RULES": 100 if DEBUG else 2000,
+        "N_TOP_RULES": 100 if DEBUG else 20000,
         "MIN_CELL_TYPE_FREQUENCY": 5,
         "MIN_CELL_TYPE_PERCENTAGE": 0.0, # 0% of all cells, to catch rare types in small samples while still filtering out very rare types in large samples
     }

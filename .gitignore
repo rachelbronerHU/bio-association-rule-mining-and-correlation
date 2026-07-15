@@ -19,3 +19,5 @@ visualization/notebooks/reports
 references/
 
 *.egg-info/
+
+ADVISOR_REQUEST.md

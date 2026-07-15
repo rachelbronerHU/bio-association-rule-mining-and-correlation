@@ -36,7 +36,7 @@
 \usepackage{fancyhdr}
 \pagestyle{fancy}
 \fancyhf{} % Clears default settings
-\fancyhead[L]{\footnotesize Weekly Summary \#4 \today} % Top left
+\fancyhead[L]{\footnotesize Weekly Summary \#5 \today} % Top left
 \fancyhead[R]{\footnotesize Rachel Broner $\vert$ Miri Adler's Lab} % Top right
 \fancyfoot[C]{\thepage} % Bottom middle (page no.)
 
@@ -66,7 +66,7 @@ Our ongoing goal is to mine spatial association rules from MIBI-TOF imaging to m
 \subsection*{This Week's Objectives}
 Our primary target this week was:
 \begin{enumerate}
-    \item \textbf{Validating pipeline's results via Information Theory.} Creating a mathematical framework to "compress" the tissue into information bits and evaluating how accurately our FP-Growth rules describe the tissue's true micro and macro architecture.
+    \item \textbf{Validating pipeline's results via Information Theory.} Building a mathematical framework that compresses the tissue into information bits, and evaluating how accurately our FP-Growth rules describe the tissue's true micro- and macro-architecture.
 
     
 \end{enumerate}
@@ -94,90 +94,156 @@ Over the next week, we plan to focus on TBD.
 \section{From Tissue to Information: Validating Rules}
 
 \subsection{The Concept: Why Information Theory?}
-FP-Growth provides us with isolated local motifs (e.g., 'Cell A is often next to Cell B'). However, the mere existence of a frequent motif does not quantify its actual contribution to the tissue's overall architecture. To measure this 'structural value', we adapt classical Information Theory \cite{Schumacher2015}. Specifically, we measure how much a rule reduces our "surprise" (or error) \cite[Lecture 4, p. 62]{Schumacher2015} when attempting to reconstruct the full tissue map. This information loss is uniquely quantified in bits using \textbf{Kullback-Leibler (KL) Divergence ( $D_{KL}$ )} \cite[Lecture 5, pp. 76-78]{Schumacher2015}.
+FP-Growth gives us isolated local motifs (e.g., "cell A is often next to cell B"). But the fact that a motif is frequent does not tell us how much it actually contributes to the tissue's overall structure. To measure that contribution, we adapt classical Information Theory \cite{Schumacher2015}. Specifically, we measure how much a rule reduces the error in reconstructing the full tissue map. This reduction in error is measured in bits using \textbf{Kullback-Leibler (KL) Divergence ($D_{KL}$)} \cite[Lecture 5, pp. 76-78]{Schumacher2015}.
 
 \subsection{The Problem: Scale and Emergence}
-Information theory demonstrates that spatial data can be decomposed into spatial frequencies \cite[Lecture 6, pp. 106-108]{Schumacher2015}:
+\label{subsec:scale-problem}
+Information theory shows that spatial data can be decomposed into spatial frequencies \cite[Lecture 6, pp. 106-108]{Schumacher2015}:
 \begin{itemize}
-    \item \textbf{Low Frequencies (Macro):} Highly structured and predictable, these layers possess low entropy and carry minimal "surprise" regarding the tissue's fundamental architecture.
-    \item \textbf{High Frequencies (Micro):} These local motifs and precise cell-to-cell interactions carry the high entropy—the true "surprise"—that defines the active biological state of the tissue.
+    \item \textbf{Low Frequencies (Macro):} Broad, predictable patterns — tissue zones and density gradients. These have low entropy: once the general anatomy is known, little is left to explain.
+    \item \textbf{High Frequencies (Micro):} Local motifs and specific cell-to-cell interactions. These have high entropy: they capture the fine-grained structure that reflects the tissue's active biological state.
 \end{itemize}
 
-If we evaluate our local rules against a naive random baseline, we conflate these scales. The rules "steal credit" by predicting the low-entropy macro-anatomy, artificially inflating their Information Gain. 
+Evaluating local rules against a naive random baseline mixes up these two scales: a rule gets credit for correctly predicting the macro-anatomy even when it adds no local information, which inflates its measured Information Gain. \textit{(Our pipeline has since moved Information Gain itself onto the random baseline $P_{global}$, and tracks the anatomy split with a separate, parallel quantity instead --- see \S\ref{sec:ig-metric}.)}
 
-
-\paragraph{The Solution (Multi-Scale Validation):} Analogous to perceptual coding (e.g., JPEG compression), which isolates and prioritizes specific frequencies to measure their true informational value, we must decouple the scales. We establish a baseline ($P_{macro}$) using local spatial permutation \cite{Goltsev2018, Littman2021} that preserves the low-entropy macro-anatomy while intentionally destroying the high-entropy micro-interactions. This isolation enables our \textbf{Emergence Test}, allowing us to evaluate the rules across two scales:
+\paragraph{Separating the Scales:} We construct a baseline ($P_{macro}$) using local spatial permutation \cite{Goltsev2018, Littman2021} that preserves the macro-anatomy while destroying the micro-interactions. This lets us evaluate the rules at two scales:
 \begin{itemize}
-    \item \textbf{Micro-Scale:} Can the rules resolve the high-entropy "surprise" of the local interactions?
-    \item \textbf{Macro-Scale:} Can these local micro-rules organically scale up (emerge) to reconstruct the low-entropy global topology, or is the macro-anatomy dictated by top-down external forces?
+    \item \textbf{Micro-Scale:} Do the rules explain the local interactions?
+    \item \textbf{Macro-Scale:} Do the local rules, combined, reproduce the global tissue anatomy on their own — or is that anatomy set by something the local rules do not capture (e.g. blood vessels, external gradients)?
 \end{itemize}
+
+\paragraph{Calibrating the Macro-to-Micro Boundary (\texttt{GRID\_SIZE}):}
+The local shuffle that constructs $P_{macro}$ requires a spatial bin size (\texttt{GRID\_SIZE}) that separates macro structure from micro interactions. We determine this boundary empirically by computing the \textbf{power spectrum} of each cell type's spatial density map: the tissue is rasterized to a regular grid, a 2D Fast Fourier Transform (FFT) is applied per cell type, and the result is radially averaged to a one-dimensional power-versus-scale curve. Low-frequency components (large spatial scales, $\gg$ individual cell diameters) correspond to tissue-level density gradients and compositional zones, while high-frequency components (small spatial scales, $\sim$ one neighborhood radius) correspond to cell-to-cell interaction distances. The spatial scale at which power transitions from macro-dominated to micro-dominated---visible as a characteristic bend in the log-scale curve---defines the appropriate \texttt{GRID\_SIZE}. In our GVHD analysis we use $\texttt{GRID\_SIZE} = 100\ \mu\text{m}$, which we validate against the empirical power spectra before running the main pipeline.
 
 \subsection{The Mathematical Framework: Four Levels of Organization}
-To precisely measure information at both scales, we construct four progressively constrained probability distributions, analogous to hierarchical $N^{th}$-order entropy models \cite[Lecture 4, pp. 63-68]{Schumacher2015}. 
+To precisely measure information at both scales, we construct four progressively constrained probability distributions, analogous to hierarchical $N^{th}$-order entropy models \cite[Lecture 4, pp. 63-68]{Schumacher2015}.
 
-\textbf{Critical Safeguard (Laplace Smoothing):} To prevent the mathematical collapse of KL Divergence when encountering unobserved motifs, we apply Laplace Smoothing uniformly across all distributions. We set $\alpha \ll 1$ (e.g., $\alpha = 0.01$) to prevent standard Add-One smoothing from artificially inflating the entropy of rare states \cite[Lecture 4, p. 62]{Schumacher2015}.
+\textbf{Laplace Smoothing:} KL Divergence is undefined when a motif has zero probability in one of the distributions. To avoid this, we apply Laplace Smoothing uniformly across all four distributions. We set $\alpha \ll 1$ (e.g., $\alpha = 0.01$) so that smoothing does not artificially inflate the entropy of rare states \cite[Lecture 4, p. 62]{Schumacher2015}.
 
 \begin{equation}
 P(m) = \frac{\text{Count}(m) + \alpha}{N + \alpha \cdot |M|}
 \end{equation}
 \textit{Where $N$ is the total number of neighborhoods and $|M|$ is the number of possible states in our feature space.}
 
-\paragraph{1. The Absolute Chaos Baseline ($P_{global}$)}
-Our "zero-information" baseline. Generated by a completely random global permutation of all cells across the FOV. It destroys both macro-gradients and micro-interactions, while realistically preserving the baseline proportions of the different cell types.
+\textbf{What is $m$?} For a given rule (or group of rules sharing the same center and neighbor types), $m$ denotes one configuration of that rule's center type and neighbor type(s) within the fixed radius — restricted to the types the rule involves, not every cell type present in the neighborhood. Each rule (or rule group) has its own state space $M$ built this way; see the discussion of rule groups in \S\ref{subsec:cumulative}. Below we use the words \textit{state}, \textit{motif}, and \textit{neighborhood} interchangeably to refer to this same object, $m$.
 
-\paragraph{2. The Macro Anatomy Baseline ($P_{macro}$)}
-Our Null Model. We shuffle cell locations \textit{locally}. This distribution knows the tissue's "anatomy" (preserving global density gradients) but knows zero interaction rules (destroying micro-motifs). 
+\paragraph{1. The Random Baseline ($P_{global}$)}
+Generated by randomly permuting all cell positions across the FOV. This destroys both the macro-gradients and the micro-interactions, while keeping the overall proportions of each cell type unchanged. It represents the case of no spatial structure at all.
+
+\paragraph{2. The Macro-Anatomy Baseline ($P_{macro}$)}
+Our null model. We shuffle cell locations \textit{locally}: this preserves the tissue's overall anatomy (the global density gradients) while destroying local interaction patterns (the micro-motifs). To reduce noise from a single random shuffle, $P_{macro}$ is estimated as the average over $N$ independent local shuffles (e.g., $N = 50$). The local bin size (\texttt{GRID\_SIZE}) that controls the shuffle is set empirically from the power spectrum analysis described in \S\ref{subsec:scale-problem}.
 
 \paragraph{3. The Ground Truth ($P_{real}$)}
-The actual, empirical distribution of cell motifs in the tissue, generated by counting the exact occurrences of mutually exclusive cell combinations.
+The actual, empirical distribution of cell motifs in the tissue, generated by directly counting how often each motif occurs in the real tissue.
 
 \paragraph{4. The Rule-Integrated Model ($P_k$)}
-This is where our extracted rules enter the equation. We use \textbf{Iterative Proportional Fitting (IPF)} \cite{Deming1940}. This Maximum Entropy approach effectively predicts global network states based solely on local pairwise interactions \cite{Schneidman2006}. IPF finds the most unbiased probability distribution that perfectly and simultaneously satisfies our set of FP-Growth rule constraints by iteratively updating the states:
+This is where our extracted rules enter the equation. We use \textbf{Iterative Proportional Fitting (IPF)} \cite{Deming1940}. This Maximum Entropy approach predicts global network states from local pairwise interactions \cite{Schneidman2006}. IPF finds the least-biased probability distribution that satisfies all of our FP-Growth rule constraints simultaneously, by iteratively updating the states:
 \begin{equation}
 P_k^{(t+1)}(m) = P_k^{(t)}(m) \times \frac{\text{Rule\_Target\_Probability}}{\text{Current\_Model\_Probability}}
 \end{equation}
+\textbf{Starting point:} $P_k^{(0)} = P_{global}$. IPF starts from the fully random baseline, not from $P_{macro}$, so a rule's measured contribution reflects everything it explains relative to pure chance --- anatomy included --- rather than only the local structure left over after anatomy is assumed.
 
 
-\subsection{The Ultimate Metric: Multi-Scale Information Gain (IG)}
-To prove our rules are biologically meaningful, we measure how much they improve our understanding of the tissue. We do this by calculating the \textbf{Residual Information Gain (IG)}, which is the reduction in error when we upgrade our model from purely anatomical to rule-integrated.
+\subsection{The Core Metric: Information Gain (IG)}
+\label{sec:ig-metric}
+To measure whether our rules capture real biological structure, we measure how much they improve our model of the tissue. We do this with the \textbf{Information Gain (IG)}: the reduction in error when the model is upgraded from the random baseline to rule-integrated.
 
 \paragraph{The Core Equations:}
 \begin{enumerate}
-\item \textbf{Baseline Error ($I_{baseline}$):} How far is the basic anatomical model from reality?
+\item \textbf{Baseline Error ($I_{baseline}$):} How far is the random baseline from reality?
 \begin{equation}
-I_{baseline} = D_{KL}(P_{real} \parallel P_{macro}) = \sum_{m} P_{real}(m) \log_2 \left( \frac{P_{real}(m)}{P_{macro}(m)} \right)
+I_{baseline} = D_{KL}(P_{real} \parallel P_{global}) = \sum_{m} P_{real}(m) \log_2 \left( \frac{P_{real}(m)}{P_{global}(m)} \right)
 \end{equation}
-\item \textbf{Information Loss ($I_{loss}$):} How far is the new, rule-integrated model from reality?
+\item \textbf{Information Loss ($I_{loss}$):} How far is the rule-integrated model from reality?
 \begin{equation}
 I_{loss} = D_{KL}(P_{real} \parallel P_k) = \sum_{m} P_{real}(m) \log_2 \left( \frac{P_{real}(m)}{P_k(m)} \right)
+\label{eq:iloss}
 \end{equation}
-\item \textbf{Residual Information Gain (IG):} The actual structural value added by our rules.
+\item \textbf{Information Gain (IG):} The value added by the rules.
 \begin{equation}
 IG = I_{baseline} - I_{loss}
 \end{equation}
 \end{enumerate}
 
+\paragraph{A separate anatomy-only baseline.} Because $I_{baseline}$ is now measured against $P_{global}$ rather than $P_{macro}$, it no longer separates anatomy from local structure by itself --- a rule's IG can include credit for anatomy it merely echoes. To recover that split, we compute one further quantity, used only for reporting, never for rule ranking or golden-rule selection:
+\begin{equation}
+I_{baseline}^{macro} = D_{KL}(P_{real} \parallel P_{macro})
+\end{equation}
+By the decomposition identity (Eq.~\ref{eq:decomp}), $I_{baseline} - I_{baseline}^{macro}$ is exactly how much of the total gap anatomy alone explains. This is what separates the macro (anatomy) and micro (beyond anatomy) components in the real tissue, and, applied the same way to a rule set's own IG, separates how much of what the rules explain is anatomy-consistent versus genuinely local.
+
+\subsection{Cumulative Information Analysis: The Elbow Curve}
+\label{subsec:cumulative}
+A single rule's IG measures its individual contribution, but the tissue's micro-architecture is encoded in the \textit{collective} structure of many rules. To identify the minimal informative rule set, we construct a \textbf{Cumulative Information Gain Curve} by incrementally adding ranked rules to the integrated model and measuring the resulting IG after each addition. The point at which the curve flattens—the "elbow"—defines the sufficient rule set.
+
+\paragraph{Individual IG Pre-Computation (Phase 1):} Before building the cumulative curve, we compute the IG of each candidate rule in isolation using single-rule IPF. This serves two purposes: it filters out rules with near-zero IG (rules whose co-occurrence is fully explained by cell density and add no biological signal), and it provides a principled ranking by true informational value rather than a proxy metric.
+
+\paragraph{Rule Ranking Strategy:} Rules are processed in two tiers, simplest first:
+\begin{enumerate}
+    \item \textbf{Tier 1 (Simple Rules):} Single-antecedent rules, ranked by individual IG descending. These form the structural backbone and are expected to saturate most of the cumulative IG early.
+    \item \textbf{Tier 2 (Complex Rules):} Multi-antecedent rules, ranked by individual IG descending, included only where no simpler rule already covers all antecedent types. These reveal higher-order micro-interactions not reducible to pairwise effects.
+\end{enumerate}
+
+\paragraph{Unified Curve Across All Cell-Type Interactions:} Because each rule operates within its own state space (defined by its specific center type and neighbor types), the cumulative IG is computed as the \textit{sum} of IG contributions across all rule groups. Only the group that receives a new rule is re-computed at each step; all other groups are cached. The total curve therefore represents the aggregate structural information explained across all cell-type interaction contexts in the tissue.
+
+\paragraph{Computational Efficiency:} Rather than evaluating IG at every rule addition, the curve is sampled at logarithmic step sizes. This provides dense resolution in the steep initial region—where each new rule contributes substantially—while reducing redundant evaluations in the plateau where marginal gains are negligible.
+
 \subsection{Multi-Scale Validation (Evaluating Emergence)}
 
-To mathematically test if our local rules accurately explain the micro-environment without corrupting the global tissue macro-architecture, we separate our validation into two distinct Information-Theoretic tests:
+\paragraph{Why We Need Two Tests}
+The total information gap between the real tissue and complete randomness splits exactly into two pieces:
+\begin{equation}
+    D_{KL}(P_{real} \parallel P_{global}) =
+    \underbrace{D_{KL}(P_{real} \parallel P_{macro})}_{\text{unexplained by anatomy}}
+    +
+    \underbrace{\sum_{m} P_{real}(m) \log_2 \frac{P_{macro}(m)}{P_{global}(m)}}_{\text{explained by anatomy}}
+    \label{eq:decomp}
+\end{equation}
+This identity holds exactly for any three distributions $P_{real}$, $P_{macro}$, $P_{global}$ — it is algebra, not an approximation. It shows the total gap between the tissue and pure randomness is made up of two non-overlapping pieces: what the anatomy alone explains, and what is left for local rules to explain. This is why we check the rules with two separate tests, rather than one combined score: Test 1 checks that the rules did not damage the anatomy piece, and Test 2 checks how much of the leftover piece the rules explain. We do not compute the second term of Eq.~\ref{eq:decomp} directly — it exists only to justify the two tests below. Combined with the elbow-curve IG, this gives a four-step comparison: $P_{global} \to P_{macro} \to P_k \to P_{real}$, where each step isolates a distinct source of structure.
 
 \paragraph{Test 1: Macro-Preservation Test}
-First, we quantify the total structural information contained strictly in the overarching anatomy relative to absolute chaos:
+First, we quantify the information carried by the anatomy baseline relative to the random baseline:
 \begin{equation}
     I_{macro} = D_{KL}(P_{macro} \parallel P_{global}) = \sum_{m} P_{macro}(m) \log_2 \left( \frac{P_{macro}(m)}{P_{global}(m)} \right)
 \end{equation}
-We then measure the distance between our rule-integrated model ($P_k$) and the global random baseline ($P_{global}$):
+We then measure the same quantity for the rule-integrated model ($P_k$) against the random baseline:
 \begin{equation}
     I_{macro\_model} = D_{KL}(P_k \parallel P_{global}) = \sum_{m} P_k(m) \log_2 \left( \frac{P_k(m)}{P_{global}(m)} \right)
 \end{equation}
-\textit{The Test:} If $I_{macro\_model} \approx I_{macro}$, it mathematically proves that enforcing our local micro-rules did not contradict or destroy the natural density gradients of the tissue.
+\textit{The Test:} If $I_{macro\_model} \approx I_{macro}$, enforcing the local rules did not distort the tissue's density gradients.
 
 \paragraph{Test 2: Micro-Information Gain Test}
-Assuming the macro-structure is preserved, we ask: how much "surprise" did our rules eliminate at the local level? We calculate the Information Loss ($I_{loss}$) between the true tissue and our rule-integrated model:
+Assuming Test 1 passes (the anatomy is preserved), we ask how much local information the rules explain. This is exactly $I_{loss}$, already defined in Eq.~\eqref{eq:iloss} (\S\ref{sec:ig-metric}): the KL divergence between the real tissue and the rule-integrated model. \textit{The Test:} a lower $I_{loss}$ (equivalently, a higher IG) means the rules capture genuine local structure, not just noise.
+
+\subsection{Synthetic Tissue Validation}
+
+\paragraph{Role of This Test.}
+Tests 1 and 2 above are quantitative: they confirm in bits that the rules carry real information, but they do not show what that information looks like spatially. This test closes that gap with a visual, model-independent check: we build a synthetic tissue using only the golden rule set, then compare it by eye to the real FOV. If the golden rules truly encode the tissue's spatial organization, a tissue built only from those rules should reproduce the same cell-type adjacency patterns as the real one.
+
+\paragraph{Algorithm: Simulated Annealing.}
+We build the synthetic tissue by repeatedly swapping cell-type labels to bring the tissue's rule confidences closer to their real-tissue targets. To avoid getting stuck in a partially-correct configuration, we use simulated annealing (a Metropolis-style acceptance rule over a Potts-style objective) rather than plain greedy search:
+\begin{enumerate}
+    \item \textbf{Initialize.} Start from the real FOV's cell positions, but randomly shuffle the cell-type labels (same cell-type counts, same geometry, no spatial structure).
+    \item \textbf{Propose.} At each step, pick two cells with different types and compute how much the objective (below) would change if their labels were swapped.
+    \item \textbf{Accept or reject.} Accept the swap if it improves the objective. If it does not, accept it anyway with probability $\exp(\Delta\mathcal{E}/T)$, where $T$ is the current temperature. This lets the search escape configurations that look good locally but are wrong globally.
+    \item \textbf{Cool down.} Decrease $T$ gradually over the run (e.g., $T_t = T_0 \cdot \gamma^t$). High $T$ early on allows broad exploration; low $T$ late in the run makes the process behave like greedy hill-climbing, locking in the best configuration found.
+    \item \textbf{Converge.} Repeat for $N$ iterations (e.g., $N = 20{,}000$) or until the objective stops improving.
+\end{enumerate}
+
+\paragraph{Objective Function.}
+The objective is a weighted sum of squared deviations from each rule's target confidence, where the weight is the rule's individual Information Gain:
 \begin{equation}
-    I_{loss} = D_{KL}(P_{real} \parallel P_k) = \sum_{m} P_{real}(m) \log_2 \left( \frac{P_{real}(m)}{P_k(m)} \right)
+    \mathcal{E} = -\sum_{r \in \text{golden rules}} \mathrm{IG}_r \cdot \left( \hat{c}_r - c_r \right)^2
 \end{equation}
-\textit{The Test:} A lower $I_{loss}$ (and thus a higher Information Gain) proves the rules are capturing true biological micro-interactions.
+where $c_r$ is the target confidence of rule $r$ (from the real tissue) and $\hat{c}_r$ is its current confidence in the synthetic tissue. $\mathcal{E}$ is maximized — equivalently, the weighted squared error is minimized — when every rule's confidence matches its target, with high-IG rules given more weight.
+
+\paragraph{Why IG as weights, not confidence?}
+A rule can have high confidence but low IG if its co-occurrence pattern is fully explained by cell density alone. Enforcing such a rule would just reproduce the macro-anatomy, not add micro-scale structure. Weighting by IG ensures only rules that carry genuine signal beyond anatomy guide the synthesis.
+
+\paragraph{Computational Cost.}
+At each swap of cells $i$ (type $A$) and $j$ (type $B$), only the rules whose center or neighbor types include $A$ or $B$ are re-scored; all other rules are unaffected and skipped. This makes each iteration $O(|\text{affected rules}| \times |\text{center cells}|)$ instead of $O(|\text{all rules}| \times N_{\text{cells}})$. This delta-scoring applies equally to the accept/reject step above, so moving from greedy search to simulated annealing adds negligible per-iteration cost — the only overhead is a longer run (to let the temperature schedule complete) and one extra exponential per proposed swap.
+
+\paragraph{Interpretation.}
+If the synthetic tissue visually resembles the real FOV — reproducing the same cell-type adjacency patterns — this confirms that the golden rules collectively encode the tissue's essential spatial organization. A synthetic tissue that remains random despite optimization indicates the rules are insufficient to reconstruct the spatial pattern, pointing to missing interactions or unresolved higher-order structure.
 
 \subsection{Biological Interpretation of the Results}
 
@@ -197,7 +263,7 @@ Assuming the macro-structure is preserved, we ask: how much "surprise" did our r
 
 
 \section{Yet Open Issues (Entering the New Week)}
-We enter the next week with yet one main issues in mind:
+We enter the next week with one open issue in mind:
 
 \begin{itemize}
 \item \textbf{Independent Validation:} Find known rules from the literature and see if our pipeline identifies them.

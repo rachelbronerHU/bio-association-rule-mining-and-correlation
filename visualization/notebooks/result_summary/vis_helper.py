@@ -736,8 +736,12 @@ def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
                           df_pca[y].max() - df_pca[y].min())
         x0, x1 = boxed[x].min() - pad, boxed[x].max() + pad
         y0, y1 = boxed[y].min() - pad, boxed[y].max() + pad
+        # Blue, and filled: the stages are green/orange/red and every other marker is
+        # outlined in black, so this is the only thing on the plot in this colour.
+        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor="#4477aa",
+                               alpha=0.18, zorder=1))
         ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False,
-                               edgecolor="black", linewidth=1.6, zorder=6))
+                               edgecolor="#1f4e79", linewidth=2.2, zorder=6))
 
 
     if label_fovs is not None:

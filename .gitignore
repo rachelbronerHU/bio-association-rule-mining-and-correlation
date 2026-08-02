@@ -9,8 +9,8 @@ data/
 # Experiment Results & Plots
 results/*
 results/debug_run
-visualization/notebooks/result_summary/figures/
-visualization/notebooks/result_summary/summary_downloads/
+visualization/notebooks/result_summary/pair_analysis/summary_downloads/
+visualization/notebooks/result_summary/rule_space/summary_downloads/
 
 
 

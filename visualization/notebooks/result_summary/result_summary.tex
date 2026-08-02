@@ -1,0 +1,565 @@
+\documentclass[10pt, a4paper]{article}
+
+% --- Packages ---
+\usepackage[top=2cm, bottom=2cm, left=2cm, right=2cm]{geometry}
+\usepackage{graphicx} % For images
+\usepackage{amsmath}  % For math/equations
+\usepackage{hyperref} % For clickable links
+\usepackage{caption}  % For styling captions
+\usepackage{titlesec} % For controlling section title sizes
+\usepackage{float}
+\usepackage{xcolor} % Required for defining and using colors
+\usepackage{hyperref} % Keep this as your last \usepackage
+\usepackage{color}
+\usepackage{soul}
+
+% ברירת המחדל של המרקור היא צהוב. אם תרצי לשנות למשל לטורקיז/תכלת, הוסיפי גם את השורה הזו:
+% \sethlcolor{cyan}
+
+\hypersetup{
+    colorlinks=true, % Removes the default boxes and colors the text instead
+    linkcolor=blue,  % Color for internal links (e.g., Figure and Table references)
+    citecolor=blue,  % Color for bibliographical citations
+    urlcolor=blue    % Color for external web URLs
+}
+% --- Document Formatting ---
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+\captionsetup{font=scriptsize, labelfont=bf}
+
+% --- Customize Title Sizes ---
+\titleformat{\section}
+  {\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}
+  {\normalsize\bfseries}{\thesubsection}{1em}{}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{} % מנקה את הגדרות ברירת המחדל
+\fancyhead[L]{\footnotesize Weekly Summary \#3 \today} % יופיע למעלה בשמאל
+\fancyhead[R]{\footnotesize Rachel Broner $\vert$ Miri Adler's Lab} % יופיע למעלה בימין
+\fancyfoot[C]{\thepage} % מספר עמוד למטה באמצע
+
+% \usepackage{mathptmx}
+
+\usepackage{setspace}
+\onehalfspacing % For 1.5 line spacing
+
+\begin{document}
+
+\begin{center}
+    {\Large \textbf{Weekly Summary \#6 $\vert$ Association Rule Mining - Result Summary}} \\[0.5em]
+    \textit{GVHD Analysis} $\vert$ Week of: \today
+\end{center}
+\vspace{0.2cm}
+\hrule
+\vspace{0.5cm}
+
+% ---------------------------------------------------------
+\section{First biological analysis: directional positive pairwise rules}
+
+\subsection{Q1 -- Which pairwise directional rules are shared across many FOVs/patients?}
+
+\textbf{How this was calculated.}
+The rules shown are those that rank among the 5 strongest positive pairwise rules
+(two cell types, lift $>1$, no rule with the same cell type on both sides) of at least
+one FOV, keeping the 30 found in the most FOVs/patients.
+Each heatmap cell counts the FOVs / patients in which the rule was found; the percentage
+is that count out of all FOVs / patients, or out of that stage's FOVs / patients in a
+stage column.
+Each bar is the rule's cell type as a fraction of all cells in an FOV, averaged over the
+FOVs in which that rule was found (antecedent to the left, consequent to the right).
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/q1_prevalence_by_fov.pdf}
+    \includegraphics[width=\textwidth]{summary_downloads/q1_prevalence_by_patient.pdf}
+    \caption{Prevalence of the top pairwise directional rules across disease stages,
+    counted by FOV (top, $n=288$) and by patient (bottom, $n=75$). Counting by biopsy
+    ($n=77$) gives an almost identical picture to counting by patient.}
+    \label{fig:q1_prevalence}
+\end{figure}
+
+\subsection{Q2 -- Which rules are patient-specific or condition-specific?}
+
+\textbf{How this was calculated}
+Rules are selected as in Q1, run separately on the colon FOVs and on the duodenum FOVs.
+Each heatmap cell counts the FOVs in which the rule was found; the percentage is that
+count out of all the organ's FOVs, or out of that stage's FOVs in a stage column.
+In the fingerprint, each cell is the share of that patient's FOVs in which the rule was
+found; patients and rules are ordered so that similar ones sit next to each other, and the
+strips above give each patient's stage.
+Stage is the \emph{pathological} score throughout; Control and Control\_S are the FOVs with
+no score, i.e.\ the controls.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/q2_prevalence_colon.pdf}
+    \includegraphics[width=\textwidth]{summary_downloads/q2_prevalence_duodenum.pdf}
+    \caption{Top rules in the colon (top, $n=97$ FOVs) and in the duodenum (bottom,
+    $n=191$ FOVs). All 21 Control\_S FOVs are duodenum, so the colon panel has no
+    Control\_S column.}
+    \label{fig:q2_organ}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/q2_patient_fingerprint.pdf}
+    \caption{Which rules each patient has: the 30 most widespread rules across all 75
+    patients. Each column is one patient.}
+    \label{fig:q2_fingerprint}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/q2_patient_fingerprint_colon.pdf}
+    \caption{The same picture inside the colon only. The rule set is chosen within the organ,
+    so the rows differ from the figure above.}
+    \label{fig:q2_fingerprint_colon}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/q2_patient_fingerprint_duodenum.pdf}
+    \caption{The same picture inside the duodenum only.}
+    \label{fig:q2_fingerprint_duodenum}
+\end{figure}
+
+% ---------------------------------------------------------
+\subsection{Q3 -- Which rules have high confidence/conviction/lift and also appear in more
+than one FOV?}
+
+\textbf{How this was calculated.}
+No top-$N$ selection is used here: all 214 positive pairwise rules are kept, one row each.
+A rule's lift, confidence and conviction are the median of its values over the FOVs in
+which it was found.
+Of these, the 109 rules found in at least two patients are shown -- a stricter test than
+the two FOVs asked for, which 116 rules pass.
+Each dot is one rule: its position gives lift and conviction, both on a log scale, its size
+the number of patients, and its colour the confidence.
+Two rules reach infinite conviction (confidence $=1$) and are drawn at the top of the plot
+with a red ring.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{summary_downloads/q3_lift_vs_conviction.pdf}
+    \caption{Every positive pairwise rule found in at least two patients ($n=109$), by
+    median lift and median conviction. Only the 15 strongest are named.}
+    \label{fig:q3_strength}
+\end{figure}
+
+% ---------------------------------------------------------
+\subsection{Q4 -- Which rules may simply reflect cell-type abundance?}
+
+\textbf{How this was calculated.}
+All 214 positive pairwise rules are used, with no top-$N$ selection and nothing averaged:
+each dot is one rule in one FOV.
+The horizontal axis is the share of cells in that FOV that are the rule's antecedent (left
+panel) or consequent (right panel); the vertical axis is that rule's lift, confidence or
+conviction in the same FOV.
+The thick line is the median per bin, a guide to the direction only.
+Infinite conviction is drawn at the top of the panel with a red ring rather than dropped.
+The last figure is the Q1 patient heatmap re-ordered so that the rules with the most common
+cell types sit at the top.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{summary_downloads/q4_abundance_lift.pdf}
+    \includegraphics[width=0.9\textwidth]{summary_downloads/q4_abundance_confidence.pdf}
+    \includegraphics[width=0.9\textwidth]{summary_downloads/q4_abundance_conviction.pdf}
+    \caption{Each score against how common the rule's cell types are, one dot per rule per
+    FOV ($n=1234$).}
+    \label{fig:q4_abundance}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/q4_prevalence_by_abundance.pdf}
+    \caption{The top rules by patient, re-ordered so that the rules with the most common
+    cell types sit at the top.}
+    \label{fig:q4_sorted}
+\end{figure}
+
+% ---------------------------------------------------------
+\vspace{0.5cm}
+\hrule
+\vspace{0.5cm}
+% ---------------------------------------------------------
+\section{FOVs as vectors in rule space}
+
+\textbf{How the rule space is built.}
+Every FOV is a row and every rule a column, holding that rule's lift in that FOV; a rule that
+never fired is set to $1$, meaning no association. Only rules seen in more than 2\% of the
+FOVs become columns. The values are log-transformed and standardised, then the PCA is run.
+
+\textbf{Why 2\% and not 0.} Keeping every rule would leave more rules than FOVs, which makes
+a PCA meaningless. 2\% is the widest cut that avoids that, and it only drops rules seen in
+one or two FOVs.
+
+Each part below is one PCA, shown the same way: how much each component carries, where the
+FOVs fall, which rules pull each component, what its ends look like in tissue, and whether it
+merely follows how common a cell type is. A loading is a rule's weight in a component --
+green pulls one way, salmon the other. For the cell types, \emph{Spearman's rho} compares the
+two orderings of the FOVs: $+1$ the same order, $0$ no relation, $-1$ the reverse; the grey
+band marks values too small to reach $p<0.05$. The FOV maps are wide and meant to be zoomed
+into.
+
+% ---------------------------------------------------------
+\subsection{All FOVs}
+
+Every stage and both organs: 249 FOVs and 43 rules. The two scatters are the same PCA
+coloured twice, so they can be compared directly.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_all_scree.pdf}
+    \caption{How much of the picture each component carries, for all FOVs.}
+    \label{fig:rs_all_scree}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{summary_downloads/rs_all_pca_pathological_score.pdf}
+    \caption{All 249 FOVs, coloured by stage.}
+    \label{fig:rs_all_pca}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{summary_downloads/rs_all_pca_organ.pdf}
+    \caption{The same PCA, coloured by organ.}
+    \label{fig:rs_all_pca_organ}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_all_loadings_pc1.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_all_loadings_pc2.pdf}
+    \caption{The rules behind PC1 (left) and PC2 (right).}
+    \label{fig:rs_all_loadings}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_all_fovs_pc1.pdf}
+    \caption{Five FOVs along PC1, from its lowest score (A) to its highest (E), drawn as
+    maps of their cells.}
+    \label{fig:rs_all_fovs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_all_pair_fovs.pdf}
+    \caption{The two FOVs whose rules are closest -- the pair squared on
+    Figure~\ref{fig:rs_all_pca}. The panel above shows FOVs that should look different;
+    this pair should look alike.}
+    \label{fig:rs_all_pair}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{summary_downloads/rs_all_abundance_correlation.pdf}
+    \caption{How closely each cell type's share of the cells follows PC1 and PC2. Goblet is
+    the one cell type running with PC1 ($+0.34$) and the others run against it, the mark of a
+    single composition gradient rather than several separate effects: Goblet makes up 17\% of
+    the cells in the colon and 4.5\% in the duodenum, so that gradient is largely the organ.
+    Every other bar stays close to the band, so no cell type dominates this PCA.}
+    \label{fig:rs_all_abundance}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_all_abundance_goblet.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_all_abundance_plasma_cd38.pdf}
+    \caption{The same PCA of all FOVs, coloured by how common each of its two
+    strongest cell types is: Goblet and Plasma\_CD38. Chosen from the figure above, so each part
+    shows the cell types that matter in it.}
+    \label{fig:rs_all_abund_cells}
+\end{figure}
+
+% ---------------------------------------------------------
+\subsection{Colon, Control vs Severe}
+
+The two extreme stages inside one organ: 55 FOVs and 48 rules. Neither organ nor the middle
+stages can explain a split here.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_control_severe_colon_scree.pdf}
+    \caption{How much of the picture each component carries, for the colon, Control vs Severe.}
+    \label{fig:rs_cs_colon_scree}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_control_severe_colon_pca_pathological_score.pdf}
+    \caption{The 55 colon FOVs scored Control or Severe. Control and Severe come apart, most
+    clearly along PC2.}
+    \label{fig:rs_colon_pca}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_colon_loadings_pc1.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_colon_loadings_pc2.pdf}
+    \caption{The rules behind PC1 (left) and PC2 (right). On PC1 the adaptive-immune rules
+    sit at one end and the stromal rules at the other.}
+    \label{fig:rs_colon_loadings}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_control_severe_colon_fovs_pc1.pdf}
+    \caption{Five colon FOVs along PC1, from its lowest score (A) to its highest (E).}
+    \label{fig:rs_colon_fovs}
+\end{figure}
+
+The panel above walks the component end to end, so it shows FOVs that should look
+\emph{different}. The pair below is the other half: the two FOVs whose rules are closest,
+squared on the scatter above. They come from different patients.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_control_severe_colon_pair_fovs.pdf}
+    \caption{The two FOVs of that pair, drawn as maps of their cells.}
+    \label{fig:rs_colon_pair_fovs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{summary_downloads/rs_control_severe_colon_abundance_correlation.pdf}
+    \caption{How closely each cell type's share of the cells follows PC1 and PC2. Here the
+    pattern is not one gradient: the immune types run strongly with PC1 (CD4T $-0.77$,
+    Mast $-0.64$, Plasma $-0.49$), matching the immune-versus-stromal split in the loadings.
+    Composition and rules point the same way, so this separation cannot yet be credited to
+    the rules alone. Note the wider grey band: with 55 FOVs it takes a rho of $0.27$ to reach
+    $p<0.05$.}
+    \label{fig:rs_colon_abundance}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_colon_abundance_cd4t.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_colon_abundance_mast.pdf}
+    \caption{The same PCA of the colon, Control vs Severe, coloured by how common each of its two
+    strongest cell types is: CD4T and Mast. Chosen from the figure above, so each part
+    shows the cell types that matter in it.}
+    \label{fig:rs_cs_colon_abund_cells}
+\end{figure}
+
+% ---------------------------------------------------------
+\subsection{Duodenum, Control vs Severe}
+
+The same two stages in the other organ: 58 FOVs and 35 rules, shown the same way as the colon
+above. \textbf{Nothing separates here} -- Control and Severe stay mixed, and PC1 carries no
+more variance than shuffled rules would give it, so the loadings and maps below describe an
+axis that does not mean anything.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_control_severe_duodenum_scree.pdf}
+    \caption{How much of the picture each component carries, for the duodenum, Control vs Severe.}
+    \label{fig:rs_cs_duo_scree}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_control_severe_duodenum_pca_pathological_score.pdf}
+    \caption{The 58 duodenum FOVs scored Control or Severe.}
+    \label{fig:rs_duodenum_pca}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_duodenum_loadings_pc1.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_duodenum_loadings_pc2.pdf}
+    \caption{The rules behind PC1 (left) and PC2 (right).}
+    \label{fig:rs_duodenum_loadings}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_control_severe_duodenum_fovs_pc1.pdf}
+    \caption{Five duodenum FOVs along PC1, from its lowest score (A) to its highest (E).}
+    \label{fig:rs_duodenum_fovs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_control_severe_duodenum_pair_fovs.pdf}
+    \caption{The two FOVs of the duodenum, Control vs Severe scope whose rules are closest -- the pair
+    squared on the scatter above.}
+    \label{fig:rs_cs_duo_pair}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{summary_downloads/rs_control_severe_duodenum_abundance_correlation.pdf}
+    \caption{How closely each cell type's share of the cells follows PC1 and PC2. Every bar
+    sits at or inside the band, so no cell type drives this PCA either.}
+    \label{fig:rs_duodenum_abundance}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_duodenum_abundance_cd4t.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_control_severe_duodenum_abundance_nk.pdf}
+    \caption{The same PCA of the duodenum, Control vs Severe, coloured by how common each of its two
+    strongest cell types is: CD4T and NK. Chosen from the figure above, so each part
+    shows the cell types that matter in it.}
+    \label{fig:rs_cs_duo_abund_cells}
+\end{figure}
+
+% ---------------------------------------------------------
+\subsection{Colon, Mild vs Severe}
+
+The two disease stages without the healthy controls: 69 FOVs and 52 rules. Mild and Severe
+stay mixed. Taken with the part above, the fingerprints tell diseased tissue from healthy but
+not one degree of disease from another.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_mild_severe_colon_scree.pdf}
+    \caption{How much of the picture each component carries, for the colon, Mild vs Severe.}
+    \label{fig:rs_ms_colon_scree}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_mild_severe_colon_pca_pathological_score.pdf}
+    \caption{The 69 colon FOVs scored Mild or Severe.}
+    \label{fig:rs_ms_colon_pca}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_colon_loadings_pc1.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_colon_loadings_pc2.pdf}
+    \caption{The rules behind PC1 (left) and PC2 (right).}
+    \label{fig:rs_ms_colon_loadings}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_mild_severe_colon_fovs_pc1.pdf}
+    \caption{Five colon FOVs along PC1, from its lowest score (A) to its highest (E).}
+    \label{fig:rs_ms_colon_fovs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_mild_severe_colon_pair_fovs.pdf}
+    \caption{The two FOVs of the colon, Mild vs Severe scope whose rules are closest -- the pair
+    squared on the scatter above.}
+    \label{fig:rs_ms_colon_pair}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{summary_downloads/rs_mild_severe_colon_abundance_correlation.pdf}
+    \caption{How closely each cell type's share of the cells follows PC1 and PC2.}
+    \label{fig:rs_ms_colon_abundance}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_colon_abundance_apc.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_colon_abundance_cd4t.pdf}
+    \caption{The same PCA of the colon, Mild vs Severe, coloured by how common each of its two
+    strongest cell types is: APC and CD4T. Chosen from the figure above, so each part
+    shows the cell types that matter in it.}
+    \label{fig:rs_ms_colon_abund_cells}
+\end{figure}
+
+% ---------------------------------------------------------
+\subsection{Duodenum, Mild vs Severe}
+
+The same two stages in the other organ: 113 FOVs and 38 rules. \textbf{Nothing separates
+here either} -- as in the duodenum part above, the two stages stay mixed and the figures
+below describe an axis that does not track disease.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_mild_severe_duodenum_scree.pdf}
+    \caption{How much of the picture each component carries, for the duodenum, Mild vs Severe.}
+    \label{fig:rs_ms_duo_scree}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/rs_mild_severe_duodenum_pca_pathological_score.pdf}
+    \caption{The 113 duodenum FOVs scored Mild or Severe.}
+    \label{fig:rs_ms_duodenum_pca}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_duodenum_loadings_pc1.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_duodenum_loadings_pc2.pdf}
+    \caption{The rules behind PC1 (left) and PC2 (right).}
+    \label{fig:rs_ms_duodenum_loadings}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_mild_severe_duodenum_fovs_pc1.pdf}
+    \caption{Five duodenum FOVs along PC1, from its lowest score (A) to its highest (E).}
+    \label{fig:rs_ms_duodenum_fovs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/rs_mild_severe_duodenum_pair_fovs.pdf}
+    \caption{The two FOVs of the duodenum, Mild vs Severe scope whose rules are closest -- the pair
+    squared on the scatter above.}
+    \label{fig:rs_ms_duo_pair}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{summary_downloads/rs_mild_severe_duodenum_abundance_correlation.pdf}
+    \caption{How closely each cell type's share of the cells follows PC1 and PC2.}
+    \label{fig:rs_ms_duodenum_abundance}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_duodenum_abundance_cd4t.pdf}
+    \includegraphics[width=0.49\textwidth]{summary_downloads/rs_mild_severe_duodenum_abundance_endothelial.pdf}
+    \caption{The same PCA of the duodenum, Mild vs Severe, coloured by how common each of its two
+    strongest cell types is: CD4T and Endothelial. Chosen from the figure above, so each part
+    shows the cell types that matter in it.}
+    \label{fig:rs_ms_duo_abund_cells}
+\end{figure}
+
+% ---------------------------------------------------------
+\subsection{Do a patient's FOVs sit together?}
+
+Colouring a scatter by patient is not readable -- 65 patients have more than one FOV, and no
+palette keeps that many colours apart -- so this is measured instead of drawn.
+For each patient we take the mean distance between their own FOVs in the PC1--PC2 plane of
+the all-FOV PCA, and divide it by the mean distance between any two FOVs; below $1$ means
+that patient's FOVs sit closer together than FOVs in general.
+Distances between pairs are used on purpose: unlike the distance to a patient's own centre,
+the value does not drift simply because a patient has few FOVs.
+Patients with a single FOV are left out, since one FOV has no spread.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{summary_downloads/rs_all_patient_spread.pdf}
+    \caption{One dot per patient, for the 65 patients with two or more FOVs. 49 of them sit
+    closer together than average, with a median of $0.63$, and this holds at every FOV count
+    rather than only for the patients with fewest FOVs.}
+    \label{fig:rs_patient}
+\end{figure}
+
+% ---------------------------------------------------------
+\vspace{0.5cm}
+\hrule
+\vspace{0.5cm}
+
+% ---------------------------------------------------------
+
+\end{document}

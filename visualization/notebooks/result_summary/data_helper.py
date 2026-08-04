@@ -9,6 +9,25 @@ import pandas as pd
 
 
 # ---------------------------------------------------------------------------
+# 0. The mining run every notebook reads
+# ---------------------------------------------------------------------------
+
+# Change this line and all the notebooks follow. One that wants a different run
+# passes its own path instead: dh.load_results(path) or rs.load(path).
+RESULT_RUN = "full_run/weighted_fpgrowth_4_items_no_markers_with_ex_per"
+
+# Built from this file's own location, not the working directory: the notebooks sit
+# at different depths, so no one relative path would work for all of them.
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+RESULT_CSV_PATH = os.path.join(_ROOT, "results", *RESULT_RUN.split("/"), "data")
+
+# Stages left out of everything, by Pathological score. Set here and no notebook sees
+# those FOVs at all - not in a heatmap, not in a PCA, not in a cell count.
+# Control_S is the second control group, 21 FOVs.
+DROP_STAGES = ("Control_S",)         # () keeps everything. One name is fine: "Control_S"
+
+
+# ---------------------------------------------------------------------------
 # 1. Load the spatial data (cells, FOVs, biopsies)
 # ---------------------------------------------------------------------------
 
@@ -35,13 +54,14 @@ def _get_organ(row):
     return "Unknown"
 
 
-def _get_clean_score(row, score_col):
-    """The stage for this FOV. Missing scores are healthy controls."""
-    if pd.notna(row[score_col]):
-        return str(row[score_col])
-    if str(row["FOV"]).startswith("S_"):
-        return "Control_S"
-    return "Control"
+# Biopsy columns the notebooks can split rules by, on top of the two scores.
+METADATA_COLS = ["Days after Transplant grouped", "Donor type",
+                 "Cortico Response", "Survival at follow-up"]
+
+
+def _control_label(fov):
+    """Control FOVs have no biopsy at all; the S_ ones are their own control group."""
+    return "Control_S" if str(fov).startswith("S_") else "Control"
 
 
 def _normalize_coords(row, fov_to_size):
@@ -67,19 +87,35 @@ def load_spatial_data(data_dir=None):
     df_fovs = pd.read_csv(os.path.join(data_dir, "fovs_metadata.csv"))
     df_biopsy = pd.read_csv(os.path.join(data_dir, "biopsy_metadata.csv"))
 
-    # Attach the biopsy's scores and location to each FOV.
+    # Attach the biopsy's scores, location and metadata to each FOV.
+    label_cols = ["Pathological score", "Clinical score"] + METADATA_COLS
     df_fovs = df_fovs.merge(
-        df_biopsy[["Biopsy_ID", "Pathological score", "Clinical score", "Localization"]],
+        df_biopsy[["Biopsy_ID", "Localization"] + label_cols],
         left_on="Patient", right_on="Biopsy_ID", how="left",
     )
     df_fovs["Organ"] = df_fovs.apply(_get_organ, axis=1)
-    df_fovs["Pathological score"] = df_fovs.apply(lambda r: _get_clean_score(r, "Pathological score"), axis=1)
-    df_fovs["Clinical score"] = df_fovs.apply(lambda r: _get_clean_score(r, "Clinical score"), axis=1)
+
+    # A FOV with no biopsy row is a control, and gets that label in every column. A FOV
+    # that has a biopsy but no value for one column keeps the blank - it is missing, not
+    # a control, and the notebook drops those rows for that column.
+    is_control = df_fovs["Biopsy_ID"].isna()
+    control = df_fovs["FOV"].map(_control_label)
+    for col in label_cols:
+        df_fovs[col] = df_fovs[col].astype("object").mask(is_control, control)
 
     # Three ways to count a rule: by FOV, by biopsy (sample), or by patient (person).
     biopsy_to_patient = df_biopsy.set_index("Biopsy_ID")["Patient_ID"].to_dict()
     df_fovs["Biopsy"] = df_fovs["Patient"]  # the 'Patient' column is really a biopsy id
     df_fovs["PatientID"] = df_fovs["Biopsy"].map(biopsy_to_patient).fillna(df_fovs["Biopsy"])
+
+    # Whole stages left out of every notebook, cells and all. One name may be written
+    # as a plain string: ("Control_S") is not a tuple, and that is easy to miss.
+    if DROP_STAGES:
+        drop = [DROP_STAGES] if isinstance(DROP_STAGES, str) else list(DROP_STAGES)
+        gone = df_fovs[df_fovs["Pathological score"].isin(drop)]["FOV"]
+        df_fovs = df_fovs[~df_fovs["FOV"].isin(gone)]
+        df_cells = df_cells[df_cells["fov"].isin(df_fovs["FOV"])]
+        print(f"Dropped {gone.nunique()} FOVs: {', '.join(drop)}")
 
     # Coordinates in microns, so cells from different FOV sizes are comparable.
     fov_to_size = df_fovs.set_index("FOV")["Size [um]"].to_dict()
@@ -105,13 +141,14 @@ def _count_items(row):
     return len(ants) + len(cons)
 
 
-def load_results(result_csv_dir, rule_max_items=2, positive_only=True):
+def load_results(result_csv_dir=None, rule_max_items=2, positive_only=True):
     """Read the filtered rules and keep the ones we want to study.
 
+    result_csv_dir : which run to read; RESULT_CSV_PATH above unless given.
     rule_max_items : keep rules with at most this many cell types (2 = pairwise).
     positive_only  : keep only rules with Lift > 1 (the cell types attract each other).
     """
-    path = os.path.join(result_csv_dir, "results_CN_filtered.csv")
+    path = os.path.join(result_csv_dir or RESULT_CSV_PATH, "results_CN_filtered.csv")
     if not os.path.exists(path):
         print(f"File not found: {path}")
         return pd.DataFrame()
@@ -130,14 +167,26 @@ def load_results(result_csv_dir, rule_max_items=2, positive_only=True):
 # 3. Clean rule names
 # ---------------------------------------------------------------------------
 
+def _strip(items):
+    """Drop the _CENTER / _NEIGHBOR tags from a list of stored cell names."""
+    return [i.replace("_CENTER", "").replace("_NEIGHBOR", "") for i in items]
+
+
+def base_items(item_str):
+    """The rule's cell types as a list: "['CD4T_CENTER', 'Bcell_NEIGHBOR']" -> ['CD4T', 'Bcell'].
+
+    Use this when you need to count them or check for repeats; use `clean_items` when you
+    need the rule's name.
+    """
+    return _strip(ast.literal_eval(str(item_str)))
+
+
 def clean_items(item_str):
     """Turn a stored list like "['CD4T_CENTER', 'Bcell_NEIGHBOR']" into "Bcell, CD4T".
 
-    Drops the _CENTER / _NEIGHBOR tags and sorts, so the same rule reads the same everywhere.
+    Sorted, so the same rule reads the same everywhere.
     """
-    items = ast.literal_eval(str(item_str))
-    names = [i.replace("_CENTER", "").replace("_NEIGHBOR", "") for i in items]
-    return ", ".join(sorted(names))
+    return ", ".join(sorted(base_items(item_str)))
 
 
 def check_rule_overlap(ant_list, con_list):
@@ -145,6 +194,5 @@ def check_rule_overlap(ant_list, con_list):
 
     Catches both 'Muscle -> Muscle' and rules that repeat a type on one side.
     """
-    base = [item.replace("_CENTER", "").replace("_NEIGHBOR", "")
-            for item in list(ant_list) + list(con_list)]
+    base = _strip(list(ant_list) + list(con_list))
     return len(base) != len(set(base))

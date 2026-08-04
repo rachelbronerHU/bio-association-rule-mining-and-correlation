@@ -163,7 +163,7 @@ def plot_rule_stage_heatmap(
         title += f" | Stages: {', '.join(map(str, stages))}"
     ax.set_title(title, fontsize=14, pad=15)
     ax.set_ylabel("" if draw_bars else "Cleaned Rule", fontsize=12)
-    ax.set_xlabel("Stage", fontsize=12)
+    ax.set_xlabel(score_col, fontsize=12)
     ax.tick_params(axis="both", which="major", labelsize=10,
                    top=True, labeltop=True, bottom=False, labelbottom=False)
     plt.tight_layout()
@@ -196,10 +196,15 @@ def plot_patient_fingerprint(
     cmap="YlOrRd",
     save=None,
     scope=None,
+    by="patient",
+    consistency=None,
 ):
     """Rules x patients heatmap: each cell = share of that patient's FOVs that have the rule.
 
-    Stage strips above the columns color every patient by stage (one strip per `strip_scores`).
+    With `by='fov'` the columns are FOVs and the values are log2 of lift, so the scale is
+    diverging around 0 - above 0 the cell types attract, below 0 they avoid.
+
+    Stage strips above the columns color every column by stage (one strip per `strip_scores`).
     `order='cluster'` puts patients with similar rules next to each other, so any grouping by
     stage shows up on its own in the strips; `order='stage'` sorts by stage instead.
     `cluster_rules=True` also groups similar rules together.
@@ -215,7 +220,9 @@ def plot_patient_fingerprint(
         if sc in df_fovs.columns:
             stage_by_score[sc] = df_fovs.drop_duplicates(patient_col).set_index(patient_col)[sc]
 
-    if order == "cluster":
+    if by == "fov":
+        patients = list(mat.columns)                    # already grouped by patient, keep it
+    elif order == "cluster":
         patients = list(_similarity_order(mat.T))       # each row = one patient's rule profile
     else:
         # Order patient columns by the primary score's stage, then id.
@@ -235,12 +242,14 @@ def plot_patient_fingerprint(
     strip_h, main_h = 0.16, max(6, len(mat) * 0.32)
     fig = plt.figure(figsize=(max(10, len(patients) * 0.18),
                               main_h + strip_h * n_strip + 0.5))
-    gs = fig.add_gridspec(n_strip + 1, 2, width_ratios=[45, 1],
+    widths = [45, 1] if consistency is None else [45, 7, 1]
+    gs = fig.add_gridspec(n_strip + 1, len(widths), width_ratios=widths,
                           height_ratios=[strip_h] * n_strip + [main_h],
                           hspace=0.10, wspace=0.015)
     strip_axes = [fig.add_subplot(gs[i, 0]) for i in range(n_strip)]
     main_ax = fig.add_subplot(gs[n_strip, 0])
-    cax = fig.add_subplot(gs[n_strip, 1])
+    ax_bar = fig.add_subplot(gs[n_strip, 1]) if consistency is not None else None
+    cax = fig.add_subplot(gs[n_strip, -1])
 
     for ax_s, (sc, series) in zip(strip_axes, stage_by_score.items()):
         colors = [_STAGE_PALETTE.get(series.get(p, "Unknown"), "#dddddd") for p in patients]
@@ -251,23 +260,49 @@ def plot_patient_fingerprint(
         ax_s.set_yticks([0.5])
         ax_s.set_yticklabels([sc.replace(" score", "")], fontsize=8)
 
-    sns.heatmap(mat, ax=main_ax, cmap=cmap, vmin=0, vmax=1, cbar_ax=cax,
-                cbar_kws={"label": "share of the patient's FOVs"})
-    how = ("grouped by how similar their rules are" if order == "cluster"
-           else f"ordered by {score_col}")
-    main_ax.set_xlabel(f"Patients (n={len(patients)}), {how}", fontsize=11)
+    if by == "fov":
+        lim = float(np.nanpercentile(np.abs(mat.to_numpy()), 98)) or 1.0
+        sns.heatmap(mat, ax=main_ax, cmap="RdBu_r", vmin=-lim, vmax=lim, cbar_ax=cax,
+                    cbar_kws={"label": "log2 of lift"})
+        main_ax.set_xlabel(f"FOVs (n={len(patients)}), grouped by patient", fontsize=11)
+    else:
+        sns.heatmap(mat, ax=main_ax, cmap=cmap, vmin=0, vmax=1, cbar_ax=cax,
+                    cbar_kws={"label": "share of the patient's FOVs"})
+        how = ("grouped by how similar their rules are" if order == "cluster"
+               else f"ordered by {score_col}")
+        main_ax.set_xlabel(f"Patients (n={len(patients)}), {how}", fontsize=11)
     main_ax.set_ylabel("Rule", fontsize=11)
     main_ax.set_xticks(np.arange(len(patients)) + 0.5)
     main_ax.set_xticklabels(patients, rotation=90, fontsize=6)
     main_ax.tick_params(axis="y", labelsize=9)
 
+    if by == "fov":                        # a line where one patient's FOVs end
+        owner = df_fovs.set_index("FOV")["PatientID"].reindex(patients).to_numpy()
+        for b in np.flatnonzero(owner[1:] != owner[:-1]) + 1:
+            main_ax.axvline(b, color="0.25", lw=0.7)
+
+    if ax_bar is not None:                 # how consistent each rule is within a patient
+        vals = consistency.reindex(mat.index).to_numpy(dtype=float)
+        y = np.arange(len(mat)) + 0.5
+        ax_bar.barh(y, np.nan_to_num(vals), height=0.8, color="#4477aa")
+        ax_bar.set_ylim(main_ax.get_ylim())
+        ax_bar.set_xlim(0, 1)
+        ax_bar.set_xticks([0, 1])
+        ax_bar.set_yticks([])
+        ax_bar.set_xlabel("Avg of %FOVs / Patient", fontsize=8)
+        ax_bar.tick_params(labelsize=8)
+        ax_bar.spines[["top", "right", "left"]].set_visible(False)
+
     stages_present = [s for s in (stage_order or list(_STAGE_PALETTE)) if s in _STAGE_PALETTE]
     handles = [Patch(color=_STAGE_PALETTE[s], label=s) for s in stages_present]
-    main_ax.legend(handles=handles, title="Stage", bbox_to_anchor=(1.05, 1.0),
-                   loc="upper left", fontsize=8, title_fontsize=9)
+    # Outside the whole figure, so the consistency bars cannot cover it.
+    fig.legend(handles=handles, title="Stage", loc="upper left",
+               bbox_to_anchor=(1.0, 0.98), bbox_transform=fig.transFigure,
+               fontsize=8, title_fontsize=9)
 
+    what = "FOV" if by == "fov" else "patient"
     (strip_axes[0] if n_strip else main_ax).set_title(
-        _titled("Which rules each patient has", scope), fontsize=13, pad=10)
+        _titled(f"Which rules each {what} has", scope), fontsize=13, pad=10)
     _finish(fig, save)          # no tight_layout: it would undo the gridspec alignment
 
 
@@ -507,10 +542,10 @@ _OTHER_COLOR = (0.5, 0.5, 0.5)
 
 
 def save_figure(fig, name, dpi=200, figure_dir=None):
-    """Write a figure next to the LaTeX summary, and return the path(s).
+    """Write a figure next to the LaTeX summary, and return the path.
 
-    Given a bare `name`, writes both a PDF (vector, what \\includegraphics uses) and a
-    PNG (for a quick look). Give an explicit extension to write only that one.
+    PDF only - vector, and the one thing \\includegraphics needs. Give an explicit
+    extension to write that format instead.
     """
     if not name:
         return None
@@ -518,13 +553,10 @@ def save_figure(fig, name, dpi=200, figure_dir=None):
     stem, ext = os.path.splitext(name)
     os.makedirs(directory, exist_ok=True)
 
-    paths = []
-    for suffix in ([ext] if ext else [".pdf", ".png"]):
-        path = os.path.join(directory, stem + suffix)
-        fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor=fig.get_facecolor())
-        print(f"saved {path}")
-        paths.append(path)
-    return paths[0] if len(paths) == 1 else paths
+    path = os.path.join(directory, stem + (ext or ".pdf"))
+    fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor=fig.get_facecolor())
+    print(f"saved {path}")
+    return path
 
 
 def _finish(fig, save=None, dpi=200):
@@ -573,344 +605,9 @@ def _titled(base, scope):
     return f"{base}  —  {scope}" if scope else base
 
 
-def plot_pca_scree(explained_variance, subtitle=None, save=None, scope=None):
-    """Bars = how much each component explains; red line = running total."""
-    ev = np.asarray(explained_variance, dtype=float)
-    names = [f"PC{i + 1}" for i in range(len(ev))]
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar(names, ev, color="skyblue", edgecolor="black")
-    ax.plot(names, np.cumsum(ev), color="red", marker="o", linestyle="-",
-            label="running total")
-    for i, v in enumerate(ev):
-        ax.annotate(f"{v:.1f}%", (i, v), ha="center", va="bottom",
-                    fontsize=8, xytext=(0, 2), textcoords="offset points")
-
-    fig.suptitle(_titled("PCA explained variance", scope), fontsize=14)
-    if subtitle:
-        ax.set_title(subtitle, fontsize=9, color="0.35")
-    ax.set_ylabel("explained variance (%)", fontsize=11)
-    ax.set_xlabel("component", fontsize=11)
-    ax.legend(frameon=False)
-    ax.grid(axis="y", linestyle="--", alpha=0.7)
-    ax.set_axisbelow(True)
-    ax.spines[["top", "right"]].set_visible(False)
-    plt.tight_layout()
-    _finish(fig, save)
-
-
-_PC_BAR_COLORS = ["#4477aa", "#ee9944", "#88ccaa"]
-
-
-def plot_abundance_correlation_bars(rho, n_fovs, top_n=8, subtitle=None, save=None,
-                                    scope=None):
-    """How closely each cell type's share of the cells follows each component.
-
-    `rho` : cell types x components, Spearman rho. `n_fovs` sets the shaded band -
-    the range where a value is too small to mean anything at this many FOVs.
-    Only the `top_n` cell types with the largest correlation are drawn.
-    """
-    if rho.empty:
-        print("No data to plot.")
-        return
-
-    pcs = list(rho.columns)
-    top = (rho.reindex(rho.abs().max(axis=1).sort_values(ascending=False).index)
-              .head(top_n).iloc[::-1])                  # biggest ends up at the top
-    band = 1.96 / np.sqrt(max(n_fovs - 1, 1))            # |rho| that reaches p < 0.05
-
-    y = np.arange(len(top))
-    height = 0.8 / len(pcs)
-    fig, ax = plt.subplots(figsize=(7, max(3.2, len(top) * 0.42)))
-
-    ax.axvspan(-band, band, color="0.88", zorder=0)
-    for i, pc in enumerate(pcs):
-        offset = (i - (len(pcs) - 1) / 2) * height
-        ax.barh(y + offset, top[pc].to_numpy(dtype=float), height=height,
-                color=_PC_BAR_COLORS[i % len(_PC_BAR_COLORS)], label=pc,
-                edgecolor="white", linewidth=0.5, zorder=3)
-
-    ax.axvline(0, color="0.2", lw=1.0, zorder=4)
-    ax.set_yticks(y)
-    ax.set_yticklabels(top.index.astype(str), fontsize=9)
-    ax.set_xlim(-1, 1)
-    ax.set_xlabel("how closely they move together", fontsize=10)
-    ax.set_ylabel("cell type", fontsize=10)
-    fig.suptitle(_titled("Does each component follow how common a cell type is?", scope)
-                 + f"   (grey: too small to matter at {n_fovs} FOVs)", fontsize=11)
-    if subtitle:
-        ax.set_title(subtitle, fontsize=7.5, color="0.35")
-    ax.legend(fontsize=9, frameon=False, loc="lower right")
-    ax.grid(axis="x", color="0.92", lw=0.8)
-    ax.set_axisbelow(True)
-    ax.spines[["top", "right"]].set_visible(False)
-    plt.tight_layout()
-    _finish(fig, save)
-
-
-def plot_patient_spread(spread, save=None):
-    """Whether one patient's FOVs sit together, against how many FOVs they have.
-
-    One dot per patient. x = the mean distance between that patient's own FOVs,
-    divided by the mean distance between any two FOVs in the same plane. Left of 1.0
-    means that patient's FOVs sit closer together than FOVs in general.
-    """
-    if spread.empty:
-        print("No data to plot.")
-        return
-
-    x = spread["spread"].to_numpy(dtype=float)
-    k = spread["n_FOV"].to_numpy(dtype=float)
-    y = k + np.random.default_rng(0).uniform(-0.2, 0.2, len(k))   # jitter, so dots don't stack
-
-    fig, ax = plt.subplots(figsize=(7.4, 3.6))
-    ax.axvline(1.0, color="0.45", ls="--", lw=1.1, zorder=1)
-    ax.scatter(x, y, s=38, color="#4477aa", alpha=0.85,
-               edgecolor="white", linewidth=0.6, zorder=3)
-
-    below = int((x < 1).sum())
-    ax.set_xlabel("how far apart one patient's FOVs are, next to any two FOVs", fontsize=10)
-    ax.set_ylabel("FOVs the patient has", fontsize=10)
-    ax.set_title(f"Do a patient's FOVs sit together?   {below} of {len(x)} patients "
-                 f"are closer together than average", fontsize=11)
-    ax.set_yticks(sorted({int(v) for v in k}))
-    ax.annotate("same as any two FOVs", xy=(1.0, ax.get_ylim()[0]), xytext=(5, 6),
-                textcoords="offset points", fontsize=8, color="0.45")
-    ax.grid(color="0.92", lw=0.8)
-    ax.set_axisbelow(True)
-    ax.spines[["top", "right"]].set_visible(False)
-    plt.tight_layout()
-    _finish(fig, save)
-
-
-# ---------------------------------------------------------------------------
-# Where each FOV sits (static, for the write-up)
-# ---------------------------------------------------------------------------
-
-def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
-                     label_fovs=None, box_fovs=None, x="PC1", y="PC2", fov_col="FOV",
-                     max_legend=12, save=None, scope=None):
-    """One dot per FOV, colored by `color_by`. The static version for the write-up.
-
-    `label_fovs` : the FOVs to name on the plot — either a list, or the
-        {FOV: description} dict that `get_representative_fovs_for_pc` returns.
-        Names are pushed apart with leader lines so they never overlap.
-    `max_legend` : with more colors than this (e.g. one per patient) the legend
-        would be unreadable, so it is replaced by a count in the title.
-
-    A numeric `color_by` column (e.g. a cell type's share of the FOV) is drawn
-    as a colorbar instead of a legend.
-    """
-    if df_pca.empty:
-        print("No data to plot.")
-        return
-
-    ix = [int(x[2:]) - 1, int(y[2:]) - 1]
-    ev = np.asarray(explained_variance, dtype=float)
-    numeric = pd.api.types.is_numeric_dtype(df_pca[color_by])
-
-    fig, ax = plt.subplots(figsize=(9, 7))
-    ordered = []
-    if numeric:
-        v = df_pca[color_by].to_numpy(dtype=float)
-        sc = ax.scatter(df_pca[x], df_pca[y], s=48, c=v, cmap="viridis",
-                        alpha=0.9, edgecolor="DarkSlateGrey", linewidth=0.5)
-        fig.colorbar(sc, ax=ax, label=color_by)
-    else:
-        vals = df_pca[color_by].fillna("Unknown").astype(str)
-        colors, ordered = _category_colors(vals)
-        for value in ordered:
-            m = (vals == value).to_numpy()
-            ax.scatter(df_pca.loc[m, x], df_pca.loc[m, y], s=48, label=str(value),
-                       color=colors[value], alpha=0.85,
-                       edgecolor="DarkSlateGrey", linewidth=0.5)
-
-    ax.axhline(0, color="0.85", lw=0.8, zorder=0)
-    ax.axvline(0, color="0.85", lw=0.8, zorder=0)
-
-    # One square around the boxed FOVs, so the maps beside the plot are easy to find.
-    boxed = df_pca[df_pca[fov_col].isin(list(box_fovs or []))]
-    if not boxed.empty:
-        from matplotlib.patches import Rectangle
-        pad = 0.018 * max(df_pca[x].max() - df_pca[x].min(),
-                          df_pca[y].max() - df_pca[y].min())
-        x0, x1 = boxed[x].min() - pad, boxed[x].max() + pad
-        y0, y1 = boxed[y].min() - pad, boxed[y].max() + pad
-        # Blue, and filled: the stages are green/orange/red and every other marker is
-        # outlined in black, so this is the only thing on the plot in this colour.
-        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor="#4477aa",
-                               alpha=0.18, zorder=1))
-        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False,
-                               edgecolor="#1f4e79", linewidth=2.2, zorder=6))
-
-
-    if label_fovs is not None:
-        names = list(label_fovs.keys()) if isinstance(label_fovs, dict) else list(label_fovs)
-        texts = []
-        for fov in names:
-            row = df_pca[df_pca[fov_col] == fov]
-            if row.empty:
-                continue
-            row = row.iloc[0]
-            ax.scatter([row[x]], [row[y]], s=110, facecolors="none",
-                       edgecolor="black", linewidth=1.3, zorder=5)
-            texts.append(ax.text(row[x], row[y], str(fov), fontsize=8, zorder=6))
-        if texts:
-            try:
-                from adjustText import adjust_text
-                adjust_text(texts, ax=ax,
-                            arrowprops=dict(arrowstyle="-", color="0.45", lw=0.7),
-                            expand=(1.6, 1.9))
-            except ImportError:
-                for t in texts:
-                    t.set_ha("left")
-
-    title = _titled(f"PCA colored by {color_by}", scope)
-    if len(ordered) > max_legend:
-        title += f"  ({len(ordered)} values, too many to list)"
-    else:
-        ax.legend(title=color_by, fontsize=9, title_fontsize=10,
-                  bbox_to_anchor=(1.02, 1), loc="upper left", frameon=True)
-    fig.suptitle(title, fontsize=13)
-    if subtitle:
-        ax.set_title(subtitle, fontsize=9, color="0.35")
-
-    ax.set_xlabel(f"{x} ({ev[ix[0]]:.1f}%)", fontsize=11)
-    ax.set_ylabel(f"{y} ({ev[ix[1]]:.1f}%)", fontsize=11)
-    ax.grid(color="0.93", lw=0.8)
-    ax.set_axisbelow(True)
-    ax.spines[["top", "right"]].set_visible(False)
-    plt.tight_layout()
-    _finish(fig, save)
-
-
-def plot_pca_scatter_interactive(df_pca, explained_variance, color_by, subtitle=None,
-                                 annotate_pc1=None, annotate_pc2=None,
-                                 fov_col="FOV", show=True):
-    """The same picture, interactive — hover a dot for its FOV. Screen only.
-
-    Cannot be saved as an image (needs kaleido); use `plot_pca_scatter` for the
-    write-up. `annotate_pc1` / `annotate_pc2` are the {FOV: description} dicts
-    from `get_representative_fovs_for_pc`; their FOVs get an arrow and a label,
-    PC1's placed above the dot and PC2's below so the two sets never collide.
-    """
-    import plotly.express as px
-
-    if df_pca.empty:
-        print("No data to plot.")
-        return None
-
-    ev = np.asarray(explained_variance, dtype=float)
-    color_map, order = None, None
-    if set(df_pca[color_by].dropna().astype(str)) <= set(PCA_STAGE_COLORS):
-        color_map = PCA_STAGE_COLORS
-        order = {color_by: PCA_STAGE_ORDER}
-
-    fig = px.scatter(
-        df_pca, x="PC1", y="PC2", color=color_by,
-        color_discrete_map=color_map, category_orders=order,
-        hover_name=fov_col,
-        title=f"PCA colored by {color_by}",
-        subtitle=subtitle,
-        labels={"PC1": f"PC1 ({ev[0]:.1f}%)", "PC2": f"PC2 ({ev[1]:.1f}%)"},
-        template="plotly_white", width=900, height=600,
-    )
-    fig.update_traces(marker=dict(size=10, opacity=0.8,
-                                  line=dict(width=1, color="DarkSlateGrey")))
-
-    pc1 = dict(annotate_pc1 or {})
-    pc2 = dict(annotate_pc2 or {})
-    named = sorted(set(pc1) | set(pc2),
-                   key=lambda f: df_pca.loc[df_pca[fov_col] == f, "PC1"].iloc[0])
-    for i, fov in enumerate(named):
-        row = df_pca[df_pca[fov_col] == fov].iloc[0]
-        in1, in2 = fov in pc1, fov in pc2
-        if in1 and not in2:                       # PC1 labels go above
-            ay, ax_ = -50 - (i % 3) * 20, (30 if row["PC1"] > 0 else -30)
-        elif in2 and not in1:                     # PC2 labels go below
-            ay, ax_ = 50 + (i % 3) * 20, (30 if row["PC1"] > 0 else -30)
-        else:                                     # extreme on both: point outwards
-            ay = -50 if row["PC2"] > 0 else 50
-            ax_ = 50 if row["PC1"] > 0 else -50
-        fig.add_annotation(
-            x=row["PC1"], y=row["PC2"], text=str(fov), showarrow=True,
-            arrowhead=2, arrowsize=1, arrowwidth=2, arrowcolor="#636363",
-            ax=ax_, ay=ay, font=dict(size=10, color="black"),
-            bgcolor="rgba(255, 255, 255, 0.8)", bordercolor="#c7c7c7",
-            borderwidth=1, borderpad=4)
-
-    if show:
-        fig.show()
-    return fig
-
-
 # ---------------------------------------------------------------------------
 # Which rules pull the FOVs apart
 # ---------------------------------------------------------------------------
-
-def plot_pca_loadings(weights, feature_names, component_idx=0, subtitle=None,
-                      top_n=10, save=None, scope=None):
-    """The rules pulling hardest on one component, both ways.
-
-    Green = rules that push a FOV to the positive side, salmon = to the negative
-    side. Reading both ends together tells you what that component means.
-    """
-    series = pd.Series(np.asarray(weights, dtype=float), index=list(feature_names))
-    top = pd.concat([series.nlargest(top_n), series.nsmallest(top_n)]).sort_values()
-    top = top[~top.index.duplicated()]             # a short list can overlap
-
-    colors = ["salmon" if v < 0 else "mediumseagreen" for v in top.to_numpy()]
-    # Near-square, so two of these sit side by side in the write-up and stay readable.
-    fig, ax = plt.subplots(figsize=(7, max(4, len(top) * 0.42)))
-    ax.barh(top.index.astype(str), top.to_numpy(), color=colors, edgecolor="black")
-
-    fig.suptitle(_titled(f"Top rules for PC{component_idx + 1}", scope), fontsize=14)
-    if subtitle:
-        ax.set_title(subtitle, fontsize=9, color="0.35")
-    ax.set_xlabel(f"weight in PC{component_idx + 1}", fontsize=11)
-    ax.set_ylabel("rule", fontsize=11)
-    ax.axvline(0, color="black", linewidth=1.2)
-    ax.grid(axis="x", linestyle="--", alpha=0.7)
-    ax.set_axisbelow(True)
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.tick_params(axis="y", labelsize=9)
-    plt.tight_layout()
-    _finish(fig, save)
-
-
-def plot_pc_abundance_correlation(corr, pvals=None, subtitle=None, save=None):
-    """How much of each component is just how common a cell type is.
-
-    `corr` : cell types x PCs of Spearman rho, `pvals` the matching FDR-adjusted
-    p-values. A cell reading near +1 or -1 means that component mostly follows
-    that cell type's share of the FOV rather than the spatial rules.
-    A star marks rho with an adjusted p below 0.05.
-    """
-    if corr.empty:
-        print("No data to plot.")
-        return
-
-    annot = corr.round(2).astype(str)
-    if pvals is not None:
-        stars = pvals.reindex_like(corr) < 0.05
-        annot = annot.where(~stars, annot + "*")
-
-    height = max(3.0, 0.42 * len(corr) + 1.4)
-    fig, ax = plt.subplots(figsize=(1.6 * len(corr.columns) + 3.5, height))
-    sns.heatmap(corr, annot=annot, fmt="", cmap="coolwarm", center=0,
-                vmin=-1, vmax=1, ax=ax, linewidths=0.5, linecolor="white",
-                cbar_kws={"label": "Spearman rho"})
-
-    fig.suptitle("PC scores vs cell-type abundance", fontsize=14)
-    if subtitle:
-        ax.set_title(subtitle, fontsize=9, color="0.35")
-    ax.set_xlabel("component", fontsize=11)
-    ax.set_ylabel("cell type", fontsize=11)
-    ax.tick_params(axis="y", labelsize=9, rotation=0)
-    ax.tick_params(axis="x", labelsize=10)
-    plt.tight_layout()
-    _finish(fig, save)
-
 
 # ---------------------------------------------------------------------------
 # The FOVs themselves

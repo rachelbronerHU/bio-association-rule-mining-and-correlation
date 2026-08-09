@@ -11,8 +11,8 @@ def _parse_list_env(env_var: str, default: list) -> list:
 
 
 # Debugging Configurations
-DEBUG = True # Set to True for quick test
-DEBUG_FOVS_PER_GROUP = 20
+DEBUG = False # Set to True for quick test
+DEBUG_FOVS_PER_GROUP = 10
 
 # How much a neighbour counts, and how cells are grouped. Everything else is identical.
 # Override per-run via: WEIGHTING=binary METHOD=KNN_R python run_association_mining.py

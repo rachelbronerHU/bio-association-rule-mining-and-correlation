@@ -79,7 +79,7 @@ def metrics(support, ant_support, con_support):
     ant_support = np.asarray(ant_support, dtype=float)
     con_support = np.asarray(con_support, dtype=float)
 
-    # Zero denominators become 1 before dividing; those answers are discarded below.
+    # Denominators of 0 are swapped to 1 to prevent crashes; the resulting 0.0 dummy metrics are later eliminated by the judge() function.
     has_ant = ant_support > 0
     confidence = np.where(has_ant, support / np.where(has_ant, ant_support, 1.0), 0.0)
 
@@ -96,6 +96,7 @@ def metrics(support, ant_support, con_support):
     leverage = np.where(has_ant, leverage, 0.0)
     conviction = np.where(has_ant, conviction, np.inf)
 
+    # If passed a single number instead of a list (0-D), unpack the NumPy result back into a plain Python float.
     if support.ndim == 0:
         return float(confidence), float(lift), float(leverage), float(conviction)
     return confidence, lift, leverage, conviction

@@ -60,7 +60,7 @@ SETTINGS = Settings(
 
     # Counted in weight, so this is exactly 10 patches under BINARY and somewhat
     # more than 10 real patches under WEIGHTED, a far neighbour counting as less.
-    min_patches=10,
+    min_patches=15,
     strong_confidence=0.9,      # above this confidence a lower support is allowed
     min_support_when_strong=0.005,
 
@@ -70,8 +70,8 @@ SETTINGS = Settings(
 
     include_avoidance_rules=True,   # search for cell types that keep apart, as well as together
     avoidance_max_lift=0.8,
-    avoidance_max_leverage=-0.0025,
-    avoidance_min_expected_meetings=10,  # expect at least this many meetings before "they don't meet" counts
+    avoidance_max_leverage=None,
+    avoidance_min_expected_meetings=30,  # expect at least this many meetings before "they don't meet" counts
 
     min_label_count=5,          # ignore rules naming a cell type this rare in the sample
 )

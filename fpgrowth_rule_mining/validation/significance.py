@@ -32,7 +32,7 @@ def seed_for(base_seed, sample_id):
     return base_seed + zlib.crc32(str(sample_id).encode())
 
 
-def p_values_for(rules, patches, labels, settings, n_shuffles, random_seed=None, labels_kept_fixed=()):
+def p_values_for(rules, patches, labels, settings, n_shuffles, random_seed, labels_kept_fixed, sample_id=""):
     """The raw p-value for each rule, in order. Nothing is corrected here (no FDR)."""
 
     if rules.empty or n_shuffles <= 0:
@@ -96,7 +96,8 @@ def p_values_for(rules, patches, labels, settings, n_shuffles, random_seed=None,
     rng = np.random.default_rng(random_seed)
     layout = _rule_columns(rules, item_index)
 
-    logger.info(f"Shuffling labels {n_shuffles} times against {len(rules)} rules...")
+    prefix = f"[{sample_id}] " if sample_id else ""
+    logger.info(f"{prefix}Shuffling labels {n_shuffles} times against {len(rules)} rules...")
     started = time.time()
 
     # --- 5. THE SHUFFLE TEST ---
@@ -134,9 +135,10 @@ def p_values_for(rules, patches, labels, settings, n_shuffles, random_seed=None,
         survived += survives_shuffle(layout, transactions, settings)
 
         if i == 0 or (i + 1) % 100 == 0 or i == n_shuffles - 1:
-            logger.debug(f"  shuffle {i + 1}/{n_shuffles}")
+            logger.debug(f"{prefix}  shuffle {i + 1}/{n_shuffles}")
 
-    logger.info(f"Shuffling took {time.time() - started:.2f}s")
+    elapsed = time.time() - started
+    logger.info(f"{prefix}Shuffling took {int(elapsed // 60)}m {elapsed % 60:.1f}s" if elapsed >= 60 else f"{prefix}Shuffling took {elapsed:.2f}s")
 
     # --- 6. SCORE P-VALUES ---
     # (times survived by luck + 1) / (total shuffles + 1)

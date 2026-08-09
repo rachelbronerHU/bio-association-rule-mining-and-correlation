@@ -18,7 +18,7 @@ from .validation.significance import p_values_for
 from .transactions import Patch, build_transactions, find_patches, measure_patches
 
 
-def mine_rules(transactions, settings: Settings) -> pd.DataFrame:
+def mine_rules(transactions, settings: Settings, sample_id: str = "") -> pd.DataFrame:
     """Transactions in, rules out: both searches, one frame."""
     if not transactions:
         return empty_rules()
@@ -33,11 +33,12 @@ def mine_rules(transactions, settings: Settings) -> pd.DataFrame:
 
     if settings.include_avoidance_rules:
         start_avoidance = time.time()
-        found.append(mine_avoidance(matrix, item_index, settings))
+        found.append(mine_avoidance(matrix, item_index, settings, sample_id=sample_id))
         elapsed_avo = time.time() - start_avoidance
         str_avoidance_time = f"Avoidance search took {int(elapsed_avo // 60)}m {elapsed_avo % 60:.1f}s" if elapsed_avo >= 60 else f"Avoidance search took {elapsed_avo:.2f}s"
 
-    logger.info(f"{str_attraction_time} {"|" + str_avoidance_time if str_avoidance_time else ''}")
+    prefix = f"[{sample_id}] " if sample_id else ""
+    logger.info(f"{prefix}{str_attraction_time} {'| ' + str_avoidance_time if str_avoidance_time else ''}")
 
     found = [frame for frame in found if not frame.empty]
     return pd.concat(found, ignore_index=True) if found else empty_rules()
@@ -53,7 +54,7 @@ class Result:
     labels: np.ndarray = field(repr=False)
     settings: Settings = field(repr=False)
 
-    def add_p_values(self, n_shuffles, rules=None, random_seed=None, labels_kept_fixed=()):
+    def add_p_values(self, n_shuffles, rules=None, random_seed=None, labels_kept_fixed=(), sample_id=""):
         """
         Test rules against shuffled labels and attach a raw p_value.
 
@@ -62,12 +63,12 @@ class Result:
         rules = (self.rules if rules is None else rules).copy()
         rules["p_value"] = p_values_for(
             rules, self.patches, self.labels, self.settings,
-            n_shuffles, random_seed, labels_kept_fixed,
+            n_shuffles, random_seed, labels_kept_fixed, sample_id,
         )
         return rules
 
 
-def mine(coords, labels, settings: Settings) -> Result:
+def mine(coords, labels, settings: Settings, sample_id: str = "") -> Result:
     """
     Mine spatial association rules.
 
@@ -87,7 +88,7 @@ def mine(coords, labels, settings: Settings) -> Result:
     stats["patches_found"] = len(patches)
 
     # Rare labels go first: the shuffle test after them is what the run pays for.
-    rules = drop_rare_labels(mine_rules(transactions, settings), labels, settings)
+    rules = drop_rare_labels(mine_rules(transactions, settings, sample_id=sample_id), labels, settings)
     # Lets a later step tell "the cell type was not here" from "tested and failed".
     stats["labels_with_enough_cells"] = labels_with_enough_cells(labels, settings)
 

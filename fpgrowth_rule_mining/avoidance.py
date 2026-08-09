@@ -49,7 +49,7 @@ def items_worth_combining(matrix, item_index, settings, n_transactions):
     if matrix.size == 0:
         return [], {}
 
-    bar = min(settings.min_patches, settings.avoidance_min_expected_meetings) / n_transactions
+    bar = max(settings.min_patches, settings.avoidance_min_expected_meetings) / n_transactions
     supports = matrix.sum(axis=0) / n_transactions
     kept = sorted(item for item, column in item_index.items() if supports[column] >= bar)
     return kept, {item: float(supports[item_index[item]]) for item in kept}
@@ -106,7 +106,7 @@ def subset_supports(items, single_supports, matrix, item_index, max_items):
     return supports
 
 
-def mine_avoidance(matrix, item_index, settings):
+def mine_avoidance(matrix, item_index, settings, sample_id: str = ""):
     """Every combination worth trying, split into rules, keeping what keeps apart."""
     n = matrix.shape[0]
     if n == 0:
@@ -132,7 +132,8 @@ def mine_avoidance(matrix, item_index, settings):
 
     splits = []
 
-    logger.info(f"Mine_avoidance - about to test {planned} itemsets!")
+    prefix = f"[{sample_id}] " if sample_id else ""
+    logger.info(f"{prefix}Mine_avoidance - about to test {planned} itemsets!")
 
     for itemset in candidate_sets(items, max_items):
         support = supports[itemset]
@@ -143,6 +144,6 @@ def mine_avoidance(matrix, item_index, settings):
             splits.append((antecedent, consequent, support, ant_support, con_support))
 
     rules = rules_from(splits, settings, n, avoids, AVOIDS)
-    logger.debug(f"Avoidance: {len(items)} of {len(item_index)} items worth combining, "
+    logger.debug(f"{prefix}Avoidance: {len(items)} of {len(item_index)} items worth combining, "
                  f"{len(supports)} combinations measured, {len(rules)} rules")
     return rules

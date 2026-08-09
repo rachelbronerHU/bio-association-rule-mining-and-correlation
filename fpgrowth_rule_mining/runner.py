@@ -172,11 +172,11 @@ def _run_one(task):
     """One sample. Returns (result, None) or (None, (sample_id, traceback))."""
     sample_id, coords, labels, settings, n_shuffles, seed, kept_fixed, min_lift_gain = task
     try:
-        result = mine(coords, labels, settings)
+        result = mine(coords, labels, settings, sample_id=sample_id)
         # Everything gets tested: a rule removed before testing later reads as one
         # that was tested and failed.
         tested = result.add_p_values(
-            n_shuffles=n_shuffles, random_seed=seed, labels_kept_fixed=kept_fixed,
+            n_shuffles=n_shuffles, random_seed=seed, labels_kept_fixed=kept_fixed, sample_id=sample_id,
         )
         kept = filter_rules(tested, min_lift_gain=min_lift_gain)
 

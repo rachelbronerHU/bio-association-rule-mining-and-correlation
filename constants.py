@@ -1,130 +1,85 @@
 import os as _os
 
+from fpgrowth_rule_mining import Method, Settings, Weighting
+
+
 def _parse_list_env(env_var: str, default: list) -> list:
     raw = _os.environ.get(env_var)
     if raw is None:
         return list(default)
     return [item.strip() for item in raw.split(",") if item.strip()]
 
+
 # Debugging Configurations
-DEBUG = False # Set to True for quick test
-DEBUG_FOVS_PER_GROUP = 10
-SAVE_RAW_RULES = True
+DEBUG = True # Set to True for quick test
+DEBUG_FOVS_PER_GROUP = 20
 
-# Algorithm Selection: "fpgrowth" | "weighted_fpgrowth"
-# Change _DEFAULT_ALGO to switch default. Override per-run via: ALGO=weighted_fpgrowth python ...
-_DEFAULT_ALGO = "weighted_fpgrowth"
-ALGO = _os.environ.get("ALGO", _DEFAULT_ALGO)
+# How much a neighbour counts, and how cells are grouped. Everything else is identical.
+# Override per-run via: WEIGHTING=binary METHOD=KNN_R python run_association_mining.py
+WEIGHTING = Weighting(_os.environ.get("WEIGHTING", Weighting.WEIGHTED.value))
+METHOD = Method(_os.environ.get("METHOD", Method.CN.value))
 
-# Functional Markers Expansion
-_DEFAULT_USE_FUNCTIONAL_MARKERS = True
-USE_FUNCTIONAL_MARKERS = _os.environ.get("USE_FUNCTIONAL_MARKERS", str(_DEFAULT_USE_FUNCTIONAL_MARKERS)).lower() in ("true", "1", "yes")
+MAX_ITEMS_PER_RULE = int(_os.environ.get("MAX_ITEMS_PER_RULE", 4))
+WORKERS = None if DEBUG else _os.cpu_count()   # None runs in this process
 
-# Permutation Label Exclusion
-_DEFAULT_USE_PERMUTATION_EXCLUDE = True
-USE_PERMUTATION_EXCLUDE = _os.environ.get("USE_PERMUTATION_EXCLUDE", str(_DEFAULT_USE_PERMUTATION_EXCLUDE)).lower() in ("true", "1", "yes")
-_DEFAULT_PERMUTATION_EXCLUDE_CELL_TYPES = ["Epithelial", "Muscle"]
-PERMUTATION_EXCLUDE_CELL_TYPES = _parse_list_env("PERMUTATION_EXCLUDE_CELL_TYPES", _DEFAULT_PERMUTATION_EXCLUDE_CELL_TYPES)
-
-_DEFAULT_MAX_RULE_LENGTH = 2
-MAX_RULE_LENGTH = int(_os.environ.get("MAX_RULE_LENGTH", _DEFAULT_MAX_RULE_LENGTH))
-
-CELLTYPE_MARKER_THRESHOLDS = {
-    'Epithelial': {'Ki67': 2.5, 'HLADRDPDQ': 1.75},
-    'CD8T': {'Ki67': 2.5, 'CD103': 2.0, 'CD69': 2.0, 'GZMB': 2.5},
-    'CD4T': {'Ki67': 1.0, 'CD103': 1.0, 'CD69': 2.0, 'GZMB': 0.5},
-    'Neutrophil': {'CD103': 2.75},
-    'Neutrophil_CD15': {'CD103': 2.75}
-}
+# Cell types whose labels stay put while shuffling, so the tissue keeps its structure.
+# An exact name matches that label only. "Epithelial*" matches anything starting with it.
+LABELS_KEPT_FIXED = tuple(_parse_list_env("LABELS_KEPT_FIXED", ["Epithelial"]))
 
 # Path Configuration
 DATA_DIR = 'data/'
 MIBI_GUT_DIR_PATH = DATA_DIR + 'MIBIGutCsv/'
 
 RESULTS_BASE_DIR = 'results/'
-if DEBUG:
-    RESULTS_DIR = RESULTS_BASE_DIR + 'debug_run/'
-else:
-    RESULTS_DIR = RESULTS_BASE_DIR + 'full_run/'
+RESULTS_DIR = RESULTS_BASE_DIR + ('debug_run/' if DEBUG else 'full_run/')
 
-markers_str = "with_markers" if USE_FUNCTIONAL_MARKERS else "no_markers"
-ex_per_str = "with_ex_per" if USE_PERMUTATION_EXCLUDE else "no_ex_per"
-run_name = f"{ALGO}_{MAX_RULE_LENGTH}_items_{markers_str}_{ex_per_str}"
+# The method is in the name so a CN run and a KNN_R run do not overwrite each other
+if LABELS_KEPT_FIXED and len(LABELS_KEPT_FIXED) > 0:
+    run_name = f"{WEIGHTING.value}_{METHOD.value}_{MAX_ITEMS_PER_RULE}_items_fixed_{'-'.join(LABELS_KEPT_FIXED)}"
+else:
+    run_name = f"{WEIGHTING.value}_{METHOD.value}_{MAX_ITEMS_PER_RULE}_items"
 
 RESULTS_ALGO_DIR = RESULTS_DIR + run_name + '/'
 RESULTS_DATA_DIR = RESULTS_ALGO_DIR + 'data/'
 RESULTS_PLOTS_DIR = RESULTS_ALGO_DIR + 'plots/'
 
-TRANSACTION_DATA_DIR = RESULTS_DATA_DIR + 'transaction_data/'
-RARE_FILTERING_STATS_DIR = RESULTS_DATA_DIR + 'rare_filtering_stats/'
-RESULT_EXPLORATION_DIR = 'result_exploration/'
-CONSENSUS_RESULTS_EXPLORATION_DIR = RESULTS_DATA_DIR + '/consensus_tables/'
 
-RESULTS_ML_DIR = RESULTS_DATA_DIR + 'ml_refined_robust_benchmarks/'
-RESULTS_ML_DATA_DIR = RESULTS_ML_DIR + 'data/'
-RESULTS_ML_DATA_DIR_NO_SELF = RESULTS_ML_DIR + 'data_no_self/' # New No-Self Directory
-RESULTS_ML_PLOTS_DIR = RESULTS_ML_DIR + 'plots/'
+# --- Mining ---
+# One set of numbers for both weightings. Only `weighting` changes the maths.
+SETTINGS = Settings(
+    weighting=WEIGHTING,
+    method=METHOD,
+    radius=25.0,
+    min_support=0.01,
+    min_lift=1.2,
+    max_items_per_rule=MAX_ITEMS_PER_RULE,
 
-RESULTS_SIMPLE_STATS_DIR = RESULTS_DATA_DIR + 'simple_stats_benchmarks/'
-RESULTS_SIMPLE_STATS_DATA_DIR = RESULTS_SIMPLE_STATS_DIR + 'data/'
-RESULTS_SIMPLE_STATS_DATA_DIR_NO_SELF = RESULTS_SIMPLE_STATS_DIR + 'data_no_self/' # New No-Self Directory
-RESULTS_SIMPLE_STATS_PLOTS_DIR = RESULTS_SIMPLE_STATS_DIR + 'plots/'
+    bandwidth=15.0,             # at this distance a neighbour counts ~0.6. Omit to use the radius
+    min_cells_per_patch=2,
+    max_one_type_share=0.9,     # a patch this dominated by one type says nothing
 
-RESULTS_CLINICAL_CORRELATION_PLOTS_DIR = RESULTS_PLOTS_DIR + 'clinical_correlation_report/'
+    # Counted in weight, so this is exactly 10 patches under BINARY and somewhat
+    # more than 10 real patches under WEIGHTED, a far neighbour counting as less.
+    min_patches=10,
+    strong_confidence=0.9,      # above this confidence a lower support is allowed
+    min_support_when_strong=0.005,
 
-# Param Configuration
-MIN_P_VALUE = 0.05
+    min_confidence=0.3,
+    min_leverage=0.0005,
+    min_conviction=1.3,
 
-# --- Algorithm-specific Configuration ---
-# Switch ALGO above to change everything below automatically.
+    include_avoidance_rules=True,   # search for cell types that keep apart, as well as together
+    avoidance_max_lift=0.8,
+    avoidance_max_leverage=-0.0025,
+    avoidance_min_expected_meetings=10,  # expect at least this many meetings before "they don't meet" counts
 
-if ALGO == "weighted_fpgrowth":
-    METHODS = ["CN"]  # "KNN_R" removed. BAG has no center cell — not supported by weighted_fpgrowth
-    CONFIG = {
-        "RADIUS": 25.0,
-        "K_NEIGHBORS": 30,
-        "BANDWIDTH": 15.0,          # Gaussian decay (µm). At d=BANDWIDTH weight ≈ 0.6. Defaults to RADIUS if absent.
-        "MIN_SUPPORT": 0.01,       # Lower than binary: weighted support uses min(item weights), harder to achieve
-        "MIN_ABS_SUPPORT":10,      # Rule must hold in at least this many transactions (absolute floor)
-        "MIN_MARGINAL_SUPPORT_FOR_NEGATIVE_RULES": 0.1, # Negative rules must meet this fraction of total transactions to be considered (prevents very rare negatives from dominating rescue)
-        # Positive-rule rescue: allow lower support only when confidence is high.
-        "HIGH_CONFIDENCE_THRESHOLD": 0.9,
-        "HIGH_CONF_MIN_SUPPORT": 0.005,
-        "MIN_CONFIDENCE": 0.3,      # Same as binary — weighted confidence already requires intensity match, not just presence
-        "MIN_LIFT": 1.2,            # Slightly stricter to compensate for finer-grained support scale
-        "MIN_LEVERAGE": 0.0005,
-        "MAX_NEGATIVE_LEVERAGE": -0.0025,
-        "MIN_CONVICTION": 1.3,
-        "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
-        "MAX_NEGATIVE_LIFT": 0.8,
-        "MAX_RULE_LENGTH": MAX_RULE_LENGTH,
-        "TARGET_CELLS": 30,
-        "MIN_CELLS_PER_PATCH": 2,
-        "N_PERMUTATIONS": 5 if DEBUG else 1000,
-        "N_TOP_RULES": 100 if DEBUG else 20000,
-        "MIN_CELL_TYPE_FREQUENCY": 5,
-        "MIN_CELL_TYPE_PERCENTAGE": 0.0, # 0% of all cells, to catch rare types in small samples while still filtering out very rare types in large samples
-    }
-else:
-    METHODS = ["CN"] # "KNN_R", "BAG" "GRID" "WIN" removed.
-    CONFIG = {
-        "RADIUS": 25.0,
-        "K_NEIGHBORS": 30,
-        "GRID_WINDOW_SIZE": 30.0,
-        "WINDOW_STEP_FRACTION": 0.5,
-        "MIN_SUPPORT": 0.01,
-        "MIN_CONFIDENCE": 0.3,
-        "MIN_LIFT": 1.2,
-        "MIN_LEVERAGE": 0.0005,
-        "MAX_NEGATIVE_LEVERAGE": -0.0025,
-        "MIN_CONVICTION": 1.3,
-        "MIN_REDUNDANCY_LIFT_IMPROVEMENT": 1.1,
-        "MAX_NEGATIVE_LIFT": 0.8,
-        "MAX_RULE_LENGTH": MAX_RULE_LENGTH,
-        "TARGET_CELLS": 30,
-        "MIN_CELLS_PER_PATCH": 2,
-        "N_PERMUTATIONS": 5 if DEBUG else 1000,
-        "N_TOP_RULES": 100 if DEBUG else 2000,
-        "MIN_CELL_TYPE_FREQUENCY": 5,
-        "MIN_CELL_TYPE_PERCENTAGE": 0.0, # 0% of all cells, to catch rare types in small samples while still filtering out very rare types in large samples
-    }
+    min_label_count=5,          # ignore rules naming a cell type this rare in the sample
+)
+
+# --- Significance ---
+# Passed to the calls that use them. Nothing here corrects or cuts: p-values come out
+# raw, and you correct at the point you make a claim (see the library README).
+N_SHUFFLES = 5 if DEBUG else 1000
+RANDOM_SEED = 42                     # each FOV derives its own seed from this
+MIN_LIFT_GAIN = 1.1                  # a longer rule must beat its shorter version by this much
+

@@ -1,81 +1,36 @@
-import pandas as pd
-import numpy as np
-import warnings
-import time
 import logging
 import os
-import json
-from concurrent.futures import ProcessPoolExecutor
+import shutil
+import time
+import warnings
+
+import numpy as np
+import pandas as pd
+
 from constants import (
-    DEBUG, 
-    DEBUG_FOVS_PER_GROUP, 
-    MIBI_GUT_DIR_PATH, 
-    RESULTS_DATA_DIR, 
-    SAVE_RAW_RULES, 
-    TRANSACTION_DATA_DIR, 
-    ALGO, 
-    CONFIG, 
-    METHODS,
-    USE_FUNCTIONAL_MARKERS,
-    CELLTYPE_MARKER_THRESHOLDS,
-    USE_PERMUTATION_EXCLUDE,
-    PERMUTATION_EXCLUDE_CELL_TYPES
+    DEBUG,
+    DEBUG_FOVS_PER_GROUP,
+    LABELS_KEPT_FIXED,
+    METHOD,
+    MIBI_GUT_DIR_PATH,
+    MIN_LIFT_GAIN,
+    N_SHUFFLES,
+    RANDOM_SEED,
+    RESULTS_ALGO_DIR,
+    RESULTS_DATA_DIR,
+    SETTINGS,
+    WEIGHTING,
+    WORKERS,
 )
-from utils.logging_setup import setup_logging, clear_previous_run, save_run_config
-from utils.config_validation import validate_config
-import worker_task
-from constants import RESULTS_ALGO_DIR, RESULTS_DIR
+from fpgrowth_rule_mining import run_samples
 
 logger = logging.getLogger("manager")
 warnings.filterwarnings('ignore')
 
 # --- CONFIGURATION ---
-GROUP_COL = "Pathological stage"
 ID_COL = "fov"
-BIOPSY_COL = "Biopsy_ID"
-
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super(NumpyEncoder, self).default(obj)
 
 # --- 1. DATA LOADING ---
-
-def _add_functional_subtypes(df):
-    """
-    Identifies functional states (e.g., Ki67+) based on protein expression thresholds.
-    Markers are linked to their base cell type and stored in a new column.
-    """
-    if not USE_FUNCTIONAL_MARKERS:
-        return df
-
-    logger.info("Pre-calculating functional subtypes...")
-    # Initialize a list of lists for efficiency
-    functional_subtypes_list = [[] for _ in range(len(df))]
-    
-    # Build a mapping of index to position for faster lookup
-    idx_to_pos = {idx: i for i, idx in enumerate(df.index)}
-
-    for base_type, markers in CELLTYPE_MARKER_THRESHOLDS.items():
-        type_mask = df["cell_type"] == base_type
-        for marker, threshold in markers.items():
-            if marker in df.columns:
-                mask = type_mask & (df[marker] > threshold)
-                subtype_label = f"{base_type}_{marker}+"
-                
-                # Vectorized index extraction
-                matching_indices = df.index[mask]
-                for idx in matching_indices:
-                    functional_subtypes_list[idx_to_pos[idx]].append(subtype_label)
-    
-    df["functional_subtypes"] = functional_subtypes_list
-    logger.info("Functional subtypes calculated.")
-    return df
 
 def _normalize_coordinates(df):
     """
@@ -140,7 +95,6 @@ def load_data():
     df_final = df_final.rename(columns={"centroid_x": "x", "centroid_y": "y", "cell type": "cell_type"})
     
     df_final = _normalize_coordinates(df_final)
-    df_final = _add_functional_subtypes(df_final)
 
     # We only need basic spatial data for mining
     req_cols = ["fov", "cell_type", "x", "y"]
@@ -231,130 +185,90 @@ def _enrich_with_metadata(df_flat, df_biopsy, df_fovs):
         
     return df_merged
 
-def save_results(results, df_biopsy, df_fovs, suffix, data_key="Rules"):
+def _as_text(items):
+    return str([str(item) for item in items])
+
+
+def save_results(rules, df_biopsy, df_fovs, suffix):
+    """Flatten one frame of rules to the results CSV, joined to the biopsy metadata."""
     logger.info(f"Saving Results ({suffix})...")
-    flat_data = []
-    for res in results:
-        # Check if key exists and isn't empty
-        if data_key not in res or res[data_key].empty: continue
-        
-        for _, row in res[data_key].iterrows():
-            # Basic dict
-            entry = {
-                "FOV": res["Sample"],
-                "Antecedents": str([str(x) for x in row["antecedents"]]),
-                "Consequents": str([str(x) for x in row["consequents"]]),
-                "Lift": row["lift"],
-                "Leverage": row["leverage"],
-                "Confidence": row["confidence"],
-                "Conviction": row["conviction"],
-                "Support": row["support"],
-            }
-            # Optional fields
-            if "p_value" in row: entry["P_Value"] = row["p_value"]
-            if "p_value_adj" in row: entry["FDR"] = row["p_value_adj"]
-            
-            flat_data.append(entry)
-            
-    df_flat = pd.DataFrame(flat_data)
-    if df_flat.empty: return
-    
-    # Enrich with Global Count
-    rule_counts = df_flat.groupby(["Antecedents", "Consequents"])["FOV"].nunique()
-    rc_df = rule_counts.reset_index(name="Rule_Count_Global")
-    df_flat = pd.merge(df_flat, rc_df, on=["Antecedents", "Consequents"], how="left")
-    
+    if rules.empty:
+        return
+
+    df_flat = pd.DataFrame({
+        "FOV": rules["sample_id"],
+        "Antecedents": rules["antecedents"].apply(_as_text),
+        "Consequents": rules["consequents"].apply(_as_text),
+        "Kind": rules["kind"],          # "attracts" or "avoids"
+        "Lift": rules["lift"],
+        "Leverage": rules["leverage"],
+        "Confidence": rules["confidence"],
+        "Conviction": rules["conviction"],
+        "Support": rules["support"],
+        "Rule_Type": rules["rule_type"],
+        "Complex_Class": rules["complex_class"],
+        "Simpler_Rules": rules["simpler_rules"].apply(_as_text),
+    })
+    if "p_value" in rules.columns:
+        df_flat["P_Value"] = rules["p_value"]
+
+    # No count of how many FOVs a rule appeared in: an uncorrected count sitting next
+    # to p-values gets read as evidence. dataset_significance_*.csv answers that.
+
     # Delegate Metadata Enrichment
     df_merged = _enrich_with_metadata(df_flat, df_biopsy, df_fovs)
-    
-    # Dir
-    out_dir = RESULTS_DATA_DIR
-    os.makedirs(out_dir, exist_ok=True)
-    
-    filename = f"{out_dir}/results_{suffix}.csv"
+
+    filename = f"{RESULTS_DATA_DIR}/results_{suffix}.csv"
     df_merged.to_csv(filename, index=False)
     logger.info(f"Saved {filename}")
 
+def _clear_previous_run(results_dir):
+    """A re-run replaces its own directory rather than mixing old and new results."""
+    if os.path.exists(results_dir):
+        shutil.rmtree(results_dir)
+    os.makedirs(results_dir, exist_ok=True)
+
+
 def run_pipeline():
-    clear_previous_run(RESULTS_ALGO_DIR)
-    setup_logging(f"run_association_mining_{ALGO}", log_dir=RESULTS_ALGO_DIR)
-    
-    logger.info("========================================================================================================")
-    logger.info("================================= STARTING ASSOCIATION MINING PIPELINE =================================")
-    logger.info("========================================================================================================")
+    _clear_previous_run(RESULTS_ALGO_DIR)
+    # Made once, here: a run that finds no rules still has files to write.
+    os.makedirs(RESULTS_DATA_DIR, exist_ok=True)
+    # Log to the console. Redirect the run to keep a file: python run_association_mining.py > run.log
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+
+    logger.info("===================================================================================")
+    logger.info(f"========================= MINING: {WEIGHTING} / {METHOD} =========================")
+    logger.info("===================================================================================")
 
     start_time = time.time()
-    validate_config(CONFIG, ALGO, METHODS)
-    
-    run_config = {
-        "ALGO": ALGO,
-        "DEBUG": DEBUG,
-        "DEBUG_FOVS_PER_GROUP": DEBUG_FOVS_PER_GROUP,
-        "USE_FUNCTIONAL_MARKERS": USE_FUNCTIONAL_MARKERS,
-        "USE_PERMUTATION_EXCLUDE": USE_PERMUTATION_EXCLUDE,
-        "PERMUTATION_EXCLUDE_CELL_TYPES": PERMUTATION_EXCLUDE_CELL_TYPES,
-        "CELLTYPE_MARKER_THRESHOLDS": CELLTYPE_MARKER_THRESHOLDS,
-        "METHODS": METHODS,
-        "CONFIG": CONFIG
-    }
-    
-    save_run_config(RESULTS_ALGO_DIR, run_config, logger)
 
     df, df_biopsy, df_fovs = load_data()
-    samples = get_samples_to_process(df)
+    chosen = set(get_samples_to_process(df))
+    samples = [
+        (fov, sub[["x", "y"]].values, sub["cell_type"].values)
+        for fov, sub in df.groupby(ID_COL) if fov in chosen
+    ]
 
-    # Prepare Tasks
-    # We group by Method loop to save intermediate results.
-    
-    # Multiprocessing Pool
-    # We can reuse the pool or create one per method. One per method is safer for memory cleanup
-    
-    for method in METHODS:
-        logger.info(f"=== STARTING METHOD: {method} ===")
-        
-        # Ensure Raw Rules Dir exists
-        if SAVE_RAW_RULES:
-            os.makedirs(os.path.join(RESULTS_DATA_DIR, "raw_rules", method), exist_ok=True)
-        
-        # Prepare Inputs
-        tasks = []
-        for sample_id in samples:
-            df_sample = df[df[ID_COL] == sample_id]
-            tasks.append((sample_id, df_sample, method, CONFIG))
-            
-        results_collection = []
-        stats_collection = {"sizes": [], "orig_counts": [], "kept_counts": [], "redundant_removed": []}
-        
-        with ProcessPoolExecutor(initializer=setup_logging, initargs=(f"run_association_mining_{ALGO}", 5 * 1024 * 1024, 3, RESULTS_ALGO_DIR)) as executor:
-            # Map returns iterator in order
-            # Note: df_sample pickling might be slow if huge, but here it's small per FOV.
-            futures = [executor.submit(worker_task.process_single_sample, *t) for t in tasks]
-            
-            for future in futures:
-                try:
-                    res = future.result()
-                    if res:
-                        results_collection.append(res)
-                        if res["Stats"]:
-                            stats_collection["sizes"].extend(res["Stats"].get("sizes", []))
-                            stats_collection["orig_counts"].append(res["Stats"].get("orig", 0))
-                            stats_collection["kept_counts"].append(res["Stats"].get("kept", 0))
-                            stats_collection["redundant_removed"].append(res["Stats"].get("redundant_removed", 0))
-                except Exception as e:
-                    logger.error(f"Task Failed: {e}")
+    report = run_samples(
+        samples, SETTINGS,
+        n_shuffles=N_SHUFFLES,
+        random_seed=RANDOM_SEED,
+        labels_kept_fixed=LABELS_KEPT_FIXED,
+        min_lift_gain=MIN_LIFT_GAIN,
+        workers=WORKERS,
+        output_path=RESULTS_ALGO_DIR,
+    )
 
-        # Save Batch (Final Rules)
-        save_results(results_collection, df_biopsy, df_fovs, suffix=method, data_key="Rules")
-        
-        # Save Batch (Raw Rules)
-        if SAVE_RAW_RULES:
-            save_results(results_collection, df_biopsy, df_fovs, suffix=f"{method}_RAW", data_key="RawRules")
-        
-        # Save Stats
-        out_dir = RESULTS_DATA_DIR
-        with open(f"{out_dir}/stats_{method}.json", "w") as f:
-            json.dump(stats_collection, f, cls=NumpyEncoder)
-            
+    save_results(report.rules(), df_biopsy, df_fovs, suffix=METHOD)
+
+    # FOVs from one patient are not independent evidence, so they vote together.
+    # The library never learns what a patient is: it only compares these values.
+    groups = df_fovs.drop_duplicates("FOV").set_index("FOV")["Patient"].to_dict()
+    across = report.dataset_significance(groups=groups)
+    across.to_csv(f"{RESULTS_DATA_DIR}/dataset_significance_{METHOD}.csv", index=False)
+    logger.info(f"Saved dataset_significance_{METHOD}.csv "
+                f"({len(across)} rules, {(across['dataset_fdr'] <= 0.05).sum()} at FDR<=0.05)")
+
     elapsed = time.time() - start_time
     h, rem = divmod(int(elapsed), 3600)
     m, s = divmod(rem, 60)

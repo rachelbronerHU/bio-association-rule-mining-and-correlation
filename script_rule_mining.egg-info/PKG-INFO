@@ -5,212 +5,398 @@ Summary: Association Rule Mining for MIBI-TOF Data
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: ipython
-Requires-Dist: joblib
 Requires-Dist: matplotlib
-Requires-Dist: mlxtend
 Requires-Dist: numpy
 Requires-Dist: pandas
 Requires-Dist: scikit-learn
 Requires-Dist: scipy
 Requires-Dist: seaborn
 Requires-Dist: statsmodels
-Requires-Dist: xgboost
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
 
-# Association Rule Mining for MIBI-TOF Data
+# fpgrowth_rule_mining
 
-This project implements a comprehensive pipeline for discovering spatial association rules between cell types in MIBI-TOF imaging data.
+Finds rules like *"where there is a CD8T cell, macrophages are nearby"* — and the
+opposite, *"where there is a CD8T cell, macrophages are not"* — in spatial data.
 
-[![Paper](https://img.shields.io/badge/Paper-Science_Translational_Medicine-blue?style=flat-square&logo=doi&logoColor=white)](https://www.science.org/doi/full/10.1126/scitranslmed.adu6032)
-[![Data](https://img.shields.io/badge/Data-Mendeley_Data-orange?style=flat-square&logo=mendeley&logoColor=white)](https://data.mendeley.com/datasets/j4bscsgn6x/2)
+## The idea
 
-## 1. Pipeline Workflow
+Every cell becomes the centre of a **patch**: itself plus the cells around it. Each
+patch is one **transaction**, listing what is present and how much it counts:
 
-The following tree illustrates the processing flow from input data to final validated rules.
-
-<pre>
-Input Data (Biopsies, FOVs, Cell Types)
-  │
-  ▼
-Data preparation
-  ├── Normelize coordinates (for microns instead of pixels)
-        │
-        ▼
-Select Iteration Method
-  ├── KNN_R
-  ├── Center-Neighbour (CN)
-  ├── BAGGING
-  ├── GRID
-  └── SLIDING WINDOW
-        │
-        ▼
-Iterate Through FOVs (Field of Views)
-  │
-  ├──► [ FOV Processing Pipeline ]
-  │       │
-  │       ├── 1. Determine Neighborhoods (Method Dependent)
-  │       ├── 2. Construct Transactions (binary presence / Gaussian-weighted float)
-  │       ├── 3. Extract Rules (FP-Growth | Weighted FP-Growth)
-  │       ├── 4. Filter Rules (Min Lift, Confidence, Conviction)
-  │       ├── 5. Filter Rare Cell Rules (Post-Mining) <a href="#rare-cell-filter">[*]</a>
-  │       ├── 6. Select Top N Rules (Ranked by Lift)
-  │       ├── 7. Statistical Validation (1000 Permutations)
-  │       ├── 8. FDR Correction (Benjamini-Hochberg)
-  │       └── 9. Prune Redundant Rules <a href="#ref1">[1]</a>
-  │               │
-  │               ▼
-  └──────► Output: Validated, Non-Redundant Spatial Rules
-</pre>
-
-<span id="rare-cell-filter">**[*] Post-Mining Rare Cell Filtering:**</span> After mining, rules containing cell types below an adaptive threshold (max(5 cells, 1% of FOV)) are filtered out **before validation**. This two-stage approach ensures: (1) accurate support/lift calculations during mining (preserves full spatial context), (2) computational efficiency (rare-cell rules skip expensive 1000-permutation validation), and (3) cleaner final results (no single-cell artifacts).
-
----
-
-## 1b. Algorithm Comparison: FP-Growth vs Weighted FP-Growth
-
-| Metric | FP-Growth formula | FP-Growth meaning | Weighted FP-Growth formula | Weighted FP-Growth meaning |
-| :--- | :--- | :--- | :--- | :--- |
-| **Transaction** | `{T_cell, B_cell, ...}` | Cell type is present (1) or absent (0) | `{T_cell: 0.6, B_cell: 0.2, ...}` | Gaussian diffusion weight — closer cells score higher |
-| **Support** | `count(A∪B) / N` | Fraction of neighborhoods containing all items | `Σ min(wᵢ for i∈A∪B) / N` | Avg intensity of weakest co-diffusing item across neighborhoods |
-| **Confidence** | `support(A∪B) / support(A)` | How often B is present when A is present | `support(A∪B) / support(A)` | How strongly B co-diffuses relative to A's intensity |
-| **Lift** | `confidence / support(B)` | Co-occurrence above random chance | `confidence / support(B)` | Same — but chance baseline uses diffusion weights |
-| **Leverage** | `support(A∪B) − support(A)·support(B)` | Excess co-occurrence beyond independence | `support(A∪B) − support(A)·support(B)` | Same — negative means diffusion signals repel |
-| **Conviction** | `(1 − support(B)) / (1 − confidence)` | How often A occurs without B (∞ = always together) | `(1 − support(B)) / (1 − confidence)` | Same interpretation, operating on diffusion-weighted supports |
-
-*Supported spatial methods — FP-Growth: BAG, CN, KNN_R, GRID, WINDOW. Weighted FP-Growth: CN, KNN_R (requires a defined center cell).*
-
----
-
-## 2. Data Exploration & Pipeline Efficiency
-
-The following tables demonstrate the efficiency of different neighborhood definition methods in retaining significant rules after rigorous statistical validation.
-
-### High Threshold Configuration (Default)
-*Note the high retention rate and significance for KNN_R and CN methods compared to sliding window approaches.*
-
-> | METHOD | RAW Count | FINAL Count | RETENTION % | RAW/FOV | FINAL/FOV | AVG LIFT (Raw->Final) | SIG (FDR<0.01) | SIG (P<0.01) |
-> | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-> | **BAG** | 6778 | 3568 | 52.64% | 32.4 | 17.1 | 1.93 -> 2.01 | 71.2% -> 68.9% | 78.0% -> 75.6% |
-> | **CN** | 11806 | 2878 | 24.38% | 56.0 | 13.6 | 2.58 -> 3.03 | 96.5% -> 98.4% | 97.2% -> 98.9% |
-> | **KNN_R** | 11806 | 2878 | 24.38% | 56.0 | 13.6 | 2.58 -> 3.03 | 96.6% -> 98.5% | 97.1% -> 98.8% |
-> | **WINDOW** | 1,048,959 | 257,427 | 24.54% | 4971.4 | 1220.0 | 22.13 -> 3.84 | 74.0% -> 13.3% | 78.5% -> 29.7% |
-> | **GRID** | 420 | 414 | 98.57% | 2.3 | 2.3 | 2.56 -> 2.57 | 96.2% -> 95.9% | 97.1% -> 97.3% |
-
-### Low Threshold Configuration
-*Relaxed constraints lead to higher rule counts but potentially lower precision.*
-
-> | METHOD | RAW Count | FINAL Count | RETENTION % | RAW/FOV | FINAL/FOV | AVG LIFT (Raw->Final) | SIG (FDR<0.01) | SIG (P<0.01) |
-> | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-> | **BAG** | 29267 | 14609 | 49.92% | 138.7 | 69.2 | 1.68 -> 1.84 | 11.2% -> 11.4% | 27.0% -> 28.5% |
-> | **CN** | 25816 | 9124 | 35.34% | 122.4 | 43.2 | 2.31 -> 2.60 | 48.0% -> 51.5% | 56.6% -> 58.9% |
-> | **KNN_R** | 25816 | 9124 | 35.34% | 122.4 | 43.2 | 2.31 -> 2.60 | 48.0% -> 51.5% | 56.8% -> 58.8% |
-
----
-
-## 3. Top Ranked Rules by Method
-*A sample of the highest lift rules discovered by each method, showing rule strength (Lift), certainty (Confidence), and statistical significance (FDR).*
-
-> | METHOD | RULE | LIFT | CONF | CONV | SUP | FDR |
-> | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-> | **CN** | CD4T_CD69+_CENTER, CD8T_NEIGHBOR -> CD4T_CENTER, CD8T_CD69+_NEIGHBOR | 86.01 | 1.00 | inf | 0.011 | 0.0065 |
-> | **CN** | CD4T_CENTER, CD8T_CD69+_NEIGHBOR -> CD4T_CD69+_CENTER, CD8T_NEIGHBOR | 86.01 | 0.92 | 11.78 | 0.011 | 0.0065 |
-> | **CN** | Epithelial_CENTER -> Plasma_NEIGHBOR, SMV_NEIGHBOR | 0.10 | 0.03 | 0.70 | 0.011 | 0.0021 |
-> | **CN** | Epithelial_CENTER -> Macrophage_NEIGHBOR, Plasma_NEIGHBOR, SMV_NEIGHBOR | 0.10 | 0.03 | 0.71 | 0.011 | 0.0021 |
-> | --- | --- | --- | --- | --- | --- | --- |
-
-
-
-
-
-
-
-
-
-
-
-
-
-
----
-
-## 4. Results Analysis
-
-This section highlights key performance metrics, with a focus on the **K-Nearest Neighbors (Radius)** method, which showed a strong balance between rule discovery and statistical significance.
-
-### Overview of Rules Found
-![Total Rules](results/full_run/plots/mining_report/qc_total_rules.png)
-
-### Rule Significance Comparison (Volcano Plots)
-The primary volcano plots below illustrate the relationship between Rule Lift (strength) and FDR Significance for the **final, validated rules**. KNN_R and CN consistently produce high-lift, highly significant rules (top right quadrant).
-
-![Final Validated Rules](results/full_run/plots/mining_report/volcano_grid.png)
-
-#### Comparative Analysis: Raw Rules & Low Thresholds
-*Below, we compare the final results against the raw (unfiltered) rules and a separate experimental run with relaxed thresholds.*
-
-**1. Raw Rules (Before Filtering)**
-> <img src="results/full_run/plots/raw_rules_report/raw_volcano_grid.png" width="600" alt="Raw Rules Volcano">
-
-### Rules per FOV (KNN_R)
-Distribution of the number of validated rules found in each Field of View (FOV) using the KNN_R method.
-![Rules per FOV](results/full_run/plots/mining_report/rules_per_fov_KNN_R.png)
-
----
-
-## 5. Consensus & Stability Analysis
-
-[📂 View Full Consensus Plots Directory](results/full_run/plots/consensus_report)
-
-This section analyzes the stability of rules across different biological scales: Global (Dataset), Stage (Disease Group), and Biopsy (Patient).
-
-### Global Consensus (Universal Rules)
-*The rules appearing most frequently across the entire dataset, representing fundamental tissue structure.*
-
-<img src="results/full_run/plots/consensus_report/bar_global_consensus_KNN_R_no_self.png" width="600">
-
-### Patient Similarity (Biopsy Clustering - CN)
-*Clustering patients based on the similarity of their rule sets (Jaccard Index). Groupings here indicate shared tissue microenvironments.*
-
-<img src="results/full_run/plots/consensus_report/clustermap_biopsy_similarity_CN_no_self.png" width="600">
-
-### Stage Specificity (Disease Signatures)
-*Comparing rule prevalence across Pathological Stages. The heatmap highlights rules that are specific to certain stages versus those that are stable throughout.*
-
-| **Stage Consensus (with Self-Rules)** | **Stage Consensus (No Self-Rules)** |
-| :---: | :---: |
-| <img src="results/full_run/plots/consensus_report/heatmap_stage_consensus_CN.png" width="400"> | <img src="results/full_run/plots/consensus_report/heatmap_stage_consensus_CN_no_self.png" width="400"> |
-
----
-
-## 6. Top Spatial Rules Visualization
-
-[📂 View Full Collection of Spatial Plots](results/full_run/plots/top_rules_spatial)
-
-Visualizing the top 3 ranked unique spatial rules (excluding self-referential rules) for KNN_R and BAG.
-
-### Method: KNN_R (K-Nearest Neighbors Radius)
-| Rank 1 | Rank 2 | Rank 3 |
-| :---: | :---: | :---: |
-| <img src="results/full_run/plots/readme_assets/KNN_R_rule_1.png" width="300"> | <img src="results/full_run/plots/readme_assets/KNN_R_rule_2.png" width="300"> | <img src="results/full_run/plots/readme_assets/KNN_R_rule_3.png" width="300"> |
-
-### Method: BAG (Bagging)
-| Rank 1 | Rank 2 | Rank 3 |
-| :---: | :---: | :---: |
-| <img src="results/full_run/plots/readme_assets/BAG_rule_1.png" width="300"> | <img src="results/full_run/plots/readme_assets/BAG_rule_2.png" width="300"> | <img src="results/full_run/plots/readme_assets/BAG_rule_3.png" width="300"> |
-
----
-
-## 7. References
-
-<span id="ref1">1.</span> <span style="color: #808080; font-style: italic;">Bayardo Jr, R. J., Agrawal, R., & Gunopulos, D. (2000). Constraint-based rule mining in large, dense databases. Data mining and knowledge discovery, 4(2), 217-240. <a href="https://www.bayardo.org/ps/icde99.pdf">[PDF]</a></span>
-
----
-
-## 8. Environment Setup
-
-This project uses `pyproject.toml` for dependency management. 
-
-Once you have created and activated your Python environment (either via Conda or `venv`), install the project and its dependencies by running:
-
-```bash
-pip install -e .
 ```
+{CD8T_CENTER: 1.0, Macrophage_NEIGHBOR: 0.8, Plasma_NEIGHBOR: 0.2}
+```
+
+How much a neighbour counts is the only choice that changes the maths:
+
+| `weighting` | a neighbour counts |
+|---|---|
+| `WEIGHTED` | `exp(-0.5 * (distance / bandwidth) ** 2)` — a far neighbour counts less |
+| `BINARY` | `1.0` — near or far |
+
+Binary is the weighted case with every weight set to `1.0`, so both run the same
+FP-growth, the same thresholds and the same significance test.
+
+Support is **min-based**: a pattern is only as strong as its weakest member in each
+transaction.
+
+```
+support(I) = mean over transactions of min(weight of each item in I)
+```
+
+With binary weights that is exactly the fraction of transactions containing every
+item, which is ordinary support.
+
+A rule always reads *centre → neighbours*: the centre cell is on the left, never the
+right.
+
+## What happens, step by step
+
+Cells go in, rules come out. Every step is one file, and each says what it dropped.
+
+**1. Group the cells into patches.** `transactions.py` — every cell becomes the centre
+of one patch: itself plus the cells within `radius` (or the `k_neighbors` nearest).
+
+**2. Weigh each neighbour.** Distance decay, or a flat 1.0. This is the only step the
+two modes disagree about.
+
+**3. Turn each patch into a transaction.** Neighbours of the same type add up, capped
+at 1.0 so one crowded patch cannot outweigh the rest. *Patches where one cell type
+takes more than `max_one_type_share` are dropped — nothing is learned from a patch
+that is all one thing.*
+
+**4. Search twice, for the two opposite claims.** *Together* and *apart* are opposite
+questions, so they are two searches — see *Attraction and avoidance* below. Each finds
+its own combinations, splits them into rules the same way (`splits_of` — every way of
+putting some items on the left and the rest on the right, centre always on the left),
+and keeps what passes its own thresholds.
+
+**5. Measure and judge each rule.** Confidence, lift, leverage and conviction come from
+one shared function, `metrics`. What counts as a finding does not: `attracts()` in
+`attraction.py`, `avoids()` in `avoidance.py`. Each rule records which one kept it, in
+its `kind` column. *Rules naming a cell type too rare in this sample are dropped here.*
+
+**6. Test each rule against chance.** `validation/significance.py` — hold the tissue
+still, shuffle the labels between cells, and re-measure on the shuffled version. Each
+rule is re-judged by the same `attracts()` or `avoids()` that found it, so mining and
+the null can never drift apart, and an attraction rule is never counted as surviving
+because the shuffled tissue made it look like avoidance. A rule's p-value is the share
+of shuffles it still survived. Cell types listed in `labels_kept_fixed` never move, so
+the tissue keeps its structure — but pin too much and there is nothing left to shuffle,
+which is refused rather than answered with a p-value of 1.0.
+
+A rule naming a cell type this sample does not have was never tested at all, and gets
+`p_value = 1.0`. It could not pass here or in any shuffle, and "never survived" must
+not be read as the strongest result the run can produce.
+
+**7. Drop rules a shorter rule already said.** `filter_rules` — after the p-values, not
+before, because anything removed earlier is later mistaken for a rule that was tested
+and failed.
+
+**8. Ask whether each rule holds across the whole dataset.** `validation/false_discovery.py` —
+count the groups where it held, test that count against chance, and correct once for
+having asked of every rule. See *Testing many rules at once*.
+
+Steps 1–7 happen per sample. Step 8 is the only one that looks across samples.
+
+## Two ways in
+
+**The runner**, when you have many samples and want the usual order:
+
+```python
+from fpgrowth_rule_mining import Settings, Weighting, Method, run_samples
+
+settings = Settings(weighting=Weighting.WEIGHTED, method=Method.CN,
+                    radius=25.0, min_support=0.01,
+                    min_lift=1.2, max_items_per_rule=4,
+                    avoidance_max_lift=0.8)
+
+if __name__ == "__main__":                       # required when workers is set
+    report = run_samples(
+        samples,                                 # (sample_id, coords, labels) triples
+        settings,
+        n_shuffles=1000, random_seed=42,
+        min_lift_gain=1.1,
+        workers=8, output_path="results/",
+    )
+
+report.rules()                        # every sample's rules, with a sample_id column
+report.tested()                       # everything mined, with raw p-values, nothing removed
+report.failures                       # (sample_id, traceback) for samples that raised
+report.dataset_significance(groups)   # does each rule hold across the whole dataset?
+```
+
+It mines everything, tests everything, then filters. A sample that raises is recorded
+and the rest carry on; if every sample fails, that raises.
+
+**The core**, when you want a different order:
+
+```python
+from fpgrowth_rule_mining import mine, filter_rules
+
+result = mine(coords, labels, settings)          # coords (n, 2), labels (n,)
+tested = result.add_p_values(n_shuffles=1000, random_seed=42)
+rules  = filter_rules(tested, min_lift_gain=1.1)
+```
+
+`add_p_values` adds a raw `p_value` and removes nothing. Use
+`seed_for(base_seed, sample_id)` to give each sample its own reproducible seed.
+
+**Only the six fields without defaults are required** — plus `avoidance_max_lift`,
+which that search needs and which is on by default. Every other parameter is `None`,
+meaning that threshold is not applied — so a rule is only dropped for a reason you
+asked for.
+
+The library writes nothing except `run_config.json`, and only when you pass
+`output_path`. Results come back as DataFrames for you to save. Progress goes to the
+console; redirect the run to keep it in a file.
+
+## Parameters
+
+### Settings — how to mine
+
+| | required | what it is for |
+|---|---|---|
+| `weighting` | **yes** | `WEIGHTED` or `BINARY` |
+| `method` | **yes** | `CN`: everything inside the radius. `KNN_R`: the k nearest, capped by it |
+| `radius` | **yes** | how far a patch reaches |
+| `min_support` | **yes** | how often a pattern must appear. `0` is not "off", it never terminates |
+| `min_lift` | **yes** | what counts as attraction. Must be `>= 1`. See *Why two thresholds are required* |
+| `max_items_per_rule` | **yes** | longest rule to build, at most 5. Bounds both searches |
+| `bandwidth` | | distance at which a neighbour counts ~0.6. Left alone it becomes `radius` |
+| `k_neighbors` | for `KNN_R` | how many neighbours to take |
+| `min_cells_per_patch` | | skip patches smaller than this. Minimum 2 |
+| `max_one_type_share` | | skip a patch where one label takes more than this share |
+| `min_patches` | | how many patches must back a rule. Counted in weight, so exact under `BINARY` and conservative under `WEIGHTED` |
+| `strong_confidence` + `min_support_when_strong` | | above that confidence, allow this lower support |
+| `min_confidence`, `min_leverage`, `min_conviction` | | tighten attraction further |
+| `include_avoidance_rules` | | search for cell types that keep apart too. On by default |
+| `avoidance_max_lift` | **when that search is on** | what counts as avoidance. Must be `< 1` |
+| `avoidance_max_leverage` | | tighten avoidance further |
+| `avoidance_min_expected_meetings` | | how many meetings had to be expected before not seeing them counts. Default 10 |
+| `min_label_count`, `min_label_share` | | ignore rules naming a label this rare in the sample |
+
+The two searches never reach into each other: `min_lift` says what counts as attraction
+and has no effect on avoidance, `avoidance_max_lift` has none on attraction. To get
+attraction only, turn the other search off with `include_avoidance_rules=False`.
+
+## Attraction and avoidance
+
+*These two cell types sit together* and *these two keep apart* are opposite claims, so
+they are two searches, and every rule records which one found it in its `kind` column
+(`"attracts"` or `"avoids"`). `lift >= 1` and `lift < 1` are structural, one per
+search, so no rule can be both.
+
+**Attraction** — `attraction.py`. FP-growth is a search for things that occur *often*,
+which is exactly this question. The tree prunes on support, exactly: under min-based
+support adding an item can never raise support, so nothing pruned could have come back.
+
+- must clear `min_support` (or `min_support_when_strong` when confidence is high),
+  and `min_patches`
+- then `min_lift`, plus `min_leverage` / `min_conviction` / `min_confidence` if set
+
+**Avoidance** — `avoidance.py`. The opposite claim, so it cannot be the same search:
+here low joint support *is* the finding, and the strongest case of all — two cell types
+that never meet — carries no support to prune on. So there is no tree and no pruning.
+
+- **no joint-support requirement at all**
+- instead, enough patches hold the antecedent to measure a rate on (`min_patches`), and
+  enough meetings were expected that not seeing them is surprising
+  (`avoidance_min_expected_meetings`)
+- then `avoidance_max_lift`, plus `avoidance_max_leverage` if set. Note `lift < 1` and
+  `leverage < 0` are the same condition, so those two are a ratio tightening and a
+  difference tightening of one idea
+
+**Why expected meetings and not a support bar on each side.** lift is observed over
+expected, so it only says anything when there is enough expected to divide by. If none
+were seen, `e^-expected` is the best p-value the rule's own evidence could support:
+expect 2 and that is about 1 in 7, expect 20 and it is 1 in 500 million.
+
+A support bar cannot express that, and worse, it is not even one bar. A patch holds
+**one** centre and **many** neighbours, so for the same cell type:
+
+```
+support as a NEIGHBOR  <=  k x  support as a CENTER,    k = mean neighbours per patch
+```
+
+The same fraction is therefore up to `k` times harsher on the left than on the right,
+and the rarer the cell type the further apart the two sides sit. Past that point no
+rare cell type can be the centre of an avoidance rule at all — not because the biology
+says so, but because one number was asked to mean two things.
+
+**How the two checks relate.** Support is a mean of weights capped at 1, so
+`con_support <= 1` always, and therefore:
+
+```
+expected meetings = ant_support x con_support x n  <=  ant_support x n = the patch count
+```
+
+So the expected-meetings check already implies the patch check whenever
+`min_patches <= avoidance_min_expected_meetings`, and `min_patches` only starts to bite
+above it. Each still catches something the other cannot: a handful of patches holding a
+very common neighbour has the meetings but no rate worth measuring, while very many
+patches holding a very rare neighbour has the rate but nothing to deplete.
+
+**A note on `min_patches` under `WEIGHTED`.** It is compared against a sum of weights,
+not a count of patches. With `BINARY` every weight is 1.0 so it is exactly a patch
+count; with `WEIGHTED` a far neighbour counts less than a whole patch, so reaching the
+same number takes more real patches. Conservative in the safe direction, but it is not
+literally patches.
+
+The bar is a floor for calling *total absence* meaningful. It is not enough to detect a
+*partial* shortfall — spotting `lift <= 0.8` is a 20% deficit, which needs an expected
+count near 100 to stand out from Poisson noise. That is what the shuffle test and the
+FDR correction are for; this gate only stops rules that cannot carry evidence from
+being built at all.
+
+**What bounds the search** is `max_items_per_rule`, not support: it measures every
+combination up to that size as matrix arithmetic, which is why it is required.
+
+But rule length alone cannot bound the work — the count grows with the number of
+items too, and 40 items at length 6 is 4.6 million combinations where 20 items is
+54,000. So `max_items_per_rule` is capped at 5 for readability, and the real guard is
+on the combination count itself, once the items are known: over
+`MOST_COMBINATIONS` the search refuses to start rather than running for days.
+
+Only combinations with **at most one centre** are ever measured. A candidate set holds
+exactly one, and splitting never moves it to the right, so nothing with two centres can
+be looked up. Skipping them is most of the search at longer rules — 3× fewer
+combinations at length 4, 9× at length 6.
+
+## Why two thresholds are required
+
+`min_lift`, and `avoidance_max_lift` whenever that search is on, are the only
+thresholds you cannot leave unset. They are not tuning knobs — they are what makes a
+p-value mean anything.
+
+The shuffle test asks how often a rule still passes **its own thresholds** in a
+shuffled tissue. Take them away and there is almost nothing left to fail. Avoidance
+would reduce to `lift < 1`, which a shuffle passes about half the time, so every
+p-value would land near 0.5 and the test would carry no information at all. Attraction
+still has the support policy, so it degrades less sharply, but in the same direction.
+
+Every other threshold really is optional, and unset means no extra tightening rather
+than no filtering.
+
+### add_p_values — is a rule more than chance?
+
+The tissue stays as it is and the labels are shuffled between positions. A rule's
+p-value is the share of shuffles where it still passed every threshold.
+
+| | what it is for |
+|---|---|
+| `n_shuffles` | **required.** More shuffles, finer p-values. The smallest possible p-value is `1/(n_shuffles+1)`, so 5 shuffles can never reach 0.05 |
+| `random_seed` | fix it and re-runs give identical p-values |
+| `labels_kept_fixed` | labels that never move, so the tissue keeps its structure. `"Name"` is exact; `"Name*"` matches anything starting with Name, so `"CD4*"` also catches `CD45` |
+
+**The p-value comes back raw.** Nothing here corrects it and nothing is dropped —
+see the next section for why.
+
+### filter_rules — drop rules a shorter rule already said
+
+| | what it is for |
+|---|---|
+| `min_lift_gain` | how much better a longer rule must be to earn its place (below) |
+
+### run_samples — everything above, over many samples
+
+Takes `settings` and every parameter from the two tables above, plus:
+
+| | what it is for |
+|---|---|
+| `samples` | iterable of `(sample_id, coords, labels)`. Not a DataFrame, so no column names are assumed |
+| `workers` | `None` runs here. An integer runs that many **processes** — mining is CPU-bound, so threads would not help. On Windows the calling script must guard with `if __name__ == "__main__"` |
+| `output_path` | where to write `run_config.json`. Nothing is written when it is `None` |
+
+Each sample gets its own seed derived from `random_seed`, so a parallel run is
+identical to a serial one and both are reproducible.
+
+## Testing many rules at once
+
+Test 12,000 rules at 5% and about 600 will look significant by luck. Correcting for
+that is not optional — but **the correction depends on the claim you are making**, and
+the library cannot know that. So it stores raw p-values and corrects nothing. You
+correct at the point of the claim. `validation/false_discovery.py` holds the pieces.
+
+**A claim about one sample** — *"in FOV 17, CD8T avoids Paneth."* The family is the
+rules tested in FOV 17, so adjust that sample's p-values:
+
+```python
+from fpgrowth_rule_mining.validation.false_discovery import false_discovery_rates
+one = report.tested().query("sample_id == 'FOV_17'")
+one["sample_fdr"] = false_discovery_rates(one["p_value"])
+```
+
+**A claim about the study** — *"CD8T avoids Paneth, as a recurring feature."* That is
+its own question, not a by-product of the per-sample tests. Filtering each sample at
+5% and counting survivors is invalid: each sample gets its own 5% of false rules, so
+across 250 samples a pure-noise rule still shows up in about 12.
+
+```python
+groups = {sample_id: patient_id, ...}          # or None: every sample its own group
+report.dataset_significance(groups=groups, alpha=0.05)
+```
+
+Four steps, in `false_discovery.py`:
+
+1. **One answer per group.** A patient with 8 FOVs must not get 8 votes. Take the
+   group's best p-value and charge it for the attempts: `min(1, m × p_best)`.
+2. **Count real attempts.** `groups_tested` counts only groups where the rule *could*
+   have been found — every cell type it names had enough cells there. A rule tested in 30
+   samples and found in 15 is overwhelming; the same numbers against 250 look like noise.
+   A group that could have found it and didn't scores 1.0: a failed attempt, not a
+   missing one.
+3. **One binomial per rule** — is `groups_passed` of `groups_tested` more than the
+   `alpha` that chance predicts?
+4. **Adjust once**, across distinct rules, giving `dataset_fdr`.
+
+**Which rules get asked about.** Only rules that survived the redundancy filter in at
+least one sample. A rule a shorter one already said *everywhere* is not a separate
+claim, and giving it its own test would make the correction stricter for every real
+one. On a typical run that is more than half the rules.
+
+**Which samples get counted.** All of them — the counts come from every rule tested,
+not from the filtered set. Redundancy is decided per sample, so a rule can survive in
+one and be filtered in another; counting only the surviving ones would turn the other
+samples into failures they never were.
+
+**When there is no grouping.** `groups=None` gives every group one sample, the penalty
+is ×1, and the whole thing reduces exactly to plain counting.
+
+**Why it errs low.** The shuffle p-value is discrete and floored at `1/(n_shuffles+1)`,
+and the ×m penalty assumes nothing about independence. Both push toward under-reporting,
+never over. `n_shuffles` must be large enough that `m × 1/(n_shuffles+1)` can get under
+`alpha`, or nothing can ever pass.
+
+**How rules are matched across samples.** Exactly as they are, roles included, so
+`CD8T_CENTER → Paneth_NEIGHBOR` and `Paneth_CENTER → CD8T_NEIGHBOR` stay separate.
+
+## The redundancy filter — not finished
+
+> **Unfinished. Read before trusting it.**
+
+If `A → C` already holds, then `A, B → C` may be telling you nothing new — B is just
+along for the ride. `min_lift_gain` keeps the longer rule only when it beats the
+shorter one it contains by that factor:
+
+- attraction: kept when `longer.lift > shorter.lift * min_lift_gain`
+- avoidance: kept when `longer.lift < shorter.lift / min_lift_gain`, because a lower
+  lift is the stronger claim
+
+Attraction and avoidance are never compared against each other — the `kind` column says
+which a rule is — and rules are matched by label, ignoring whether a cell was the centre
+or a neighbour.
+
+It runs **after** the p-values, not before. A rule removed before testing would later
+be read as one that was tested and failed, turning a filtered-out rule into evidence
+against itself. For the same reason the shuffle test cannot replay this filter, which
+makes p-values slightly conservative: a rule may survive a shuffle that would have been
+dropped as redundant in the real run.
+
+What is still open: comparison is by lift alone, so a longer rule with much better
+confidence but similar lift is dropped; and only rules with the *same consequent* are
+compared, so it does nothing about redundancy across different consequents.
+
+Reference: [Bayardo et al., *Constraint-Based Rule Mining in Large, Dense Databases*](https://www.bayardo.org/ps/icde99.pdf)

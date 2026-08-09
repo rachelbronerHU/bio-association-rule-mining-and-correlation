@@ -1,0 +1,208 @@
+"""
+Run the same mining over many samples: mine everything, test everything, then filter.
+See README, "run_samples".
+"""
+
+import json
+import logging
+import os
+import sys
+import traceback
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass, field
+from typing import List, Tuple
+
+import pandas as pd
+
+from .mine import mine
+from .rules import filter_rules
+from .settings import Settings
+from .transactions import strip_role
+from .validation.false_discovery import (
+    false_discovery_rates,
+    group_p_value,
+    recurrence_p_value,
+)
+from .validation.significance import seed_for
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SampleResult:
+    sample_id: object
+    rules: pd.DataFrame     # what survived the redundancy filter
+    tested: pd.DataFrame    # everything mined, with raw p-values, nothing removed
+    stats: dict
+
+
+@dataclass
+class RunReport:
+    """Every sample that worked, and every one that did not."""
+
+    results: List[SampleResult] = field(default_factory=list)
+    failures: List[Tuple[object, str]] = field(default_factory=list)
+
+    def rules(self) -> pd.DataFrame:
+        """Every sample's final rules in one frame, with a sample_id column."""
+        return self._joined("rules")
+
+    def tested(self) -> pd.DataFrame:
+        """Everything mined, with raw p-values. What dataset_significance counts."""
+        return self._joined("tested")
+
+    def _joined(self, attribute):
+        frames = [
+            getattr(r, attribute).assign(sample_id=r.sample_id)
+            for r in self.results if not getattr(r, attribute).empty
+        ]
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    def dataset_significance(self, groups=None, alpha=0.05) -> pd.DataFrame:
+        """
+        Does each rule hold across the dataset, more often than chance would give?
+
+        groups: sample_id -> one independent unit, such as a patient. None makes every
+                sample its own group.
+
+        One row per rule: groups_tested, groups_passed, p_value, dataset_fdr.
+        See README, "Testing many rules at once".
+        """
+        tested, claims = self.tested(), self.rules()
+        if tested.empty or claims.empty:
+            return pd.DataFrame(columns=["antecedents", "consequents", "groups_tested",
+                                         "groups_passed", "p_value", "dataset_fdr"])
+
+        group_of = dict(groups or {})
+        eligible = {r.sample_id: r.stats["labels_with_enough_cells"] for r in self.results}
+        samples_in_group = {}
+        for sample_id in eligible:
+            samples_in_group.setdefault(group_of.get(sample_id, sample_id), []).append(sample_id)
+
+        found = {(rule.antecedents, rule.consequents): {} for rule in claims.itertuples()}
+        for rule in tested.itertuples():
+            key = (rule.antecedents, rule.consequents)
+            if key in found:
+                found[key][rule.sample_id] = rule.p_value
+
+        rows = []
+        for (antecedents, consequents), p_by_sample in found.items():
+            names = {strip_role(item) for item in antecedents + consequents}
+            groups_tested = groups_passed = 0
+            for members in samples_in_group.values():
+                # Only samples that could have produced this rule count as attempts.
+                # Not .get(): a missing sample would silently make everything untestable.
+                attempts = [s for s in members if names <= eligible[s]]
+                if not attempts:
+                    continue
+                groups_tested += 1
+                # An attempt with no rule found is a failure, so it scores 1.0.
+                p_values = [p_by_sample.get(s, 1.0) for s in attempts]
+                if group_p_value(p_values, len(attempts)) < alpha:
+                    groups_passed += 1
+
+            rows.append({
+                "antecedents": antecedents,
+                "consequents": consequents,
+                "groups_tested": groups_tested,
+                "groups_passed": groups_passed,
+                "p_value": recurrence_p_value(groups_passed, groups_tested, alpha),
+            })
+
+        result = pd.DataFrame(rows)
+        result["dataset_fdr"] = false_discovery_rates(result["p_value"].values)
+        return result.sort_values("dataset_fdr", ignore_index=True)
+
+
+def run_samples(samples, settings: Settings, *, n_shuffles, random_seed=None,
+                labels_kept_fixed=(), min_lift_gain=None,
+                workers=None, output_path=None) -> RunReport:
+    """
+    Mine every sample and report what came back, with raw p-values and nothing cut.
+
+    samples:      iterable of (sample_id, coords, labels)
+    workers:      An integer runs that many processes — on Windows,
+                  guard the caller with `if __name__ == "__main__"`.
+                  `None` makes it to run here. 
+    output_path:  where to write run_config.json. `None` writes nothing.
+
+    A sample that raises lands in report.failures. If every sample fails, this raises.
+    """
+    setup_console_logging()
+    tasks = [
+        (sample_id, coords, labels, settings, n_shuffles, seed_for(random_seed, sample_id),
+         tuple(labels_kept_fixed), min_lift_gain)
+        for sample_id, coords, labels in samples
+    ]
+    if not tasks:
+        raise ValueError("no samples were given")
+
+    if output_path is not None:
+        _save_config(output_path, settings, dict(
+            n_shuffles=n_shuffles, random_seed=random_seed, labels_kept_fixed=list(labels_kept_fixed),
+            min_lift_gain=min_lift_gain, workers=workers,
+        ))
+
+    logger.info(f"Mining {len(tasks)} samples" + (f" across {workers} processes" if workers else ""))
+    if workers:
+        with ProcessPoolExecutor(max_workers=workers, initializer=setup_console_logging) as pool:
+            outcomes = list(pool.map(_run_one, tasks))
+    else:
+        outcomes = [_run_one(task) for task in tasks]
+
+    report = RunReport()
+    for result, failure in outcomes:
+        if result is not None:
+            report.results.append(result)
+        else:
+            report.failures.append(failure)
+
+    if report.failures:
+        logger.warning(f"{len(report.failures)} of {len(tasks)} samples failed:")
+        for sample_id, message in report.failures:
+            logger.warning(f"  {sample_id}: {message.splitlines()[-1]}")
+    if not report.results:
+        raise RuntimeError(f"every one of the {len(tasks)} samples failed. First: {report.failures[0][1]}")
+
+    logger.info(f"Done. {len(report.results)} samples, {len(report.rules())} rules")
+    return report
+
+
+def _run_one(task):
+    """One sample. Returns (result, None) or (None, (sample_id, traceback))."""
+    sample_id, coords, labels, settings, n_shuffles, seed, kept_fixed, min_lift_gain = task
+    try:
+        result = mine(coords, labels, settings)
+        # Everything gets tested: a rule removed before testing later reads as one
+        # that was tested and failed.
+        tested = result.add_p_values(
+            n_shuffles=n_shuffles, random_seed=seed, labels_kept_fixed=kept_fixed,
+        )
+        kept = filter_rules(tested, min_lift_gain=min_lift_gain)
+
+        logger.info(f"[{sample_id}] {result.stats['patches_kept']} transactions, "
+                    f"{len(result.rules)} mined, {len(kept)} kept")
+        return SampleResult(sample_id, kept, tested, result.stats), None
+    except Exception:
+        return None, (sample_id, traceback.format_exc())
+
+
+def setup_console_logging(level=logging.INFO):
+    """Show progress on the console. Does nothing if logging is already configured."""
+    package = logging.getLogger(__package__)
+    if package.handlers or logging.getLogger().handlers:
+        return
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%H:%M:%S"))
+    package.addHandler(handler)
+    package.setLevel(level)
+
+
+def _save_config(output_path, settings, steps):
+    """Record what this run was asked to do. The only file the library writes."""
+    os.makedirs(output_path, exist_ok=True)
+    with open(os.path.join(output_path, "run_config.json"), "w") as f:
+        record = {"settings": asdict(settings), "steps": steps}
+        # bandwidth may be empty in the settings; record what the run actually used.
+        record["settings"]["decay_distance"] = settings.decay_distance
+        json.dump(record, f, indent=2, default=str)

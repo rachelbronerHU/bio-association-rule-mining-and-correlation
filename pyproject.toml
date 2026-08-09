@@ -6,22 +6,24 @@ build-backend = "setuptools.build_meta"
 name = "script-rule-mining"
 version = "0.1.0"
 description = "Association Rule Mining for MIBI-TOF Data"
-readme = "README.md"
+readme = "fpgrowth_rule_mining/README.md"
 requires-python = ">=3.10"
 dependencies = [
     "ipython",
-    "joblib",
     "matplotlib",
-    "mlxtend",
     "numpy",
     "pandas",
     "scikit-learn",
     "scipy",
     "seaborn",
-    "statsmodels",
-    "xgboost"
+    "statsmodels"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [tool.setuptools]
-packages = ["check_rule_correlation_with_disease", "data_exploration", "result_exploration", "visualization"]
-py-modules = ["constants", "run_association_mining", "transactions", "worker_task"]
+# The library only. data_exploration and result_exploration are this project's own
+# scripts and notebooks, not something an install should ship.
+packages = ["fpgrowth_rule_mining", "fpgrowth_rule_mining.validation"]
+py-modules = ["constants", "run_association_mining"]

@@ -132,7 +132,7 @@ def mine_avoidance(matrix, item_index, settings):
 
     splits = []
 
-    print(f"Mine_avoidance - about to test {planned} itemsets!")
+    logger.info(f"Mine_avoidance - about to test {planned} itemsets!")
 
     for itemset in candidate_sets(items, max_items):
         support = supports[itemset]

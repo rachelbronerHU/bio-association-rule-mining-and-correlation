@@ -11,7 +11,7 @@ def _parse_list_env(env_var: str, default: list) -> list:
 
 
 # Debugging Configurations
-DEBUG = False # Set to True for quick test
+DEBUG = True # Set to True for quick test
 DEBUG_FOVS_PER_GROUP = 10
 
 # How much a neighbour counts, and how cells are grouped. Everything else is identical.
@@ -64,7 +64,7 @@ SETTINGS = Settings(
     strong_confidence=0.9,      # above this confidence a lower support is allowed
     min_support_when_strong=0.005,
 
-    min_confidence=0.3,
+    min_confidence=0.5,
     min_leverage=0.0005,
     min_conviction=1.3,
 

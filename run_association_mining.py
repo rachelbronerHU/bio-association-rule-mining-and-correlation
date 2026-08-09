@@ -235,7 +235,7 @@ def run_pipeline():
     os.makedirs(RESULTS_DATA_DIR, exist_ok=True)
     # Log to console and to a file in the results directory
     logging.basicConfig(
-        level=logging.INFO, 
+        level=logging.DEBUG if DEBUG else logging.INFO, 
         format="%(asctime)s %(message)s", 
         datefmt="%H:%M:%S",
         handlers=[

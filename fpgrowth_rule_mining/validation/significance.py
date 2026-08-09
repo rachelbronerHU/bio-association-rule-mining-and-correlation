@@ -33,43 +33,86 @@ def seed_for(base_seed, sample_id):
 
 
 def p_values_for(rules, patches, labels, settings, n_shuffles, random_seed=None, labels_kept_fixed=()):
-    """The raw p-value for each rule, in order. Nothing is corrected here."""
+    """The raw p-value for each rule, in order. Nothing is corrected here (no FDR)."""
+
     if rules.empty or n_shuffles <= 0:
         return np.ones(len(rules))
+    
     if "kind" not in rules.columns:
         raise ValueError("rules need a 'kind' column: a rule is tested against the "
                          "thresholds of the search that found it, and this cannot guess which")
+    
     if (rules["kind"] == AVOIDS).any() and settings.avoidance_max_lift is None:
         raise ValueError("these rules include avoidance, but the settings have no "
                          "avoidance_max_lift to test them against. Testing them by a "
                          "different threshold than the one that found them would make "
                          "the p-values answer a different question")
 
+
+    # --- 1. ENCODE LABELS ---
+    # One-hot encode labels (1 row per cell, 1 column per cell type).
+    #
+    # Example: (Col 0=T-Cell, Col 1=B-Cell, Col 2=Macro)
+    #          [ T, B, M ]
+    # Cell 0:  [ 1, 0, 0 ]  (T-Cell)
+    # Cell 1:  [ 0, 1, 0 ]  (B-Cell)
+    # Cell 2:  [ 1, 0, 0 ]  (T-Cell)
+    #
+    # The shuffle test permutes these rows to randomly reassign cell types.
     labels = np.asarray(labels, dtype=object)
     names = sorted({str(label) for label in labels})
     column_of = {name: i for i, name in enumerate(names)}
 
-    # One row per cell, marking its label. Shuffling permutes these rows.
-    # float64 to match the mining matrix, so both judge a borderline rule the same.
     cell_labels = np.zeros((len(labels), len(names)), dtype=float)
     for cell, label in enumerate(labels):
         cell_labels[cell, column_of[str(label)]] = 1.0
 
+    # --- 2. MAP THE TISSUE ---
+    # Build sparse adjacency maps. The physical tissue layout stays fixed
+    # so we avoid recalculating spatial distances for every shuffle.
+    #
+    # Example (centers matrix): 
+    #          [ C0, C1, C2 ]
+    # Patch 0: [  0,  1,  0 ]  (Patch 0's center is Cell 1)
+    # Patch 1: [  0,  0,  1 ]  (Patch 1's center is Cell 2)
+    # Patch 2: [  1,  0,  0 ]  (Patch 2's center is Cell 0)
     centers, neighbors, membership, patch_sizes = _adjacency(patches, len(labels))
-    # A transaction column per item: centres first, then neighbours.
+
+
+    # --- 3. PREPARE THE RULES ---
+
+    # Map human-readable cell names to matrix column indices.
     item_index = {}
     for name, column in column_of.items():
         item_index[item_of(name, CENTER)] = column
         item_index[item_of(name, NEIGHBOR)] = column + len(names)
 
+    # --- 4. LOCK FIXED CELLS ---
+
+    # Identify which cells can be randomly reassigned vs which must stay anchored.
     movable = np.arange(len(labels))[~_held_fixed(labels, labels_kept_fixed)]
     _check_enough_moves(movable.size, len(labels), labels_kept_fixed)
+    
     rng = np.random.default_rng(random_seed)
-    layout = _rule_columns(rules, item_index)   # identical every shuffle
+    layout = _rule_columns(rules, item_index)
 
     logger.info(f"Shuffling labels {n_shuffles} times against {len(rules)} rules...")
     started = time.time()
 
+    # --- 5. THE SHUFFLE TEST ---
+    # Randomize label assignments n times to see if rules survive by chance.
+    #
+    # How matrix multiplication (centers @ shuffled) instantly rebuilds the patches.
+    # Imagine the shuffle just randomly turned Cell 1 into a Macrophage:
+    #
+    #    [ centers matrix ]   @    [ shuffled matrix ]    =  [ final patch center types ]
+    #       (C0, C1, C2)               (T, B, M)                    (T, B, M)
+    #
+    # P0: [  0,  1,  0  ]          C0: [ 0, 1, 0 ]           P0: [ 0, 0, 1 ]  <- (P0 center is now a Macro!)
+    # P1: [  0,  0,  1  ]    @     C1: [ 0, 0, 1 ]    =      P1: [ 1, 0, 0 ]
+    # P2: [  1,  0,  0  ]          C2: [ 1, 0, 0 ]           P2: [ 0, 1, 0 ]
+    # 
+    # The math instantly maps the fake labels onto the physical patches!
     survived = np.zeros(len(rules))
     for i in range(n_shuffles):
         order = np.arange(len(labels))
@@ -77,34 +120,41 @@ def p_values_for(rules, patches, labels, settings, n_shuffles, random_seed=None,
             order[movable] = rng.permutation(movable)
         shuffled = cell_labels[order, :]
 
-        # Rebuild the transaction weights, capped as a real transaction is.
+        # Multiply the fixed tissue maps by the randomized labels to rebuild patches.
         transactions = np.hstack([
             np.minimum(_dense(centers @ shuffled), 1.0),
             np.minimum(_dense(neighbors @ shuffled), 1.0),
         ])
-        # Drop crowded patches as the real run did, judged on the shuffled labels:
-        # the null repeats the procedure, not the outcome.
+        
+        # Drop patches crowded by a single cell type, repeating the real run's procedure.
         transactions = transactions[not_crowded(membership, patch_sizes, shuffled,
                                                 settings.max_one_type_share)]
+                                                
+        # Tally how many rules passed the statistical thresholds by pure chance.
         survived += survives_shuffle(layout, transactions, settings)
 
         if i == 0 or (i + 1) % 100 == 0 or i == n_shuffles - 1:
-            logger.info(f"  shuffle {i + 1}/{n_shuffles}")
+            logger.debug(f"  shuffle {i + 1}/{n_shuffles}")
 
     logger.info(f"Shuffling took {time.time() - started:.2f}s")
 
-    # +1 top and bottom: never surviving is not proof, just "under 1 in n".
+    # --- 6. SCORE P-VALUES ---
+    # (times survived by luck + 1) / (total shuffles + 1)
     p_values = (survived + 1) / (n_shuffles + 1)
-    # A rule naming a cell type this sample lacks was never tested. No evidence is 1.0.
+    
+    # If a cell type was completely absent, its rule was never tested (p = 1.0).
     p_values[~layout.usable] = 1.0
     return p_values
 
 
 def _adjacency(patches, n_cells):
     """
-    Who is where: one row per patch, one column per cell.
+    Maps patches to physical cell IDs so shuffle tests can run via fast sparse matrix math.
 
-    centers/neighbors carry the weights. membership is plain 1s, for counting labels.
+    Returns 3 sparse matrices:
+    - centers: Identifies the exact single cell acting as the center of each patch.
+    - neighbors: Holds the mathematical distance weights of all surrounding cells.
+    - membership: Records a plain 1 for every cell inside the patch, used to quickly count raw cell totals.
     """
     center_rows, center_cols = [], []
     neighbor_rows, neighbor_cols, neighbor_weights = [], [], []

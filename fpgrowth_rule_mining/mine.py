@@ -1,10 +1,14 @@
 """The entry point: coordinates and labels in, rules out."""
 
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import List
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from .attraction import mine_attraction
 from .avoidance import mine_avoidance
@@ -20,9 +24,17 @@ def mine_rules(transactions, settings: Settings) -> pd.DataFrame:
         return empty_rules()
 
     matrix, item_index = weight_matrix(transactions)
+    
+    start_attraction = time.time()
     found = [mine_attraction(transactions, matrix, item_index, settings)]
+    elapsed_att = time.time() - start_attraction
+    logger.info(f"Attraction search took {int(elapsed_att // 60)}m {elapsed_att % 60:.1f}s" if elapsed_att >= 60 else f"Attraction search took {elapsed_att:.2f}s")
+    
     if settings.include_avoidance_rules:
+        start_avoidance = time.time()
         found.append(mine_avoidance(matrix, item_index, settings))
+        elapsed_avo = time.time() - start_avoidance
+        logger.info(f"Avoidance search took {int(elapsed_avo // 60)}m {elapsed_avo % 60:.1f}s" if elapsed_avo >= 60 else f"Avoidance search took {elapsed_avo:.2f}s")
 
     found = [frame for frame in found if not frame.empty]
     return pd.concat(found, ignore_index=True) if found else empty_rules()

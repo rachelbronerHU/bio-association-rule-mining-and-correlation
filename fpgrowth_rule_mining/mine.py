@@ -28,13 +28,16 @@ def mine_rules(transactions, settings: Settings) -> pd.DataFrame:
     start_attraction = time.time()
     found = [mine_attraction(transactions, matrix, item_index, settings)]
     elapsed_att = time.time() - start_attraction
-    logger.info(f"Attraction search took {int(elapsed_att // 60)}m {elapsed_att % 60:.1f}s" if elapsed_att >= 60 else f"Attraction search took {elapsed_att:.2f}s")
-    
+    str_attraction_time = f"Attraction search took {int(elapsed_att // 60)}m {elapsed_att % 60:.1f}s" if elapsed_att >= 60 else f"Attraction search took {elapsed_att:.2f}s"
+    str_avoidance_time = ""
+
     if settings.include_avoidance_rules:
         start_avoidance = time.time()
         found.append(mine_avoidance(matrix, item_index, settings))
         elapsed_avo = time.time() - start_avoidance
-        logger.info(f"Avoidance search took {int(elapsed_avo // 60)}m {elapsed_avo % 60:.1f}s" if elapsed_avo >= 60 else f"Avoidance search took {elapsed_avo:.2f}s")
+        str_avoidance_time = f"Avoidance search took {int(elapsed_avo // 60)}m {elapsed_avo % 60:.1f}s" if elapsed_avo >= 60 else f"Attraction search took {elapsed_att:.2f}s | Avoidance search took {elapsed_avo:.2f}s"
+
+    logger.info(f"{str_attraction_time} {"|" + str_avoidance_time if str_avoidance_time else ''}")
 
     found = [frame for frame in found if not frame.empty]
     return pd.concat(found, ignore_index=True) if found else empty_rules()

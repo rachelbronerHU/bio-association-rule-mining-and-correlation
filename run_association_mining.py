@@ -233,8 +233,16 @@ def run_pipeline():
     _clear_previous_run(RESULTS_ALGO_DIR)
     # Made once, here: a run that finds no rules still has files to write.
     os.makedirs(RESULTS_DATA_DIR, exist_ok=True)
-    # Log to the console. Redirect the run to keep a file: python run_association_mining.py > run.log
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    # Log to console and to a file in the results directory
+    logging.basicConfig(
+        level=logging.INFO, 
+        format="%(asctime)s %(message)s", 
+        datefmt="%H:%M:%S",
+        handlers=[
+            logging.FileHandler(f"{RESULTS_ALGO_DIR}/run.log"),
+            logging.StreamHandler()
+        ]
+    )
 
     logger.info("===================================================================================")
     logger.info(f"========================= MINING: {WEIGHTING} / {METHOD} =========================")

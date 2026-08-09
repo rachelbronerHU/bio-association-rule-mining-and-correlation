@@ -35,7 +35,7 @@ def mine_rules(transactions, settings: Settings) -> pd.DataFrame:
         start_avoidance = time.time()
         found.append(mine_avoidance(matrix, item_index, settings))
         elapsed_avo = time.time() - start_avoidance
-        str_avoidance_time = f"Avoidance search took {int(elapsed_avo // 60)}m {elapsed_avo % 60:.1f}s" if elapsed_avo >= 60 else f"Attraction search took {elapsed_att:.2f}s | Avoidance search took {elapsed_avo:.2f}s"
+        str_avoidance_time = f"Avoidance search took {int(elapsed_avo // 60)}m {elapsed_avo % 60:.1f}s" if elapsed_avo >= 60 else f"Avoidance search took {elapsed_avo:.2f}s"
 
     logger.info(f"{str_attraction_time} {"|" + str_avoidance_time if str_avoidance_time else ''}")
 

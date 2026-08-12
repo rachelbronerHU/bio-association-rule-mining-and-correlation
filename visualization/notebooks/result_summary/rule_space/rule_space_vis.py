@@ -13,7 +13,9 @@ from matplotlib.patches import Patch, Rectangle
 import vis_helper as vh
 from vis_helper import save_figure, _finish, _titled, _category_colors
 
-_GROUP_COLORS = ["#4c5c68", "#c9a227"]   # groups are a split, not a category: never the category palette
+# Groups are a split, not a category: never the category palette. Blue against gold,
+# far enough apart to survive colour blindness.
+_GROUP_COLORS = ["#2F6FA8", "#C98A1F"]
 
 # Only a handful of cell types are stacked in one bar, and they need to be told apart at
 # a glance. The shared cell colours are spread over every cell type at once, so next to

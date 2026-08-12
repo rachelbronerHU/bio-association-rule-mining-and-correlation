@@ -12,10 +12,11 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-# Stage colors for the fingerprint strips (baseline greens -> warm severity).
+# Stage colors for the fingerprint strips: the same green -> amber -> red climb as
+# PCA_STAGE_COLORS below, one step lighter so a strip stays quiet behind the heatmap.
 _STAGE_PALETTE = {
-    "Control_S": "#4d9221", "Control": "#a1d99b",
-    "Mild": "#fdae6b", "Severe": "#e34a33", "Unknown": "#dddddd",
+    "Control_S": "#3E9068", "Control": "#7FCBA0",
+    "Mild": "#F2AA4C", "Severe": "#DE6767", "Unknown": "#e3e2dc",
 }
 
 
@@ -528,11 +529,14 @@ def plot_rule_metric_scatter_interactive(table, size_col="n_Patient", color_col=
 FIGURE_DIR = "summary_downloads"          # written next to result_summary.tex
 
 # Stage colors for dots on a white background (stronger than the strip palette).
+# A green -> amber -> red climb, because the stages are an order, not a list of names.
+# Checked for colour blindness: every pair of the three stages that share a plot stays
+# apart under protanopia, deuteranopia and tritanopia.
 PCA_STAGE_COLORS = {
-    "Control_S": "#2E7D32",     # dark green
-    "Control": "#81C784",       # light green
-    "Mild": "#FFA726",          # orange
-    "Severe": "#D32F2F",        # red
+    "Control_S": "#1F7A4D",     # deep green
+    "Control": "#4FB477",       # green
+    "Mild": "#E8890C",          # amber
+    "Severe": "#D03B3B",        # red
 }
 PCA_STAGE_ORDER = ["Control_S", "Control", "Mild", "Severe"]
 

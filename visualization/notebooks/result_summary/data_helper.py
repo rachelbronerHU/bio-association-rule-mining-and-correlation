@@ -21,6 +21,15 @@ RESULT_RUN = "full_run/weighted_fpgrowth_4_items_no_markers_with_ex_per"
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 RESULT_CSV_PATH = os.path.join(_ROOT, "results", *RESULT_RUN.split("/"), "data")
 
+# A run holds its rules in one of two layouts: split in two by prepare_data.ipynb, or
+# a single file already cut down. Which one is on disk says which to read.
+PAIRWISE_FILENAME = "results_CN_pairwise.csv"
+COMPLEX_FILENAME = "results_CN_complex.csv"
+FILTERED_FILENAME = "results_CN_filtered.csv"
+
+# How significant a rule has to be to be worth looking at.
+MAX_FDR = 0.05
+
 # Stages left out of everything, by Pathological score. Set here and no notebook sees
 # those FOVs at all - not in a heatmap, not in a PCA, not in a cell count.
 # Control_S is the second control group, 21 FOVs.
@@ -134,32 +143,87 @@ def load_spatial_data(data_dir=None):
 # 2. Load the mined rules (same table for both notebooks)
 # ---------------------------------------------------------------------------
 
-def _count_items(row):
-    """How many cell types the rule mentions in total (antecedent + consequent)."""
+def count_items(row):
+    """How many items the rule mentions in total (antecedent + consequent).
+
+    Items, not cell types: 'Paneth_CENTER + Paneth_NEIGHBOR' is two. This is the same
+    count the library uses for its own Rule_Type, so the two always agree.
+    """
     ants = ast.literal_eval(str(row["Antecedents"]))
     cons = ast.literal_eval(str(row["Consequents"]))
     return len(ants) + len(cons)
 
 
-def load_results(result_csv_dir=None, rule_max_items=2, positive_only=True):
-    """Read the filtered rules and keep the ones we want to study.
+def _read_rules(directory, rule_max_items):
+    """The run's rules, from whichever layout this directory holds.
+
+    Split in two: read the pairwise file, and pay for the complex one only when a
+    caller asks for longer rules. A single filtered file holds both, so it is read
+    whole and narrowed afterwards.
+    """
+    pairwise_path = os.path.join(directory, PAIRWISE_FILENAME)
+    if os.path.exists(pairwise_path):
+        read = [PAIRWISE_FILENAME]
+        frames = [pd.read_csv(pairwise_path)]
+
+        complex_path = os.path.join(directory, COMPLEX_FILENAME)
+        if rule_max_items > 2 and os.path.exists(complex_path):
+            read.append(COMPLEX_FILENAME)
+            frames.append(pd.read_csv(complex_path))
+
+        print(f"Read {' + '.join(read)}")
+        return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+    filtered_path = os.path.join(directory, FILTERED_FILENAME)
+    if os.path.exists(filtered_path):
+        print(f"Read {FILTERED_FILENAME}")
+        return pd.read_csv(filtered_path)
+
+    print(f"No rules found in {directory}. Run prepare_data.ipynb first.")
+    return pd.DataFrame()
+
+
+def load_results(result_csv_dir=None, rule_max_items=2, positive_only=True, max_fdr=None):
+    """Read the run's rules and keep the ones we want to study.
 
     result_csv_dir : which run to read; RESULT_CSV_PATH above unless given.
-    rule_max_items : keep rules with at most this many cell types (2 = pairwise).
+    rule_max_items : keep rules with at most this many items (2 = pairwise).
     positive_only  : keep only rules with Lift > 1 (the cell types attract each other).
+    max_fdr        : how significant a rule must be; MAX_FDR above unless given.
+                     Applied when the rules carry an Individual_FDR column.
     """
-    path = os.path.join(result_csv_dir or RESULT_CSV_PATH, "results_CN_filtered.csv")
-    if not os.path.exists(path):
-        print(f"File not found: {path}")
-        return pd.DataFrame()
-
-    rules = pd.read_csv(path)
+    # Read at call time rather than as a default, so setting dh.MAX_FDR works the way
+    # setting dh.RESULT_RUN does.
+    max_fdr = MAX_FDR if max_fdr is None else max_fdr
+    rules = _read_rules(result_csv_dir or RESULT_CSV_PATH, rule_max_items)
+    if rules.empty:
+        return rules
     print(f"Loaded {len(rules)} rules.")
 
-    rules = rules[rules.apply(_count_items, axis=1) <= rule_max_items].copy()
+    if "Individual_FDR" in rules.columns:
+        rules = rules[rules["Individual_FDR"] <= max_fdr].copy()
+        print(f"Kept {len(rules)} rules at FDR <= {max_fdr}.")
+
+    rules = rules[rules.apply(count_items, axis=1) <= rule_max_items].copy()
     if positive_only:
         rules = rules[rules["Lift"] > 1].copy()
     print(f"Kept {len(rules)} rules (max_items={rule_max_items}, positive_only={positive_only}).")
+    return rules
+
+
+def load_complex_results(result_csv_dir=None):
+    """Read the longer rules, every one of them, for the complex-rule notebook.
+
+    Nothing is filtered - not by significance and not by class. The point of that
+    notebook is how the classes are distributed, and the redundant ones are half the
+    story, so a loader that dropped them would empty out what it is meant to show.
+    """
+    path = os.path.join(result_csv_dir or RESULT_CSV_PATH, COMPLEX_FILENAME)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} not found. Run prepare_data.ipynb first.")
+
+    rules = pd.read_csv(path)
+    print(f"Loaded {len(rules)} complex rules.")
     return rules
 
 

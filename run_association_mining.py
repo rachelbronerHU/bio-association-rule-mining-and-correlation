@@ -11,6 +11,7 @@ from constants import (
     DEBUG,
     DEBUG_FOVS_PER_GROUP,
     LABELS_KEPT_FIXED,
+    MAX_INDIVIDUAL_FDR,
     METHOD,
     MIBI_GUT_DIR_PATH,
     MIN_LIFT_GAIN,
@@ -207,10 +208,12 @@ def save_results(rules, df_biopsy, df_fovs, suffix):
         "Support": rules["support"],
         "Rule_Type": rules["rule_type"],
         "Complex_Class": rules["complex_class"],
+        "Adds_Information": rules["adds_information"],
         "Simpler_Rules": rules["simpler_rules"].apply(_as_text),
     })
     if "p_value" in rules.columns:
         df_flat["P_Value"] = rules["p_value"]
+        df_flat["Individual_FDR"] = rules["individual_fdr"]
 
     # No count of how many FOVs a rule appeared in: an uncorrected count sitting next
     # to p-values gets read as evidence. dataset_significance_*.csv answers that.
@@ -263,6 +266,7 @@ def run_pipeline():
         random_seed=RANDOM_SEED,
         labels_kept_fixed=LABELS_KEPT_FIXED,
         min_lift_gain=MIN_LIFT_GAIN,
+        max_individual_fdr=MAX_INDIVIDUAL_FDR,
         workers=WORKERS,
         output_path=RESULTS_ALGO_DIR,
     )

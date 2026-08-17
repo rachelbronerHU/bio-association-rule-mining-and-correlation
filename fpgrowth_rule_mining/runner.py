@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SampleResult:
     sample_id: object
-    rules: pd.DataFrame     # what survived the redundancy filter
+    rules: pd.DataFrame     # every rule, classified. adds_information marks the redundant ones
     tested: pd.DataFrame    # everything mined, with raw p-values, nothing removed
     stats: dict
 
@@ -68,7 +68,11 @@ class RunReport:
         One row per rule: groups_tested, groups_passed, p_value, dataset_fdr.
         See README, "Testing many rules at once".
         """
+        # A rule a shorter one already said is not a claim of its own, so it is not asked
+        # about and does not enlarge the family the correction divides across.
         tested, claims = self.tested(), self.rules()
+        if not claims.empty:
+            claims = claims[claims["adds_information"]]
         if tested.empty or claims.empty:
             return pd.DataFrame(columns=["antecedents", "consequents", "groups_tested",
                                          "groups_passed", "p_value", "dataset_fdr"])
@@ -115,7 +119,7 @@ class RunReport:
 
 
 def run_samples(samples, settings: Settings, *, n_shuffles, random_seed=None,
-                labels_kept_fixed=(), min_lift_gain=None,
+                labels_kept_fixed=(), min_lift_gain=None, max_individual_fdr=None,
                 workers=None, output_path=None) -> RunReport:
     """
     Mine every sample and report what came back, with raw p-values and nothing cut.
@@ -131,7 +135,7 @@ def run_samples(samples, settings: Settings, *, n_shuffles, random_seed=None,
     setup_console_logging()
     tasks = [
         (sample_id, coords, labels, settings, n_shuffles, seed_for(random_seed, sample_id),
-         tuple(labels_kept_fixed), min_lift_gain)
+         tuple(labels_kept_fixed), min_lift_gain, max_individual_fdr)
         for sample_id, coords, labels in samples
     ]
     if not tasks:
@@ -170,7 +174,7 @@ def run_samples(samples, settings: Settings, *, n_shuffles, random_seed=None,
 
 def _run_one(task):
     """One sample. Returns (result, None) or (None, (sample_id, traceback))."""
-    sample_id, coords, labels, settings, n_shuffles, seed, kept_fixed, min_lift_gain = task
+    sample_id, coords, labels, settings, n_shuffles, seed, kept_fixed, min_lift_gain, max_individual_fdr = task
     try:
         result = mine(coords, labels, settings, sample_id=sample_id)
         # Everything gets tested: a rule removed before testing later reads as one
@@ -178,11 +182,13 @@ def _run_one(task):
         tested = result.add_p_values(
             n_shuffles=n_shuffles, random_seed=seed, labels_kept_fixed=kept_fixed, sample_id=sample_id,
         )
-        kept = filter_rules(tested, min_lift_gain=min_lift_gain)
+        classified = filter_rules(tested, min_lift_gain=min_lift_gain,
+                                  max_individual_fdr=max_individual_fdr)
 
         logger.info(f"[{sample_id}] {result.stats['patches_kept']} transactions, "
-                    f"{len(result.rules)} mined, {len(kept)} kept")
-        return SampleResult(sample_id, kept, tested, result.stats), None
+                    f"{len(result.rules)} mined, "
+                    f"{int(classified['adds_information'].sum())} add information")
+        return SampleResult(sample_id, classified, tested, result.stats), None
     except Exception:
         return None, (sample_id, traceback.format_exc())
 

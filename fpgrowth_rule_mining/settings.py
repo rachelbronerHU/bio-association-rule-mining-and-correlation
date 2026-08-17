@@ -22,7 +22,7 @@ class Method(str, Enum):
     __str__ = str.__str__
 
 
-LONGEST_RULE = 5     # avoidance.py guards the actual work, which also grows with items
+LONGEST_RULE = 5     # both searches prune by support; this caps how long a rule may get
 
 
 @dataclass(frozen=True)

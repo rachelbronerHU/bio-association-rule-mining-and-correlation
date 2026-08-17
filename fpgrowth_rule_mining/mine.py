@@ -15,6 +15,7 @@ from .avoidance import mine_avoidance
 from .rules import drop_rare_labels, empty_rules, labels_with_enough_cells, weight_matrix
 from .settings import Settings
 from .validation.significance import p_values_for
+from .validation.false_discovery import false_discovery_rates
 from .transactions import Patch, build_transactions, find_patches, measure_patches
 
 
@@ -56,15 +57,18 @@ class Result:
 
     def add_p_values(self, n_shuffles, rules=None, random_seed=None, labels_kept_fixed=(), sample_id=""):
         """
-        Test rules against shuffled labels and attach a raw p_value.
+        Test rules against shuffled labels: a raw p_value, and individual_fdr, that
+        same p-value corrected across every rule tested here.
 
-        Defaults to this run's rules, but takes any subset. Nothing is corrected.
+        Defaults to the rules this sample produced, but takes any subset — the
+        correction is over whatever you pass in.
         """
         rules = (self.rules if rules is None else rules).copy()
         rules["p_value"] = p_values_for(
             rules, self.patches, self.labels, self.settings,
             n_shuffles, random_seed, labels_kept_fixed, sample_id,
         )
+        rules["individual_fdr"] = false_discovery_rates(rules["p_value"].values)
         return rules
 
 

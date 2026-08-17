@@ -82,4 +82,5 @@ SETTINGS = Settings(
 N_SHUFFLES = 5 if DEBUG else 1000
 RANDOM_SEED = 42                     # each FOV derives its own seed from this
 MIN_LIFT_GAIN = 1.1                  # a longer rule must beat its shorter version by this much
+MAX_INDIVIDUAL_FDR = 0.05            # a sub-rule needs FDR this low to make a complex rule redundant
 

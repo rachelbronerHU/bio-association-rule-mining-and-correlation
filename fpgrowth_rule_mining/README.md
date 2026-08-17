@@ -39,7 +39,7 @@ A rule always reads *centre → neighbours*. The centre is on the left, never th
 | 4 | `attraction.py`, `avoidance.py` | two searches, one per claim — see below |
 | 5 | `rules.py` | measure and judge. Rules naming a too-rare cell type are dropped |
 | 6 | `validation/significance.py` | shuffle the labels, see how often the rule still passes → `p_value` |
-| 7 | `rules.py` | drop rules a shorter rule already said (`filter_rules`) |
+| 7 | `rules.py` | label rules a shorter rule already said (`filter_rules`) |
 | 8 | `validation/false_discovery.py` | does the rule hold across the whole dataset? |
 
 Steps 1–7 run per sample. Step 8 is the only one that looks across samples.
@@ -61,7 +61,7 @@ if __name__ == "__main__":                       # required when workers is set
         samples,                                 # (sample_id, coords, labels) triples
         settings,
         n_shuffles=1000, random_seed=42,
-        min_lift_gain=1.1,
+        min_lift_gain=1.1, max_individual_fdr=0.05,
         workers=8, output_path="results/",
     )
 
@@ -81,7 +81,7 @@ from fpgrowth_rule_mining import mine, filter_rules
 
 result = mine(coords, labels, settings)          # coords (n, 2), labels (n,)
 tested = result.add_p_values(n_shuffles=1000, random_seed=42)
-rules  = filter_rules(tested, min_lift_gain=1.1)
+rules  = filter_rules(tested, min_lift_gain=1.1, max_individual_fdr=0.05)
 ```
 
 The library writes nothing except `run_config.json`, and only if you pass
@@ -141,6 +141,7 @@ Two things it will not fudge:
 | `workers` | `None` runs here. An integer runs that many **processes** — mining is CPU-bound. On Windows, guard the caller with `if __name__ == "__main__"` |
 | `output_path` | where to write `run_config.json`. `None` writes nothing |
 | `min_lift_gain` | how much better a longer rule must be to earn its place |
+| `max_individual_fdr` | how significant a rule must be before it can condemn a longer one. `None` skips the check |
 
 Each sample derives its own seed from `random_seed`, so a parallel run matches a serial
 one.
@@ -159,8 +160,8 @@ exact: adding an item never raises min-based support, so nothing pruned could co
 - then `min_lift`, plus `min_leverage` / `min_conviction` / `min_confidence` if set
 
 **Avoidance** — `avoidance.py`. Cannot be the same search: low joint support *is* the
-finding, and never meeting — the strongest case — has no support to prune on. No tree,
-no pruning.
+finding, and never meeting — the strongest case — has no *joint* support to prune on. It
+prunes on each half of the rule instead, which is why it needs no tree.
 
 - **no joint-support requirement**
 - enough patches hold the antecedent to measure a rate on (`min_patches`)
@@ -201,15 +202,26 @@ to clear Poisson noise. That is what the shuffle test and the FDR correction are
 
 ### What bounds the avoidance search
 
-`max_items_per_rule`, not support. But rule length alone is not enough — the count grows
-with the number of items too: 20 items at length 6 is 54,000 combinations, 40 items is
-4.6 million. So:
+A rule is built from two **sides**: the antecedent and the consequent. Sides are grown
+one item at a time and measured a level at a time, then paired.
 
-- `max_items_per_rule` is capped at 5
-- above `MOST_COMBINATIONS`, the search refuses to start rather than running for days
-- only combinations with **at most one centre** are measured, since a candidate set
-  holds exactly one and splitting never moves it right. That is 3× fewer at length 4,
-  9× at length 6
+```
+expected meetings = ant_support x con_support x n,   and neither share exceeds 1
+```
+
+So each side alone must clear `avoidance_min_expected_meetings / n`, and an antecedent
+must also clear `min_patches / n`. A side is never more common than the shorter side it
+grew from, so one that fails is dropped and never grown again — the whole branch above
+it goes with it.
+
+That leaves:
+
+- `max_items_per_rule` is capped at 5, and a side holds at most `max_items_per_rule - 1`
+  items, since the other side needs one
+- a centre seeds a side and only neighbours extend it, so **no side ever holds two
+  centres** — a patch has one centre, so those could only ever measure zero
+- pairing walks the consequents most-common-first and stops as soon as one is too rare
+  for the antecedent in hand
 
 ## Why the two lift thresholds are required
 
@@ -262,8 +274,8 @@ Four steps:
 
 Notes:
 
-- **Which rules are asked about** — only those that survived the redundancy filter
-  somewhere. A rule a shorter one already said *everywhere* is not a separate claim.
+- **Which rules are asked about** — only those with `adds_information` somewhere. A rule
+  a shorter one already said *everywhere* is not a separate claim.
 - **Which samples are counted** — all of them. Redundancy is decided per sample, so
   counting only survivors would turn the others into failures they never were.
 - **It errs low.** The p-value is floored at `1/(n_shuffles+1)` and the ×m penalty
@@ -274,19 +286,104 @@ Notes:
 
 ## Complex rules classification
 
-Rules with 3 or more items are classified to see if they add new information beyond their simpler pairwise parts. The library adds three columns: `rule_type`, `complex_class`, and `simpler_rules`.
+A rule with 3 or more items is asked whether it adds anything its shorter parts did
+not. Nothing is dropped — four columns are added:
 
-Classification is based on `min_lift_gain`:
+- `rule_type` — `pairwise`, `ant-complex`, `con-complex`, `both-complex`
+- `complex_class` — why the rule was kept or dismissed, `None` for pairwise
+- `adds_information` — the one column to filter on
+- `simpler_rules` — exactly what it was weighed against
 
-**Type I (A + B → C)**
-- `"new"`: Neither `A → C` nor `B → C` were found.
-- `"improved"`: The rule beats the best simpler rule's lift by `min_lift_gain`.
-- `"redundant"`: Fails to improve upon the simpler rules.
+One column is read rather than written: `individual_fdr`, attached by
+`add_p_values()`. It is Benjamini-Hochberg over every rule that call tested, whatever
+its class, so nothing here runs in a circle. Per-sample, so distinct from
+`dataset_fdr`, which comes later across samples. *Significant* below means
+`individual_fdr ≤ max_individual_fdr`; rules that were never tested have no
+`individual_fdr`, and lift decides alone.
 
-**Type II (A → B + C)**
-- `"consequent-driven"`: `B` and `C` strongly predict each other, forming a natural niche.
-- `"new"`, `"improved"`, or `"redundant"`: Compared against `A → B` and `A → C`.
+### The decision tree
 
-Rules are not dropped; they are labeled. The `simpler_rules` column shows exactly which rules were used for the comparison.
+**Shortest rules first**, so a rule is only ever weighed against shorter ones already
+judged:
+
+```
+2 items ....................................... pairwise, keep. done.
+
+do the consequents already do this to each other?
+├─ every consequent pair backed by a two-item rule
+│  of the same kind, at least as strong?
+│  ├─ yes, and every backing rule significant . consequent_driven    DROP
+│  ├─ yes, but one rests on noise ............. consequent_is_noise  KEEP
+│  └─ no ...................................... fall through
+└─ one consequent only ........................ fall through
+
+shorter rules = every rule contained in this one,
+                one item left on each side
+
+├─ none were mined ............................ new                  KEEP
+├─ beats every one by min_lift_gain ........... stronger_effect      KEEP
+└─ matched at least one
+   ├─ any matched one is significant .......... redundant_by_simpler DROP
+   └─ none is ................................. simpler_are_noise    KEEP
+```
+
+`A + B → C + D` answers to `A → C`, `A + B → C`, `A → C + D` and the rest — every rule
+inside it, not only the next size down, since a rule two sizes down can be the strongest
+while the one between collapsed. A dismissed shorter rule still counts: it is a yardstick,
+not a verdict to inherit, or `new` stops meaning "nothing shorter was mined".
+
+The correction reads no class, so it runs first and nothing goes in a circle.
+
+`adds_information` is `False` for the two classes marked DROP, and `True` for everything
+else, pairwise rules included.
+
+### The consequent question, both ways
+
+Whether the consequents already do to each other what the rule claims the antecedent
+does to them. Every pair of consequent types must be backed, not just one — a niche
+means the whole group hangs together.
+
+| rule is | backing rule must be | at least as strong means |
+| --- | --- | --- |
+| `attracts` | `attracts` | pair lift ≥ this rule's — they always cluster, so finding them by the antecedent is not news |
+| `avoids` | `avoids` | pair lift ≤ this rule's — they already exclude each other, so nothing sitting by both is not news |
+
+### Counted by item, compared by type
+
+Two different questions, so two different ways of matching:
+
+- **How long is this rule?** By item, roles included. `Paneth_CENTER +
+  Paneth_NEIGHBOR → Epithelial_NEIGHBOR` is three items — the cell in the middle and
+  the cell beside it are two different observations.
+- **Which rule is it up against?** By cell type, role dropped, duplicates kept.
+  That rule answers to `Paneth → Epithelial`, whichever way round the roles fall.
+
+Keeping duplicates is what makes the two agree: the type list is as long as the item
+list, so dropping an item always lands on a genuinely shorter rule.
+
+Several arrangements share one signature — `Muscle_NEIGHBOR + Paneth_CENTER →
+Paneth_NEIGHBOR` and `Muscle_CENTER + Paneth_NEIGHBOR → Paneth_NEIGHBOR` both read
+`Muscle, Paneth → Paneth`. One speaks for the group: **rules that earned their place
+first, then the significant ones, then the strongest of those.**
+
+Direction stays in the signature, so `C → A` is not a shorter version of `A → C`. It is
+ignored only in the consequent question, where the rule joining two cell types always
+has one of them as its centre.
+
+### Notes
+
+- **`adds_information` is about redundancy, not evidence.** `simpler_are_noise` means
+  the *shorter* rules failed the threshold, not that this rule is weak. Filter
+  `individual_fdr` separately — it applies to every class alike.
+- **A rule the consequent question claimed is not re-asked** the shorter-rule
+  question, so a few rules that question would have caught are kept instead.
+- **`max_individual_fdr=None`** takes lift at its word: every rule counts as
+  convincing. Same when there are no p-values.
+- **`n_shuffles` has to be large enough.** p is floored at `1/(n_shuffles+1)`, and BH
+  needs a fraction `p_floor / max_individual_fdr` of the sample at that floor before
+  anything can clear it — 2% at 1000 shuffles and 0.05. Too few and every rule reads
+  as noise.
+- **Sub-rules and their longer rules are positively correlated**, not independent. BH
+  holds under positive dependence (PRDS) — an assumption, not a free lunch.
 
 Reference: [Bayardo et al., *Constraint-Based Rule Mining in Large, Dense Databases*](https://www.bayardo.org/ps/icde99.pdf)

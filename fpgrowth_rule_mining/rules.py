@@ -196,10 +196,10 @@ def drop_rare_labels(rules, labels, settings):
     return rules[keep]
 
 
-def filter_rules(rules, min_lift_gain=None):
+def filter_rules(rules, min_lift_gain=None, max_individual_fdr=None):
     """Classify rules instead of dropping them."""
     if min_lift_gain is None:
         min_lift_gain = 1.0
     from .complex_rules import classify_complex_rules
-    return classify_complex_rules(rules, min_lift_gain)
+    return classify_complex_rules(rules, min_lift_gain, max_individual_fdr)
 

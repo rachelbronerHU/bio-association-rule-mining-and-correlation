@@ -1,147 +1,240 @@
+"""
+Does a longer rule earn its place next to its shorter parts?
+
+Shortest rules first, so a rule is only ever weighed against shorter ones that have
+already been judged.
+
+Rules are counted by item but compared by cell type. 'Paneth_CENTER + Paneth_NEIGHBOR'
+is two items, and both are Paneth — so the rule is complex, and it answers to
+'Paneth -> ...' rather than only to the one arrangement that happens to match.
+
+individual_fdr is read, never written: add_p_values() corrects across every rule it
+tested, whatever its class, so nothing here runs in a circle. See README, "Complex
+rules classification".
+"""
+
+import itertools
+from collections import defaultdict
+from functools import lru_cache
+
 import pandas as pd
+
 from .transactions import strip_role
 
 ATTRACTS = "attracts"
 AVOIDS = "avoids"
 
-def classify_complex_rules(rules, min_lift_gain):
+NEW = "new"
+STRONGER_EFFECT = "stronger_effect"
+SIMPLER_ARE_NOISE = "simpler_are_noise"
+REDUNDANT_BY_SIMPLER = "redundant_by_simpler"
+CONSEQUENT_DRIVEN = "consequent_driven"
+CONSEQUENT_IS_NOISE = "consequent_is_noise"
+
+# The classes where something convincing was shown against the rule. The "_is_noise"
+# ones are not here: what would have dismissed them is itself too weak to judge by.
+REDUNDANT_CLASSES = frozenset({REDUNDANT_BY_SIMPLER, CONSEQUENT_DRIVEN})
+
+_ADDED_COLUMNS = {"rule_type": object, "complex_class": object, "adds_information": bool,
+                  "simpler_rules": object}
+
+
+def classify_complex_rules(rules, min_lift_gain, max_individual_fdr=None):
     """
-    Adds classification columns to rules.
-    Columns added:
-    - rule_type: 'pairwise', 'ant-complex', 'con-complex'
-    - complex_class: 'new', 'improved', 'redundant', 'consequent-driven', or None
-    - simpler_rules: list of simpler rules compared against
+    Adds classification columns to rules. Nothing is dropped.
+
+    - rule_type:        'pairwise', 'ant-complex', 'con-complex', 'both-complex'
+    - complex_class:    why the rule was kept or dismissed, None for pairwise
+    - adds_information: False when something else already said it — filter on this
+    - simpler_rules:    what the rule was weighed against
+
+    min_lift_gain:      how much a longer rule must beat a shorter one by
+    max_individual_fdr: how low a rule's individual_fdr must be before it can condemn
+                        a longer one. Smaller is stronger. None, or rules with no
+                        individual_fdr, takes lift at its word.
     """
     if rules.empty:
         rules = rules.copy()
-        rules["rule_type"] = pd.Series(dtype=str)
-        rules["complex_class"] = pd.Series(dtype=str)
-        rules["simpler_rules"] = pd.Series(dtype=object)
+        for column, dtype in _ADDED_COLUMNS.items():
+            rules[column] = pd.Series(dtype=dtype)
         return rules
 
     rules = rules.copy()
-    
-    # Pre-calculate labels for easier lookup
-    rules["ant_labels"] = rules["antecedents"].apply(lambda items: frozenset(strip_role(i) for i in items))
-    rules["con_labels"] = rules["consequents"].apply(lambda items: frozenset(strip_role(i) for i in items))
-    
-    # Initialize new columns
-    rules["rule_type"] = "pairwise"
+
+    antecedents = list(rules["antecedents"])
+    consequents = list(rules["consequents"])
+    kinds = list(rules["kind"])
+    lifts = list(rules["lift"])
+    fdrs = (list(rules["individual_fdr"]) if "individual_fdr" in rules.columns
+            else [float("nan")] * len(rules))
+
+    ant_types = [_types(items) for items in antecedents]
+    con_types = [_types(items) for items in consequents]
+    sizes = [len(a) + len(c) for a, c in zip(antecedents, consequents)]
+
+    rules["rule_type"] = [_rule_type(len(a), len(c))
+                          for a, c in zip(antecedents, consequents)]
     rules["complex_class"] = None
     rules["simpler_rules"] = [[] for _ in range(len(rules))]
-    
-    # Create a lookup dictionary: (ant_labels, con_labels, kind) -> lift
-    lift_map = {}
-    for row in rules.itertuples():
-        lift_map[(row.ant_labels, row.con_labels, row.kind)] = row.lift
 
-    for idx, row in rules.iterrows():
-        ant = row["ant_labels"]
-        con = row["con_labels"]
-        kind = row["kind"]
-        lift = row["lift"]
-        
-        len_ant = len(ant)
-        len_con = len(con)
-        total_len = len_ant + len_con
-        
-        if total_len <= 2:
+    # Several arrangements of the same cell types share one signature, so both maps
+    # hold every rule that fits, never just the last one seen.
+    same_types, pair_rules = defaultdict(list), defaultdict(list)
+    for pos in range(len(rules)):
+        same_types[(ant_types[pos], con_types[pos], kinds[pos])].append(pos)
+        if sizes[pos] == 2:
+            pair_rules[(frozenset(ant_types[pos] + con_types[pos]), kinds[pos])].append(pos)
+
+    def convincing(pos):
+        """
+        Does this rule stand up on its own, enough to condemn a longer one?
+
+        With no threshold, or no p-value to judge by, lift has the last word.
+        """
+        return max_individual_fdr is None or pd.isna(fdrs[pos]) or fdrs[pos] <= max_individual_fdr
+
+    def best_of(group, kind):
+        """
+        One rule to stand for all the arrangements sharing a type signature.
+
+        Rules that pass the FDR bar first, then the strongest of those.
+        """
+        passed_fdr = [pos for pos in group if convincing(pos)]
+        return _strongest(passed_fdr or group, lifts, kind)
+
+    informative = [True] * len(rules)
+    for pos in sorted(range(len(rules)), key=lambda p: sizes[p]):
+        # A two-item rule has nothing shorter to answer to.
+        if sizes[pos] == 2:
             continue
-            
-        if len_ant > 1 and len_con == 1:
-            rules.at[idx, "rule_type"] = "ant-complex"
-            _classify_type_1(rules, idx, ant, con, kind, lift, lift_map, min_lift_gain)
-        elif len_ant == 1 and len_con > 1:
-            rules.at[idx, "rule_type"] = "con-complex"
-            _classify_type_2(rules, idx, ant, con, kind, lift, lift_map, min_lift_gain)
-            
-    return rules.drop(columns=["ant_labels", "con_labels"])
 
+        idx = rules.index[pos]
+        kind, lift = kinds[pos], lifts[pos]
 
-def _format_rule(ant, con):
-    ant_str = " + ".join(sorted(ant))
-    con_str = " + ".join(sorted(con))
-    return f"{ant_str} -> {con_str}"
-
-
-def _classify_type_1(rules, idx, ant, con, kind, lift, lift_map, min_lift_gain):
-    # A + B -> C (Compare with A -> C and B -> C)
-    simpler_lifts = []
-    simpler_rule_strs = []
-    
-    for a in ant:
-        sub_ant = frozenset([a])
-        simpler_rule_strs.append(_format_rule(sub_ant, con))
-        key = (sub_ant, con, kind)
-        if key in lift_map:
-            simpler_lifts.append(lift_map[key])
-            
-    rules.at[idx, "simpler_rules"] = simpler_rule_strs
-    
-    if not simpler_lifts:
-        rules.at[idx, "complex_class"] = "new"
-    else:
-        max_simpler_lift = max(simpler_lifts)
-        
-        if kind == AVOIDS:
-            beats_it = lift < max_simpler_lift / min_lift_gain
+        backing = _consequent_pairs(con_types[pos], lift, kind, pair_rules, lifts)
+        if backing is not None:
+            rules.at[idx, "simpler_rules"] = _named(
+                [pos for pair in backing for pos in pair], antecedents, consequents)
+            if all(any(convincing(p) for p in pair) for pair in backing):
+                complex_class = CONSEQUENT_DRIVEN
+            else:
+                complex_class = CONSEQUENT_IS_NOISE
         else:
-            beats_it = lift >= max_simpler_lift * min_lift_gain
-            
-        if beats_it:
-            rules.at[idx, "complex_class"] = "improved"
-        else:
-            rules.at[idx, "complex_class"] = "redundant"
+            groups = (same_types.get(signature, [])
+                      for signature in _every_shorter(ant_types[pos], con_types[pos], kind))
+            # Prefer a parent that earned its place; if a group has none, weigh against
+            # the dismissed one rather than pretending nothing shorter exists.
+            live = [[p for p in group if informative[p]] or group
+                    for group in groups if group]
+            shorter = [best_of(group, kind) for group in live]
+            matched = [p for p in shorter
+                       if not _lift_beats(lift, lifts[p], min_lift_gain, kind)]
+            rules.at[idx, "simpler_rules"] = _named(shorter, antecedents, consequents)
+            if not shorter:
+                complex_class = NEW
+            elif not matched:
+                complex_class = STRONGER_EFFECT
+            elif any(convincing(p) for p in matched):
+                complex_class = REDUNDANT_BY_SIMPLER
+            else:
+                complex_class = SIMPLER_ARE_NOISE
+
+        rules.at[idx, "complex_class"] = complex_class
+        informative[pos] = complex_class not in REDUNDANT_CLASSES
+
+    rules["adds_information"] = ~rules["complex_class"].isin(REDUNDANT_CLASSES)
+    return rules
+
+def _types(items):
+    """
+    The cell types a rule names, role dropped and duplicates kept.
+
+    'Paneth_CENTER + Paneth_NEIGHBOR' -> ('Paneth', 'Paneth'), so the count still
+    matches the item count and a rule can never match itself.
+    """
+    return tuple(sorted(strip_role(item) for item in items))
 
 
-def _classify_type_2(rules, idx, ant, con, kind, lift, lift_map, min_lift_gain):
-    # A -> B + C
-    
-    # 1. Check Consequent-driven (B -> C or C -> B)
-    # Are the consequents naturally strongly co-occurring?
-    con_lifts = []
-    consequent_rule_strs = []
-    for c1 in con:
-        for c2 in con:
-            if c1 != c2:
-                c1_set = frozenset([c1])
-                c2_set = frozenset([c2])
-                consequent_rule_strs.append(_format_rule(c1_set, c2_set))
-                # B->C is naturally an attraction rule if they form a niche
-                key = (c1_set, c2_set, ATTRACTS)
-                if key in lift_map:
-                    con_lifts.append(lift_map[key])
-                    
-    # If B->C or C->B exists and has high lift (e.g. higher than A->B+C)
-    if con_lifts and max(con_lifts) >= lift:
-        rules.at[idx, "complex_class"] = "consequent-driven"
-        rules.at[idx, "simpler_rules"] = consequent_rule_strs
-        return
+def _rule_type(n_ant, n_con):
+    """Item counts, roles included — 'Paneth_CENTER + Paneth_NEIGHBOR' is two items."""
+    if n_ant + n_con <= 2:
+        return "pairwise"
+    if n_con == 1:
+        return "ant-complex"
+    if n_ant == 1:
+        return "con-complex"
+    return "both-complex"
 
-    # 2. Check Niche-defining/Improved or Redundant (A -> B and A -> C)
-    simpler_lifts = []
-    simpler_rule_strs = []
-    
-    for c in con:
-        sub_con = frozenset([c])
-        simpler_rule_strs.append(_format_rule(ant, sub_con))
-        key = (ant, sub_con, kind)
-        if key in lift_map:
-            simpler_lifts.append(lift_map[key])
-            
-    rules.at[idx, "simpler_rules"] = simpler_rule_strs
-    
-    if not simpler_lifts:
-        rules.at[idx, "complex_class"] = "new"
-    else:
-        max_simpler_lift = max(simpler_lifts)
-        
-        if kind == AVOIDS:
-            beats_it = lift < max_simpler_lift / min_lift_gain
-        else:
-            beats_it = lift >= max_simpler_lift * min_lift_gain
-            
-        if beats_it:
-            rules.at[idx, "complex_class"] = "improved"
-        else:
-            rules.at[idx, "complex_class"] = "redundant"
+
+@lru_cache(maxsize=None)
+def _every_shorter(ant_types, con_types, kind):
+    """
+    Every type signature this rule contains: any items dropped, one left on each side.
+
+    Every one is looked up directly, not only the next size down. A rule two sizes down
+    can be the strongest of the lot while the one between it collapsed, and it may be
+    the only one that was mined at all. Cached because many rules share a signature.
+    """
+    shorter = set()
+    for antecedent in _parts_of(ant_types):
+        for consequent in _parts_of(con_types):
+            if len(antecedent) + len(consequent) < len(ant_types) + len(con_types):
+                shorter.add((antecedent, consequent, kind))
+    return shorter
+
+
+def _parts_of(types):
+    """Every non-empty part of a signature, still sorted, since types is."""
+    return {part for size in range(1, len(types) + 1)
+            for part in itertools.combinations(types, size)}
+
+
+def _lift_beats(lift, shorter_lift, min_lift_gain, kind):
+    """True when the longer rule improves on a shorter one's lift enough."""
+    if kind == AVOIDS:
+        return lift < shorter_lift / min_lift_gain
+    return lift >= shorter_lift * min_lift_gain
+
+
+def _strongest(group, lifts, kind):
+    """The strongest lift in a group — highest for attraction, lowest for avoidance."""
+    pick = min if kind == AVOIDS else max
+    return pick(group, key=lambda pos: lifts[pos])
+
+
+def _at_least_as_strong(pair_lift, lift, kind):
+    """A pair backs a rule when it does the same thing at least as hard."""
+    return pair_lift <= lift if kind == AVOIDS else pair_lift >= lift
+
+
+def _consequent_pairs(con_types, lift, kind, pair_rules, lifts):
+    """
+    Do the consequents already do this to each other, without the antecedent?
+
+    - attraction: they always cluster, so finding them by the antecedent is not news
+    - avoidance:  they already exclude each other, so nothing sitting by both is not news
+
+    Every pair of consequent types must be backed by a two-item rule of the same kind,
+    at least as strong as this one. Roles are ignored here: the rule joining two types
+    always has one of them as its centre, so either arrangement is the same evidence.
+
+    Returns the backing rules per pair, or None if any pair has none.
+    """
+    types = sorted(set(con_types))
+    if len(types) < 2:
+        return None
+
+    backing = []
+    for pair in itertools.combinations(types, 2):
+        found = [pos for pos in pair_rules.get((frozenset(pair), kind), [])
+                 if _at_least_as_strong(lifts[pos], lift, kind)]
+        if not found:
+            return None
+        backing.append(found)
+    return backing
+
+
+def _named(positions, antecedents, consequents):
+    """The rules themselves, roles and all, so the comparison can be read back."""
+    return [f"{' + '.join(sorted(antecedents[pos]))} -> {' + '.join(sorted(consequents[pos]))}"
+            for pos in positions]

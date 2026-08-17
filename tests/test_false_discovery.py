@@ -22,15 +22,18 @@ def sample(sample_id, p_by_rule, eligible, survived=None):
     """
     One mined sample: which rules were found, with what p, and what had enough cells.
 
-    survived lists the rules left after the redundancy filter. It defaults to all of
-    them, since most tests do not care about that filter.
+    survived lists the rules that add information. It defaults to all of them, since
+    most tests do not care about that column.
     """
     def frame_of(rules):
         rows = [{"antecedents": a, "consequents": c, "p_value": p_by_rule[(a, c)]} for a, c in rules]
         return pd.DataFrame(rows, columns=["antecedents", "consequents", "p_value"])
 
     tested = frame_of(p_by_rule)
-    kept = tested if survived is None else frame_of(survived)
+    adds = set(p_by_rule if survived is None else survived)
+    kept = tested.copy()
+    kept["adds_information"] = [(a, c) in adds
+                                for a, c in zip(kept["antecedents"], kept["consequents"])]
     return SampleResult(sample_id, kept, tested, {"labels_with_enough_cells": frozenset(eligible)})
 
 
@@ -61,6 +64,14 @@ def test_false_discovery_rates_are_not_simply_stricter_when_wider():
     narrow = false_discovery_rates([0.04] + [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99])[0]
     wide = false_discovery_rates([0.04] + [0.001] * 700 + [0.5] * 299)[0]
     assert wide < narrow
+
+
+def test_the_correction_only_ever_raises_a_p_value():
+    """Within one family, no rule ends up looking better than its raw p-value."""
+    raw = [0.01, 0.02]
+    corrected = false_discovery_rates(raw)
+    assert (corrected >= raw).all()
+    assert corrected[-1] == pytest.approx(0.02), "the largest is never raised"
 
 
 # --- the whole claim -----------------------------------------------------------
@@ -175,8 +186,8 @@ def test_a_rule_filtered_in_one_sample_keeps_its_evidence_from_the_others():
     assert row["groups_passed"] == 5, "and its p-value there still counts as a pass"
 
 
-def test_with_no_redundancy_filtering_every_rule_is_asked_about():
-    """When nothing was filtered, the two frames are the same and nothing changes."""
+def test_with_nothing_marked_redundant_every_rule_is_asked_about():
+    """When every rule adds information, all of them are claims."""
     found = report(*[sample(f"s{i}", {RULE: 0.001, OTHER: 0.5}, "ABCD") for i in range(5)])
     assert len(found.dataset_significance()) == 2
 
@@ -192,7 +203,8 @@ def test_a_sample_missing_its_label_record_stops_the_run():
     "nothing is significant" — a wrong answer that looks exactly like a real one.
     It must stop instead.
     """
-    frame = pd.DataFrame([{"antecedents": RULE[0], "consequents": RULE[1], "p_value": 0.001}])
+    frame = pd.DataFrame([{"antecedents": RULE[0], "consequents": RULE[1], "p_value": 0.001,
+                           "adds_information": True}])
     broken = SampleResult("s0", frame, frame, stats={})     # no labels recorded
 
     with pytest.raises(KeyError):

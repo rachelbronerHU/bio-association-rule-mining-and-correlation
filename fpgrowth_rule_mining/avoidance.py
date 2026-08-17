@@ -3,18 +3,13 @@ Search for cell types that keep apart. See README, "Attraction and avoidance".
 """
 
 import logging
-from itertools import combinations
-from math import comb
 
 import numpy as np
 
-from .rules import AVOIDS, frame_of, rules_from, splits_of, support_of_many
+from .rules import AVOIDS, frame_of, rules_from, support_of_many
 from .transactions import is_center
 
 logger = logging.getLogger(__name__)
-
-MOST_COMBINATIONS = 2_000_000    # refuse to start above this many
-BATCH = 100_000                  # combinations held as tuples at once
 
 
 def enough_to_judge_avoidance(settings, ant_support, con_support, n_transactions):
@@ -43,13 +38,15 @@ def items_worth_combining(matrix, item_index, settings, n_transactions):
     """
     Items worth combining, and the support of each. A speed filter only.
 
-    The bar is the lower of the two requirements, since a consequent item needs no
-    patches of its own — a common antecedent supplies the expected meetings.
+    Only the expected meetings bar can be asked of a single item: no side of a rule is
+    more common than its rarest item, and neither side's share exceeds 1, so an item too
+    rare here can never sit in a rule that passes. min_patches is not asked here — it
+    constrains the antecedent only, and enough_to_judge_avoidance() applies it there.
     """
     if matrix.size == 0:
         return [], {}
 
-    bar = max(settings.min_patches, settings.avoidance_min_expected_meetings) / n_transactions
+    bar = settings.avoidance_min_expected_meetings / n_transactions
     supports = matrix.sum(axis=0) / n_transactions
     kept = sorted(item for item, column in item_index.items() if supports[column] >= bar)
     return kept, {item: float(supports[item_index[item]]) for item in kept}
@@ -61,89 +58,121 @@ def by_role(items):
             [item for item in items if not is_center(item)])
 
 
-def candidate_sets(items, max_items):
-    """Every combination that could be read as a rule: exactly one centre."""
-    centres, neighbours = by_role(items)
-    for size in range(2, max_items + 1):
-        for centre in centres:
-            for combo in combinations(neighbours, size - 1):
-                yield frozenset((centre,) + combo)
+def items_of(side):
+    """The items of a side: its centre, if it has one, then its neighbours."""
+    centre, neighbours = side
+    return (centre,) + neighbours if centre is not None else neighbours
 
 
-def combinations_to_measure(items, size):
-    """Every combination of this size a rule could look up: at most one centre."""
-    centres, neighbours = by_role(items)
-    yield from combinations(neighbours, size)
-    for centre in centres:
-        for combo in combinations(neighbours, size - 1):
-            yield (centre,) + combo
+def extend(sides, neighbours):
+    """
+    Each side grown by one more neighbour, every longer side built exactly once.
+
+    Only the neighbours are kept in order, never the centre — so a centre that sorts
+    late (Muscle_CENTER) can still be joined by a neighbour that sorts early
+    (Epithelial_NEIGHBOR), and no side can ever collect a second centre.
+    """
+    for centre, so_far in sides:
+        for item in neighbours:
+            if not so_far or item > so_far[-1]:
+                yield centre, so_far + (item,)
 
 
-def how_many_to_measure(n_centres, n_neighbours, max_items):
-    """How many combinations_to_measure will produce, without building them."""
-    return sum(comb(n_neighbours, size) + n_centres * comb(n_neighbours, size - 1)
-               for size in range(1, max_items + 1))
+def supports_of(sides, matrix, item_index):
+    """The support of every side in a level, in one batched pass."""
+    columns = np.asarray([[item_index[item] for item in items_of(side)] for side in sides])
+    return support_of_many(matrix, columns)
 
 
-def subset_supports(items, single_supports, matrix, item_index, max_items):
-    """Support of every combination a rule could look up. Single items are given."""
-    supports = {frozenset([item]): support for item, support in single_supports.items()}
+def joint_supports(wholes, matrix, item_index):
+    """The support of each whole rule, measured once, grouped by size so each size batches."""
 
-    def measure(batch):
-        columns = np.asarray([[item_index[item] for item in combo] for combo in batch])
-        for combo, support in zip(batch, support_of_many(matrix, columns)):
-            supports[frozenset(combo)] = float(support)
+    by_size = {}
+    for whole in wholes:
+        by_size.setdefault(len(whole), []).append(whole)
 
-    for size in range(2, max_items + 1):
-        batch = []
-        for combo in combinations_to_measure(items, size):
-            batch.append(combo)
-            if len(batch) >= BATCH:
-                measure(batch)
-                batch = []
-        if batch:
-            measure(batch)
+    supports = {}
+    for group in by_size.values():
+        columns = np.asarray([[item_index[item] for item in whole] for whole in group])
+        for whole, support in zip(group, support_of_many(matrix, columns)):
+            supports[whole] = float(support)
+
     return supports
 
 
+def sides_worth_pairing(matrix, item_index, settings, n_transactions):
+    """
+    Every side of a rule common enough to be worth pairing, and its support.
+
+    A rule needs ant_support * con_support * n_transactions expected meetings, and
+    neither share exceeds 1, so each side alone must clear that bar. An antecedent must
+    also cover min_patches by itself. A side is never more common than the shorter side
+    it grew from, so one that fails is dropped and never extended again — the whole
+    branch above it disappears with it.
+    """
+    items, single_supports = items_worth_combining(matrix, item_index, settings, n_transactions)
+    centres, neighbours = by_role(items)
+    bar = settings.avoidance_min_expected_meetings / n_transactions
+    centre_bar = max(bar, settings.min_patches / n_transactions)
+
+    # Level one is single items, and items_worth_combining has already measured them.
+    kept = {}
+    level = {(centre, ()): single_supports[centre] for centre in centres}
+    level.update({(None, (item,)): single_supports[item] for item in neighbours})
+
+    # A side can hold at most max_items_per_rule - 1 items: the other side needs one.
+    longest = settings.max_items_per_rule - 1
+    for size in range(1, longest + 1):
+        survivors = []
+        for side, support in level.items():
+            if support >= (centre_bar if side[0] is not None else bar):
+                kept[side] = float(support)
+                survivors.append(side)
+
+        if size == longest or not survivors:
+            break        # no round left to measure a longer side, or nothing left to grow
+        grown = list(extend(survivors, neighbours))
+        level = dict(zip(grown, supports_of(grown, matrix, item_index)))
+
+    return kept
+
+
 def mine_avoidance(matrix, item_index, settings, sample_id: str = ""):
-    """Every combination worth trying, split into rules, keeping what keeps apart."""
+    """Every side worth pairing, paired into rules, keeping what keeps apart."""
+
     n = matrix.shape[0]
     if n == 0:
         return frame_of([])
 
-    items, single_supports = items_worth_combining(matrix, item_index, settings, n)
-    if len(items) < 2:
-        return frame_of([])
+    sides = sides_worth_pairing(matrix, item_index, settings, n)
+    # A side of no support divides nothing and judges nothing, so it never pairs.
+    antecedents = [(items_of(side), support)
+                   for side, support in sides.items() if side[0] is not None and support > 0]
+    consequents = sorted(((items_of(side), support)
+                          for side, support in sides.items() if side[0] is None and support > 0),
+                         key=lambda pair: -pair[1])  # most common first, so the pairing stops early
 
-    max_items = min(settings.max_items_per_rule, len(items))
-    centres, neighbours = by_role(items)
-    planned = how_many_to_measure(len(centres), len(neighbours), max_items)
-    if planned > MOST_COMBINATIONS:
-        raise ValueError(
-            f"the avoidance search would measure {planned:,} combinations of "
-            f"{len(items)} items at max_items_per_rule={max_items}, over the "
-            f"{MOST_COMBINATIONS:,} it will attempt. The count grows with both, so "
-            f"lower max_items_per_rule, or raise avoidance_min_expected_meetings to "
-            f"leave fewer items worth combining"
-        )
+    floor = settings.avoidance_min_expected_meetings
+    pairs = []
+    for ant_items, ant_support in antecedents:
+        needed = floor / (ant_support * n)
+        for con_items, con_support in consequents:
+            if con_support < needed:
+                break
+            if len(ant_items) + len(con_items) > settings.max_items_per_rule:
+                continue
+            if set(ant_items) & set(con_items):
+                continue
+            pairs.append((frozenset(ant_items), frozenset(con_items), ant_support, con_support))
 
-    supports = subset_supports(items, single_supports, matrix, item_index, max_items)
+    joint = joint_supports({ant | con for ant, con, _, _ in pairs}, matrix, item_index)
 
-    splits = []
+    rules = rules_from([(ant, con, joint[ant | con], ant_support, con_support)
+                        for ant, con, ant_support, con_support in pairs],
+                       settings, n, avoids, AVOIDS)
 
     prefix = f"[{sample_id}] " if sample_id else ""
-    logger.info(f"{prefix}Mine_avoidance - about to test {planned} itemsets!")
+    logger.info(f"{prefix}Avoidance: {len(sides)} sides worth pairing, "
+                f"{len(joint)} joint supports measured, {len(rules)} rules")
 
-    for itemset in candidate_sets(items, max_items):
-        support = supports[itemset]
-        for antecedent, consequent in splits_of(itemset):
-            ant_support, con_support = supports[antecedent], supports[consequent]
-            if ant_support <= 0 or con_support <= 0:
-                continue
-            splits.append((antecedent, consequent, support, ant_support, con_support))
-
-    rules = rules_from(splits, settings, n, avoids, AVOIDS)
-    logger.debug(f"{prefix}Avoidance: {len(items)} of {len(item_index)} items worth combining, "
-                 f"{len(supports)} combinations measured, {len(rules)} rules")
     return rules

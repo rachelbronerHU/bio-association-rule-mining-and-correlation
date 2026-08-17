@@ -105,10 +105,18 @@ def load(result_csv_path=None, load_max_items=4):
 
 
 def _support_floor(result_csv_path):
-    """How many patches a rule needed, taken from the run that produced these rules."""
+    """How many patches a rule needed, taken from the run that produced these rules.
+
+    A run records its settings under 'settings' or under 'CONFIG', naming the same two
+    floors differently.
+    """
     cfg = Path(result_csv_path).parent / 'run_config.json'
-    c = json.loads(cfg.read_text())['CONFIG'] if cfg.exists() else {}
-    return c.get('MIN_ABS_SUPPORT', 10), c.get('MIN_SUPPORT', 0.01)
+    raw = json.loads(cfg.read_text()) if cfg.exists() else {}
+    c = raw.get('settings') or raw.get('CONFIG') or {}
+    # Approximate twice over: the floor backs joint patches but is checked per cell type,
+    # and under WEIGHTED it counts weight, not patches.
+    return (c.get('min_patches', c.get('MIN_ABS_SUPPORT', 10)),
+            c.get('min_support', c.get('MIN_SUPPORT', 0.01)))
 
 
 def _fov_labels(cells, fovs):

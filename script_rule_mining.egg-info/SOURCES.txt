@@ -11,6 +11,7 @@ fpgrowth_rule_mining/README.md
 fpgrowth_rule_mining/__init__.py
 fpgrowth_rule_mining/attraction.py
 fpgrowth_rule_mining/avoidance.py
+fpgrowth_rule_mining/complex_rules.py
 fpgrowth_rule_mining/mine.py
 fpgrowth_rule_mining/rules.py
 fpgrowth_rule_mining/runner.py
@@ -26,5 +27,6 @@ script_rule_mining.egg-info/SOURCES.txt
 script_rule_mining.egg-info/dependency_links.txt
 script_rule_mining.egg-info/requires.txt
 script_rule_mining.egg-info/top_level.txt
+tests/test_complex_rules.py
 tests/test_false_discovery.py
 tests/test_mining.py

@@ -9,7 +9,7 @@ Spatial association rule mining. See README.md.
 
     result = mine(coords, labels, settings)
     tested = result.add_p_values(n_shuffles=1000, random_seed=42)
-    rules  = filter_rules(tested, min_lift_gain=1.1)
+    rules  = filter_rules(tested, min_lift_gain=1.1, max_individual_fdr=0.05)
 """
 
 from .mine import Result, mine

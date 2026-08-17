@@ -20,10 +20,11 @@ from fpgrowth_rule_mining import Method, Settings, Weighting, mine
 from fpgrowth_rule_mining.attraction import attracts
 from fpgrowth_rule_mining.avoidance import (
     avoids,
-    candidate_sets,
-    combinations_to_measure,
+    extend,
+    items_of,
     items_worth_combining,
     mine_avoidance,
+    sides_worth_pairing,
 )
 from fpgrowth_rule_mining.mine import Result, mine_rules
 from fpgrowth_rule_mining.rules import metrics, splits_of, support_of, weight_matrix
@@ -266,7 +267,9 @@ def test_no_shuffles_means_no_claim():
     """With nothing tested, every p-value is 1: the test was not run."""
     coords, labels = grid_tissue()
     result = mine(coords, labels, base(min_patches=0))
-    assert (p_values_for(result.rules, result.patches, labels, result.settings, n_shuffles=0) == 1).all()
+    p_values = p_values_for(result.rules, result.patches, labels, result.settings,
+                            n_shuffles=0, random_seed=42, labels_kept_fixed=())
+    assert (p_values == 1).all()
 
 
 # --- settings -----------------------------------------------------------------
@@ -512,37 +515,59 @@ def test_avoidance_reads_the_weights_when_they_are_not_all_one():
 
 def test_two_centres_are_never_combined():
     """
-    A patch has one centre cell, so a set with two centres can only ever measure zero.
+    A patch has one centre cell, so a side with two centres can only ever measure zero.
 
-    Building them wastes the whole search, since every split is thrown away later.
+    A side carries the centre it started with and is only ever grown by neighbours, so
+    two centres cannot meet — it is impossible by shape, not filtered out afterwards.
     """
-    items = ["A_CENTER", "B_CENTER", "X_NEIGHBOR", "Y_NEIGHBOR"]
-    for itemset in candidate_sets(items, max_items=4):
-        centres = [item for item in itemset if item.endswith("_CENTER")]
-        assert len(centres) == 1, f"{sorted(itemset)} has {len(centres)} centres"
+    transactions = ([binary("A_CENTER", "X_NEIGHBOR")] * 40
+                    + [binary("B_CENTER", "Y_NEIGHBOR")] * 40
+                    + [binary("A_CENTER", "Y_NEIGHBOR")] * 20)
+    matrix, item_index = weight_matrix(transactions)
+    settings = base(max_items_per_rule=4, min_patches=0, avoidance_min_expected_meetings=1)
+
+    sides = sides_worth_pairing(matrix, item_index, settings, len(transactions))
+    assert sides, "no sides survived, so this test proves nothing"
+    for side in sides:
+        centres = [item for item in items_of(side) if item.endswith("_CENTER")]
+        assert len(centres) <= 1, f"{items_of(side)} has {len(centres)} centres"
 
 
 def test_nothing_with_two_centres_is_even_measured():
     """
-    Not just unused — never enumerated. That waste is most of the search at length 4.
+    Not just unused — never enumerated. At length 4 that would be most of the search.
 
-    A candidate set holds one centre and its splits never move it right, so no group
-    of two centres is ever looked up.
+    extend() adds neighbours only, and orders them so each longer side is built once.
     """
-    items = ["A_CENTER", "B_CENTER", "C_CENTER", "X_NEIGHBOR", "Y_NEIGHBOR", "Z_NEIGHBOR"]
-    measured = [combo for size in range(1, 5) for combo in combinations_to_measure(items, size)]
+    neighbours = ["X_NEIGHBOR", "Y_NEIGHBOR", "Z_NEIGHBOR"]
+    sides = [("A_CENTER", ()), ("B_CENTER", ()), (None, ("X_NEIGHBOR",))]
 
-    assert len(measured) == len(set(measured)), "a combination was measured twice"
-    for combo in measured:
-        assert sum(item.endswith("_CENTER") for item in combo) <= 1
+    for _ in range(3):
+        sides = list(extend(sides, neighbours))
+        assert len(sides) == len(set(sides)), "a side was built twice"
+        for side in sides:
+            assert sum(item.endswith("_CENTER") for item in items_of(side)) <= 1
 
-    # Every set a rule could name must still be there: the sets themselves and both halves.
-    available = {frozenset(combo) for combo in measured}
-    for itemset in candidate_sets(items, max_items=4):
-        assert itemset in available
-        for antecedent, consequent in splits_of(itemset):
-            assert antecedent in available
-            assert consequent in available
+
+def test_a_centre_that_sorts_after_a_neighbour_still_grows():
+    """
+    Only the neighbours are ordered, never the centre.
+
+    Order the whole side instead and "Epithelial_NEIGHBOR" > "Muscle_CENTER" is False, so
+    that side is never built — and no other path builds it, since a centre is only ever
+    a seed. The rule would vanish with no error.
+    """
+    grown = set(extend([("Muscle_CENTER", ())], ["Epithelial_NEIGHBOR", "Zeta_NEIGHBOR"]))
+    assert grown == {("Muscle_CENTER", ("Epithelial_NEIGHBOR",)),
+                     ("Muscle_CENTER", ("Zeta_NEIGHBOR",))}
+
+    transactions = ([binary("Muscle_CENTER", "Epithelial_NEIGHBOR")] * 50
+                    + [binary("Muscle_CENTER", "Zeta_NEIGHBOR")] * 50)
+    matrix, item_index = weight_matrix(transactions)
+    settings = base(max_items_per_rule=3, min_patches=0, avoidance_min_expected_meetings=1)
+
+    sides = sides_worth_pairing(matrix, item_index, settings, len(transactions))
+    assert ("Muscle_CENTER", ("Epithelial_NEIGHBOR",)) in sides
 
 
 def brute_force_avoidance(transactions, settings):
@@ -577,11 +602,12 @@ def brute_force_avoidance(transactions, settings):
 
 def test_the_prefilter_cannot_change_which_rules_come_out():
     """
-    items_worth_combining only saves work. The rules must be the ones brute force finds.
+    The prefilters only save work. The rules must be the ones brute force finds.
 
-    Its bar is the *lower* of the two requirements exactly so it can never drop an item
-    that a surviving rule would have named — a rare neighbour still counts when a common
-    centre supplies the expected meetings.
+    items_worth_combining bars on expected meetings alone, and sides_worth_pairing drops
+    a side only when it is too rare for any rule to pass — so neither can lose a rule a
+    surviving one would have named. A rare neighbour still counts when a common centre
+    supplies the expected meetings.
     """
     transactions = ([binary("A_CENTER", "B_NEIGHBOR")] * 60
                     + [binary("A_CENTER", "C_NEIGHBOR")] * 12
@@ -603,23 +629,6 @@ def test_the_prefilter_cannot_change_which_rules_come_out():
     matrix, item_index = weight_matrix(transactions)
     kept, _ = items_worth_combining(matrix, item_index, settings, len(transactions))
     assert set(kept) < set(item_index), "nothing was dropped, so this proves nothing"
-
-
-def test_a_search_too_big_to_finish_says_so():
-    """
-    max_items_per_rule cannot bound the work on its own: the item count matters too.
-
-    A check on rule length alone would accept a run that never finishes, so the guard
-    is on the combination count, once the items are known.
-    """
-    transactions = [binary(f"C{i}_CENTER", *[f"N{j}_NEIGHBOR" for j in range(60)])
-                    for i in range(60)]
-    matrix, item_index = weight_matrix(transactions)
-    settings = base(min_support=0.01, max_items_per_rule=5,
-                    min_patches=0, avoidance_min_expected_meetings=1)
-
-    with pytest.raises(ValueError, match="combinations"):
-        mine_avoidance(matrix, item_index, settings)
 
 
 def test_the_two_kinds_never_describe_the_same_rule():

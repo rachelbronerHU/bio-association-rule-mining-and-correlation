@@ -1,7 +1,7 @@
 """
 From coordinates to transactions.
 
-A patch is one centre cell plus the cells around it, and becomes one transaction:
+A patch is one center cell plus the cells around it, and becomes one transaction:
 {item: weight}, where an item is a label plus its role, "CD8T_CENTER".
 """
 
@@ -18,7 +18,7 @@ NEIGHBOR = "NEIGHBOR"
 
 
 def item_of(label, role) -> str:
-    """'CD8T' as a centre -> 'CD8T_CENTER'."""
+    """'CD8T' as a center -> 'CD8T_CENTER'."""
     return f"{label}_{role}"
 
 
@@ -37,9 +37,9 @@ def is_center(item: str) -> bool:
 
 class Patch(NamedTuple):
     center: int
-    members: np.ndarray    # every cell in the patch, centre included
+    members: np.ndarray    # every cell in the patch, center included
     neighbors: np.ndarray
-    weights: np.ndarray    # one weight per neighbour
+    weights: np.ndarray    # one weight per neighbor
 
 
 def find_patches(coords, settings):
@@ -52,7 +52,7 @@ def find_patches(coords, settings):
         finder = NearestNeighbors(radius=settings.radius, n_jobs=-1).fit(coords)
         return list(enumerate(finder.radius_neighbors(coords, return_distance=False)))
 
-    # KNN_R: k+1 because a cell is its own nearest neighbour.
+    # KNN_R: k+1 because a cell is its own nearest neighbor.
     finder = NearestNeighbors(n_neighbors=min(settings.k_neighbors + 1, len(coords)), n_jobs=-1).fit(coords)
     distances, members = finder.kneighbors(coords)
     return [
@@ -69,7 +69,7 @@ def is_crowded_by_one_type(labels, max_share) -> bool:
 
 
 def measure_patches(patches, coords, settings):
-    """How much each neighbour counts. Position only, so the null can reuse it."""
+    """How much each neighbor counts. Position only, so the null can reuse it."""
     coords = np.asarray(coords, dtype=float)
     measured = []
 
@@ -98,7 +98,7 @@ def build_transactions(patches, labels, settings):
     """
     Patches to transactions.
 
-    Neighbours of the same label add up, capped at 1.0. The centre always counts 1.0.
+    Neighbors of the same label add up, capped at 1.0. The center always counts 1.0.
     """
     labels = np.asarray(labels, dtype=object)
     transactions = []

@@ -108,7 +108,7 @@ def splits_of(itemset):
     """
     Every way of reading an itemset as a rule, as (antecedent, consequent) pairs.
 
-    The centre item goes on the left and never on the right.
+    The center item goes on the left and never on the right.
     """
     for size in range(1, len(itemset)):
         for antecedent in combinations(sorted(itemset), size):
@@ -197,7 +197,7 @@ def drop_rare_labels(rules, labels, settings):
 
 
 def filter_rules(rules, min_lift_gain=None, max_individual_fdr=None):
-    """Classify rules instead of dropping them."""
+    """Classify complex rules to redundant (with no additional value to simpler rule) vs informative."""
     if min_lift_gain is None:
         min_lift_gain = 1.0
     from .complex_rules import classify_complex_rules

@@ -25,7 +25,7 @@ def seed_for(base_seed, sample_id):
     """
     A seed per sample: re-runs match, and samples stay independent.
 
-    crc32, not hash(), which Python randomises per process.
+    crc32, not hash(), which Python randomizes per process.
     """
     if base_seed is None:
         return None

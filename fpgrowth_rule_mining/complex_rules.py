@@ -85,21 +85,19 @@ def classify_complex_rules(rules, min_lift_gain, max_individual_fdr=None):
         if sizes[pos] == 2:
             pair_rules[(frozenset(ant_types[pos] + con_types[pos]), kinds[pos])].append(pos)
 
-    def convincing(pos):
+    def pass_fdr_threshold(pos):
         """
-        Does this rule stand up on its own, enough to condemn a longer one?
-
+        Does this rule stand up on its own (fdr smaller than threshold), enough to condemn a longer one?
         With no threshold, or no p-value to judge by, lift has the last word.
         """
         return max_individual_fdr is None or pd.isna(fdrs[pos]) or fdrs[pos] <= max_individual_fdr
 
     def best_of(group, kind):
         """
-        One rule to stand for all the arrangements sharing a type signature.
-
+        One rule to stand for all the arrangements sharing a type signature (after removing suffixes like _CENTER, _NEIGHBOR).
         Rules that pass the FDR bar first, then the strongest of those.
         """
-        passed_fdr = [pos for pos in group if convincing(pos)]
+        passed_fdr = [pos for pos in group if pass_fdr_threshold(pos)]
         return _strongest(passed_fdr or group, lifts, kind)
 
     informative = [True] * len(rules)
@@ -111,11 +109,11 @@ def classify_complex_rules(rules, min_lift_gain, max_individual_fdr=None):
         idx = rules.index[pos]
         kind, lift = kinds[pos], lifts[pos]
 
-        backing = _consequent_pairs(con_types[pos], lift, kind, pair_rules, lifts)
+        backing = _find_consequent_backing_rules(con_types[pos], lift, kind, pair_rules, lifts)
         if backing is not None:
             rules.at[idx, "simpler_rules"] = _named(
                 [pos for pair in backing for pos in pair], antecedents, consequents)
-            if all(any(convincing(p) for p in pair) for pair in backing):
+            if all(any(pass_fdr_threshold(p) for p in pair) for pair in backing):
                 complex_class = CONSEQUENT_DRIVEN
             else:
                 complex_class = CONSEQUENT_IS_NOISE
@@ -134,7 +132,7 @@ def classify_complex_rules(rules, min_lift_gain, max_individual_fdr=None):
                 complex_class = NEW
             elif not matched:
                 complex_class = STRONGER_EFFECT
-            elif any(convincing(p) for p in matched):
+            elif any(pass_fdr_threshold(p) for p in matched):
                 complex_class = REDUNDANT_BY_SIMPLER
             else:
                 complex_class = SIMPLER_ARE_NOISE
@@ -207,7 +205,7 @@ def _at_least_as_strong(pair_lift, lift, kind):
     return pair_lift <= lift if kind == AVOIDS else pair_lift >= lift
 
 
-def _consequent_pairs(con_types, lift, kind, pair_rules, lifts):
+def _find_consequent_backing_rules(con_types, lift, kind, pair_rules, lifts):
     """
     Do the consequents already do this to each other, without the antecedent?
 
@@ -216,7 +214,7 @@ def _consequent_pairs(con_types, lift, kind, pair_rules, lifts):
 
     Every pair of consequent types must be backed by a two-item rule of the same kind,
     at least as strong as this one. Roles are ignored here: the rule joining two types
-    always has one of them as its centre, so either arrangement is the same evidence.
+    always has one of them as its center, so either arrangement is the same evidence.
 
     Returns the backing rules per pair, or None if any pair has none.
     """

@@ -5,18 +5,18 @@ opposite, *"where there is a CD8T cell, macrophages are not"* — in spatial dat
 
 ## The idea
 
-Every cell becomes the centre of a **patch**: itself plus the cells around it. Each
+Every cell becomes the center of a **patch**: itself plus the cells around it. Each
 patch is one **transaction**:
 
 ```
 {CD8T_CENTER: 1.0, Macrophage_NEIGHBOR: 0.8, Plasma_NEIGHBOR: 0.2}
 ```
 
-How much a neighbour counts is the only choice that changes the maths:
+How much a neighbor counts is the only choice that changes the math:
 
-| `weighting` | a neighbour counts |
+| `weighting` | a neighbor counts |
 |---|---|
-| `WEIGHTED` | `exp(-0.5 * (distance / bandwidth) ** 2)` — a far neighbour counts less |
+| `WEIGHTED` | `exp(-0.5 * (distance / bandwidth) ** 2)` — a far neighbor counts less |
 | `BINARY` | `1.0` — near or far |
 
 Support is **min-based** — a pattern is only as strong as its weakest member:
@@ -27,15 +27,15 @@ support(I) = mean over transactions of min(weight of each item in I)
 
 With binary weights that is the plain fraction of transactions holding every item.
 
-A rule always reads *centre → neighbours*. The centre is on the left, never the right.
+A rule always reads *center → neighbors*. The center is on the left, never the right.
 
 ## Pipeline
 
 | step | file | what it does |
 |---|---|---|
 | 1 | `transactions.py` | group cells into patches — everything within `radius`, or the `k_neighbors` nearest |
-| 2 | `transactions.py` | weigh each neighbour: distance decay, or a flat 1.0 |
-| 3 | `transactions.py` | patch → transaction. Same-label neighbours add up, capped at 1.0. Patches dominated by one label are dropped |
+| 2 | `transactions.py` | weigh each neighbor: distance decay, or a flat 1.0 |
+| 3 | `transactions.py` | patch → transaction. Same-label neighbors add up, capped at 1.0. Patches dominated by one label are dropped |
 | 4 | `attraction.py`, `avoidance.py` | two searches, one per claim — see below |
 | 5 | `rules.py` | measure and judge. Rules naming a too-rare cell type are dropped |
 | 6 | `validation/significance.py` | shuffle the labels, see how often the rule still passes → `p_value` |
@@ -103,8 +103,8 @@ threshold is not applied, so a rule is only dropped for a reason you asked for.
 | `min_lift` | **yes** | what counts as attraction. Must be `>= 1` |
 | `max_items_per_rule` | **yes** | longest rule to build, 2 to 5 |
 | `avoidance_max_lift` | **when avoidance is on** | what counts as avoidance. Must be `< 1` |
-| `bandwidth` | | distance at which a neighbour counts ~0.6. Unset, it follows `radius` |
-| `k_neighbors` | for `KNN_R` | how many neighbours to take |
+| `bandwidth` | | distance at which a neighbor counts ~0.6. Unset, it follows `radius` |
+| `k_neighbors` | for `KNN_R` | how many neighbors to take |
 | `min_cells_per_patch` | | skip patches smaller than this. Minimum 2 |
 | `max_one_type_share` | | skip a patch this dominated by one label |
 | `min_patches` | | how many patches must back a rule. Counted in weight, so exact under `BINARY` and conservative under `WEIGHTED` |
@@ -175,15 +175,15 @@ lift is observed over expected, so it needs enough expected to divide by. If non
 seen, `e^-expected` is the best p-value the evidence could support — expect 2 and that
 is about 1 in 7; expect 20 and it is 1 in 500 million.
 
-A support bar cannot say that, and it is not even one bar. A patch holds **one** centre
-and **many** neighbours, so:
+A support bar cannot say that, and it is not even one bar. A patch holds **one** center
+and **many** neighbors, so:
 
 ```
-support as a NEIGHBOR  <=  k x support as a CENTER      k = mean neighbours per patch
+support as a NEIGHBOR  <=  k x support as a CENTER      k = mean neighbors per patch
 ```
 
 One fraction is up to `k` times harsher on the left than the right. Past a point, no
-rare cell type can be the centre of an avoidance rule at all.
+rare cell type can be the center of an avoidance rule at all.
 
 **How the two checks relate.** `con_support <= 1` always, so:
 
@@ -193,8 +193,8 @@ expected meetings = ant_support x con_support x n  <=  ant_support x n = the pat
 
 The expected-meetings check therefore covers the patch check unless
 `min_patches > avoidance_min_expected_meetings`. Each still catches what the other
-cannot: few patches with a very common neighbour has the meetings but no rate worth
-measuring; many patches with a very rare neighbour has the rate but nothing to deplete.
+cannot: few patches with a very common neighbor has the meetings but no rate worth
+measuring; many patches with a very rare neighbor has the rate but nothing to deplete.
 
 **What it does not do.** The bar makes *total absence* meaningful. It cannot detect a
 *partial* shortfall — `lift <= 0.8` is a 20% deficit, needing an expected count near 100
@@ -218,8 +218,8 @@ That leaves:
 
 - `max_items_per_rule` is capped at 5, and a side holds at most `max_items_per_rule - 1`
   items, since the other side needs one
-- a centre seeds a side and only neighbours extend it, so **no side ever holds two
-  centres** — a patch has one centre, so those could only ever measure zero
+- a center seeds a side and only neighbors extend it, so **no side ever holds two
+  centers** — a patch has one center, so those could only ever measure zero
 - pairing walks the consequents most-common-first and stops as soon as one is too rare
   for the antecedent in hand
 
@@ -368,7 +368,7 @@ first, then the significant ones, then the strongest of those.**
 
 Direction stays in the signature, so `C → A` is not a shorter version of `A → C`. It is
 ignored only in the consequent question, where the rule joining two cell types always
-has one of them as its centre.
+has one of them as its center.
 
 ### Notes
 

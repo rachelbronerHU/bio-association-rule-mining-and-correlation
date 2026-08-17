@@ -6,7 +6,7 @@ from typing import Optional
 
 
 class Weighting(str, Enum):
-    """How much a neighbour counts."""
+    """How much a neighbor counts."""
     WEIGHTED = "weighted"   # by distance: exp(-0.5 * (distance / bandwidth) ** 2)
     BINARY = "binary"       # by presence: 1.0, near or far
 
@@ -42,7 +42,7 @@ class Settings:
     bandwidth: Optional[float] = None      # decay scale. Unset, it follows the radius
     k_neighbors: Optional[int] = None      # KNN_R only
 
-    min_cells_per_patch: int = 2           # a patch of one cell has no neighbours
+    min_cells_per_patch: int = 2           # a patch of one cell has no neighbors
     max_one_type_share: float = 1.0        # skip a patch this dominated by one label
 
     min_patches: int = 0                   # patches backing a rule, counted in weight
@@ -96,7 +96,7 @@ class Settings:
 
     @property
     def decay_distance(self) -> float:
-        """How far a neighbour's weight reaches: the bandwidth, or the radius if unset."""
+        """How far a neighbor's weight reaches: the bandwidth, or the radius if unset."""
         return self.bandwidth if self.bandwidth is not None else self.radius
 
     def replace(self, **changes) -> "Settings":

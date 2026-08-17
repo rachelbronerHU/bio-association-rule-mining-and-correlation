@@ -53,29 +53,29 @@ def items_worth_combining(matrix, item_index, settings, n_transactions):
 
 
 def by_role(items):
-    """The items split into centres and neighbours."""
+    """The items split into centers and neighbors."""
     return ([item for item in items if is_center(item)],
             [item for item in items if not is_center(item)])
 
 
 def items_of(side):
-    """The items of a side: its centre, if it has one, then its neighbours."""
-    centre, neighbours = side
-    return (centre,) + neighbours if centre is not None else neighbours
+    """The items of a side: its center, if it has one, then its neighbors."""
+    center, neighbors = side
+    return (center,) + neighbors if center is not None else neighbors
 
 
-def extend(sides, neighbours):
+def extend(sides, neighbors):
     """
-    Each side grown by one more neighbour, every longer side built exactly once.
+    Each side grown by one more neighbor, every longer side built exactly once.
 
-    Only the neighbours are kept in order, never the centre — so a centre that sorts
-    late (Muscle_CENTER) can still be joined by a neighbour that sorts early
-    (Epithelial_NEIGHBOR), and no side can ever collect a second centre.
+    Only the neighbors are kept in order, never the center — so a center that sorts
+    late (Muscle_CENTER) can still be joined by a neighbor that sorts early
+    (Epithelial_NEIGHBOR), and no side can ever collect a second center.
     """
-    for centre, so_far in sides:
-        for item in neighbours:
+    for center, so_far in sides:
+        for item in neighbors:
             if not so_far or item > so_far[-1]:
-                yield centre, so_far + (item,)
+                yield center, so_far + (item,)
 
 
 def supports_of(sides, matrix, item_index):
@@ -85,7 +85,7 @@ def supports_of(sides, matrix, item_index):
 
 
 def joint_supports(wholes, matrix, item_index):
-    """The support of each whole rule, measured once, grouped by size so each size batches."""
+    """Measures support of unique itemsets, grouping by item count for efficient calculation."""
 
     by_size = {}
     for whole in wholes:
@@ -104,6 +104,9 @@ def sides_worth_pairing(matrix, item_index, settings, n_transactions):
     """
     Every side of a rule common enough to be worth pairing, and its support.
 
+    returns: a dictionary containing the sides of potential rules that meet the minimum support thresholds, 
+                along with their respective support values
+
     A rule needs ant_support * con_support * n_transactions expected meetings, and
     neither share exceeds 1, so each side alone must clear that bar. An antecedent must
     also cover min_patches by itself. A side is never more common than the shorter side
@@ -111,27 +114,27 @@ def sides_worth_pairing(matrix, item_index, settings, n_transactions):
     branch above it disappears with it.
     """
     items, single_supports = items_worth_combining(matrix, item_index, settings, n_transactions)
-    centres, neighbours = by_role(items)
+    centers, neighbors = by_role(items)
     bar = settings.avoidance_min_expected_meetings / n_transactions
-    centre_bar = max(bar, settings.min_patches / n_transactions)
+    center_bar = max(bar, settings.min_patches / n_transactions)
 
     # Level one is single items, and items_worth_combining has already measured them.
     kept = {}
-    level = {(centre, ()): single_supports[centre] for centre in centres}
-    level.update({(None, (item,)): single_supports[item] for item in neighbours})
+    level = {(center, ()): single_supports[center] for center in centers}
+    level.update({(None, (item,)): single_supports[item] for item in neighbors})
 
     # A side can hold at most max_items_per_rule - 1 items: the other side needs one.
     longest = settings.max_items_per_rule - 1
     for size in range(1, longest + 1):
         survivors = []
         for side, support in level.items():
-            if support >= (centre_bar if side[0] is not None else bar):
+            if support >= (center_bar if side[0] is not None else bar):
                 kept[side] = float(support)
                 survivors.append(side)
 
         if size == longest or not survivors:
             break        # no round left to measure a longer side, or nothing left to grow
-        grown = list(extend(survivors, neighbours))
+        grown = list(extend(survivors, neighbors))
         level = dict(zip(grown, supports_of(grown, matrix, item_index)))
 
     return kept

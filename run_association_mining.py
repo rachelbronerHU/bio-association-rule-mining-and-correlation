@@ -215,9 +215,6 @@ def save_results(rules, df_biopsy, df_fovs, suffix):
         df_flat["P_Value"] = rules["p_value"]
         df_flat["Individual_FDR"] = rules["individual_fdr"]
 
-    # No count of how many FOVs a rule appeared in: an uncorrected count sitting next
-    # to p-values gets read as evidence. dataset_significance_*.csv answers that.
-
     # Delegate Metadata Enrichment
     df_merged = _enrich_with_metadata(df_flat, df_biopsy, df_fovs)
 
@@ -272,14 +269,6 @@ def run_pipeline():
     )
 
     save_results(report.rules(), df_biopsy, df_fovs, suffix=METHOD)
-
-    # FOVs from one patient are not independent evidence, so they vote together.
-    # The library never learns what a patient is: it only compares these values.
-    groups = df_fovs.drop_duplicates("FOV").set_index("FOV")["Patient"].to_dict()
-    across = report.dataset_significance(groups=groups)
-    across.to_csv(f"{RESULTS_DATA_DIR}/dataset_significance_{METHOD}.csv", index=False)
-    logger.info(f"Saved dataset_significance_{METHOD}.csv "
-                f"({len(across)} rules, {(across['dataset_fdr'] <= 0.05).sum()} at FDR<=0.05)")
 
     elapsed = time.time() - start_time
     h, rem = divmod(int(elapsed), 3600)

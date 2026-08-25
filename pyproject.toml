@@ -16,7 +16,9 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "seaborn",
-    "statsmodels"
+    "statsmodels",
+    "plotly",
+    "nbformat"
 ]
 
 [project.optional-dependencies]

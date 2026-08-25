@@ -17,12 +17,6 @@ import pandas as pd
 from .mine import mine
 from .rules import filter_rules
 from .settings import Settings
-from .transactions import strip_role
-from .validation.false_discovery import (
-    false_discovery_rates,
-    group_p_value,
-    recurrence_p_value,
-)
 from .validation.significance import seed_for
 
 logger = logging.getLogger(__name__)
@@ -31,8 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SampleResult:
     sample_id: object
-    rules: pd.DataFrame     # every rule, classified. adds_information marks the redundant ones
-    tested: pd.DataFrame    # everything mined, with raw p-values, nothing removed
+    rules: pd.DataFrame     # every rule, with raw p-values and classification columns
     stats: dict
 
 
@@ -44,78 +37,10 @@ class RunReport:
     failures: List[Tuple[object, str]] = field(default_factory=list)
 
     def rules(self) -> pd.DataFrame:
-        """Every sample's final rules in one frame, with a sample_id column."""
-        return self._joined("rules")
-
-    def tested(self) -> pd.DataFrame:
-        """Everything mined, with raw p-values. What dataset_significance counts."""
-        return self._joined("tested")
-
-    def _joined(self, attribute):
-        frames = [
-            getattr(r, attribute).assign(sample_id=r.sample_id)
-            for r in self.results if not getattr(r, attribute).empty
-        ]
+        """Every sample's rules in one frame, with a sample_id column."""
+        frames = [r.rules.assign(sample_id=r.sample_id)
+                  for r in self.results if not r.rules.empty]
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-    def dataset_significance(self, groups=None, alpha=0.05) -> pd.DataFrame:
-        """
-        Does each rule hold across the dataset, more often than chance would give?
-
-        groups: sample_id -> one independent unit, such as a patient. None makes every
-                sample its own group.
-
-        One row per rule: groups_tested, groups_passed, p_value, dataset_fdr.
-        See README, "Testing many rules at once".
-        """
-        # A rule a shorter one already said is not a claim of its own, so it is not asked
-        # about and does not enlarge the family the correction divides across.
-        tested, claims = self.tested(), self.rules()
-        if not claims.empty:
-            claims = claims[claims["adds_information"]]
-        if tested.empty or claims.empty:
-            return pd.DataFrame(columns=["antecedents", "consequents", "groups_tested",
-                                         "groups_passed", "p_value", "dataset_fdr"])
-
-        group_of = dict(groups or {})
-        eligible = {r.sample_id: r.stats["labels_with_enough_cells"] for r in self.results}
-        samples_in_group = {}
-        for sample_id in eligible:
-            samples_in_group.setdefault(group_of.get(sample_id, sample_id), []).append(sample_id)
-
-        found = {(rule.antecedents, rule.consequents): {} for rule in claims.itertuples()}
-        for rule in tested.itertuples():
-            key = (rule.antecedents, rule.consequents)
-            if key in found:
-                found[key][rule.sample_id] = rule.p_value
-
-        rows = []
-        for (antecedents, consequents), p_by_sample in found.items():
-            names = {strip_role(item) for item in antecedents + consequents}
-            groups_tested = groups_passed = 0
-            for members in samples_in_group.values():
-                # Only samples that could have produced this rule count as attempts.
-                # Not .get(): a missing sample would silently make everything untestable.
-                attempts = [s for s in members if names <= eligible[s]]
-                if not attempts:
-                    continue
-                groups_tested += 1
-                # An attempt with no rule found is a failure, so it scores 1.0.
-                p_values = [p_by_sample.get(s, 1.0) for s in attempts]
-                if group_p_value(p_values, len(attempts)) < alpha:
-                    groups_passed += 1
-
-            rows.append({
-                "antecedents": antecedents,
-                "consequents": consequents,
-                "groups_tested": groups_tested,
-                "groups_passed": groups_passed,
-                "p_value": recurrence_p_value(groups_passed, groups_tested, alpha),
-            })
-
-        result = pd.DataFrame(rows)
-        result["dataset_fdr"] = false_discovery_rates(result["p_value"].values)
-        return result.sort_values("dataset_fdr", ignore_index=True)
 
 
 def run_samples(samples, settings: Settings, *, n_shuffles, random_seed=None,
@@ -177,8 +102,6 @@ def _run_one(task):
     sample_id, coords, labels, settings, n_shuffles, seed, kept_fixed, min_lift_gain, max_individual_fdr = task
     try:
         result = mine(coords, labels, settings, sample_id=sample_id)
-        # Everything gets tested: a rule removed before testing later reads as one
-        # that was tested and failed.
         tested = result.add_p_values(
             n_shuffles=n_shuffles, random_seed=seed, labels_kept_fixed=kept_fixed, sample_id=sample_id,
         )
@@ -188,7 +111,7 @@ def _run_one(task):
         logger.info(f"[{sample_id}] {result.stats['patches_kept']} transactions, "
                     f"{len(result.rules)} mined, "
                     f"{int(classified['adds_information'].sum())} add information")
-        return SampleResult(sample_id, classified, tested, result.stats), None
+        return SampleResult(sample_id, classified, result.stats), None
     except Exception:
         return None, (sample_id, traceback.format_exc())
 

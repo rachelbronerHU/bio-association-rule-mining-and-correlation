@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from .attraction import mine_attraction
 from .avoidance import mine_avoidance
-from .rules import drop_rare_labels, empty_rules, labels_with_enough_cells, weight_matrix
+from .rules import drop_rare_labels, empty_rules, weight_matrix
 from .settings import Settings
 from .validation.significance import p_values_for
 from .validation.false_discovery import false_discovery_rates
@@ -93,7 +93,5 @@ def mine(coords, labels, settings: Settings, sample_id: str = "") -> Result:
 
     # Rare labels go first: the shuffle test after them is what the run pays for.
     rules = drop_rare_labels(mine_rules(transactions, settings, sample_id=sample_id), labels, settings)
-    # Lets a later step tell "the cell type was not here" from "tested and failed".
-    stats["labels_with_enough_cells"] = labels_with_enough_cells(labels, settings)
 
     return Result(rules=rules, stats=stats, patches=measured, labels=labels, settings=settings)

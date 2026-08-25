@@ -9,7 +9,7 @@ is two items, and both are Paneth — so the rule is complex, and it answers to
 'Paneth -> ...' rather than only to the one arrangement that happens to match.
 
 individual_fdr is read, never written: add_p_values() corrects across every rule it
-tested, whatever its class, so nothing here runs in a circle. See README, "Complex
+tested, whatever its class, so nothing here runs in a circle. See DESIGN.md, "Complex
 rules classification".
 """
 

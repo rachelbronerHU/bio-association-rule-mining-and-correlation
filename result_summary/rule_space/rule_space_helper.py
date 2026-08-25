@@ -148,15 +148,21 @@ def _fov_fractions(cells):
 # 2. From rules to a PCA
 # ---------------------------------------------------------------------------
 
-def _filter(data, stages, organs, exclude=()):
-    """The FOVs this run is about, and the rules allowed to be columns."""
-    fovs = data.fovs
-    if stages is not None:
-        fovs = fovs[fovs[SCORE_COL].isin(stages)]
-    if organs is not None:
-        fovs = fovs[fovs['Organ'].isin(organs)]
+def _filter(data, stages, organs, exclude=(), fovs=None):
+    """The FOVs this run is about, and the rules allowed to be columns.
 
-    rules = data.results[data.results['FOV'].isin(fovs['FOV'])].copy()
+    `fovs` names FOVs by hand, on top of the stage and organ cuts rather than instead
+    of them, so a subset still knows where it came from.
+    """
+    chosen = data.fovs
+    if stages is not None:
+        chosen = chosen[chosen[SCORE_COL].isin(stages)]
+    if organs is not None:
+        chosen = chosen[chosen['Organ'].isin(organs)]
+    if fovs is not None:
+        chosen = chosen[chosen['FOV'].isin(fovs)]
+
+    rules = data.results[data.results['FOV'].isin(chosen['FOV'])].copy()
     items = rules['Antecedents'].apply(base_items) + rules['Consequents'].apply(base_items)
 
     keep = items.apply(len) <= RULE_MAX_ITEMS
@@ -213,16 +219,17 @@ def _settings(scope, color_by=None):
 
 
 def run(data, stages=None, organs=None, prefix=None, colors=(), save=False,
-        exclude=(), diagnostics=True):
+        exclude=(), fovs=None, diagnostics=True):
     """Filter, build the matrix, run the PCA, and draw how much each component carries.
 
     `colors` names extra colourings to draw as scatters (organ, a metadata column...).
     The stage-coloured scatter comes from `pair()` instead, because that one also
     carries the boxed pair. `exclude` drops every rule naming those cell types.
-    `diagnostics` draws the scree and the loadings bars - turn it off when you only
+    `fovs` keeps those FOVs only, rebuilding the rules and the matrix from them - a
+    new PCA, not the old one re-drawn. `diagnostics` draws the scree and the loadings bars - turn it off when you only
     want the PCA back to lay out yourself.
     """
-    mat = _matrix(_filter(data, stages, organs, exclude))
+    mat = _matrix(_filter(data, stages, organs, exclude, fovs))
     return _fit(mat, data, stages, organs, prefix, colors, save, diagnostics=diagnostics)
 
 
@@ -299,6 +306,28 @@ def spread_along(scope, component='PC1', num=5):
         picked[row['FOV']] = (f"{component} {label} | {row[component]:.2f} | "
                               f"{row.get('Organ', '?')} ({row.get(SCORE_COL, '?')})")
     return picked
+
+
+def outliers(scope, k=3, components=('PC1', 'PC2')):
+    """Returns (the FOVs left, the FOVs sitting far out). Draws nothing.
+
+    Each FOV's distance from the middle, over the median distance - so 1 is an
+    ordinary FOV and `k` is how far out one must sit to be an outlier: 2 trims hard,
+    5 barely trims. The middle is the median, which the far FOVs cannot drag towards
+    themselves. Pass the kept FOVs to `run(..., fovs=kept)` to fit the PCA again.
+    """
+    coords = scope.coords
+    pts = coords[list(components)].to_numpy(dtype=float)
+    far = np.linalg.norm(pts - np.median(pts, axis=0), axis=1)
+    usual = np.median(far)
+    ratio = far / usual if usual else np.zeros(len(far))
+
+    out = coords.loc[ratio > k, 'FOV'].tolist()
+    print(f"{scope.label}: {len(out)} of {len(coords)} FOVs sit more than {k}x the "
+          f"usual {usual:.2f} out from the middle")
+    for fov, times in sorted(zip(out, ratio[ratio > k]), key=lambda both: -both[1]):
+        print(f"  {fov:26s} {times:.1f}x")
+    return coords.loc[ratio <= k, 'FOV'].tolist(), out
 
 
 def closest_pair(scope):

@@ -213,16 +213,19 @@ def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
             row = row.iloc[0]
             ax.scatter([row[x]], [row[y]], s=110, facecolors="none",
                        edgecolor="black", linewidth=1.3, zorder=5)
-            texts.append(ax.text(row[x], row[y], str(fov), fontsize=8, zorder=6))
+            # Set off the dot from the start: adjustText is not always installed, and
+            # a name printed on top of its own ring is the harder one to read.
+            texts.append(ax.annotate(str(fov), (row[x], row[y]), xytext=(13, 7),
+                                     textcoords="offset points", fontsize=8, zorder=6,
+                                     ha="left", va="center"))
         if texts:
             try:
                 from adjustText import adjust_text
                 adjust_text(texts, ax=ax,
                             arrowprops=dict(arrowstyle="-", color="0.45", lw=0.7),
-                            expand=(1.6, 1.9))
+                            expand=(2.2, 2.6))
             except ImportError:
-                for t in texts:
-                    t.set_ha("left")
+                pass
 
     title = _titled(f"PCA colored by {color_by}", scope)
     if len(ordered) > max_legend:

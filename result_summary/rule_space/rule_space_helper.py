@@ -382,6 +382,87 @@ def fov_panel(data, scope, component='PC1', num=5, save=False):
     return picked
 
 
+_DIRECTIONS = ['right', 'down-right', 'down', 'down-left',
+               'left', 'up-left', 'up', 'up-right']
+
+
+def _compass(point):
+    """The word for the direction a point lies in, seen from the middle."""
+    turn = np.degrees(np.arctan2(point[1], point[0])) % 360
+    return _DIRECTIONS[int(round((360 - turn) / 45)) % len(_DIRECTIONS)]
+
+
+def archetype_fovs(scope, num=8, per_corner=1, gap=0.2):
+    """The FOVs at the edges of the cloud: {FOV: (its description, its corner)}.
+
+    Directions, not the corners of the plot: a cloud shaped like a triangle has three
+    tips and no fourth corner, and this finds the tips it has. PC1 and PC2 are put on
+    one scale first, so the wider one does not win every direction.
+
+    `num` directions are swept clockwise from the right, so the maps come out in the
+    order they sit round the plot, and the FOV furthest out in each is taken. Winners
+    within `gap` of one another - a share of the cloud's width - are one corner, named
+    for where its furthest-out FOV lies. `per_corner` then takes that many of the
+    corner's FOVs, furthest out first.
+    """
+    coords = scope.coords
+    if coords.empty:
+        return {}
+    pts = coords[['PC1', 'PC2']].to_numpy(dtype=float)
+    span = np.ptp(pts, axis=0)
+    pts = (pts - np.median(pts, axis=0)) / np.where(span > 0, span, 1)
+    out = np.linalg.norm(pts, axis=1)                  # how far out from the middle
+
+    corners = []                                       # each: the FOV indexes found
+    for angle in np.linspace(0, -2 * np.pi, num, endpoint=False):
+        i = int(np.argmax(pts @ np.array([np.cos(angle), np.sin(angle)])))
+        # Every corner this winner is close to becomes one corner, so three FOVs strung
+        # along one edge are not read as two corners with a gap between them.
+        joined = [c for c in corners
+                  if min(np.linalg.norm(pts[i] - pts[j]) for j in c) <= gap]
+        if not joined:
+            corners.append([i])
+            continue
+        joined[0][:] = list(dict.fromkeys(sum(joined, [i])))
+        for other in joined[1:]:
+            corners.remove(other)
+
+    picked = {}
+    for seeds in corners:
+        near = [j for j in range(len(pts))
+                if min(np.linalg.norm(pts[j] - pts[i]) for i in seeds) <= gap]
+        share = np.array(near)[np.argsort(-out[near])][:per_corner]
+        way = _compass(pts[share[0]])                  # the tip says which corner it is
+        for n, j in enumerate(share, start=1):
+            row = coords.iloc[j]
+            picked.setdefault(row['FOV'],
+                              (f"{way} corner, {n} of {len(share)} | "
+                               f"PC1 {row['PC1']:.1f}, PC2 {row['PC2']:.1f} | "
+                               f"{row.get('Organ', '?')} ({row.get(SCORE_COL, '?')})", way))
+    return picked
+
+
+def archetype_panel(data, scope, num=8, per_corner=1, gap=0.2, save=False):
+    """Where the edge FOVs sit, and then those FOVs as maps - four to a row.
+
+    The scatter names them, and the maps of one corner share a title color.
+    """
+    picked = archetype_fovs(scope, num=num, per_corner=per_corner, gap=gap)
+    titles = {fov: desc for fov, (desc, _) in picked.items()}
+    corners = {fov: way for fov, (_, way) in picked.items()}
+    for fov, desc in titles.items():
+        print(f"  {fov:26s} {desc}")
+
+    rsv.plot_pca_scatter(scope.coords, scope.variance, color_by=SCORE_COL,
+                        label_fovs=titles, scope=scope.label,
+                        subtitle=_settings(scope, SCORE_COL),
+                        save=f"{scope.prefix}_archetypes_pca" if save else None)
+    vh.plot_fov_panel(titles, data.cells, data.fovs, num_cols=per_corner,
+                      title_groups=corners,
+                      save=f"{scope.prefix}_archetypes" if save else None)
+    return picked
+
+
 def pair(data, scope, color_by=None, save=False):
     """The scope's scatter - the panel FOVs named, the closest pair squared - and then
     that pair drawn as maps.

@@ -704,7 +704,9 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
                        alpha=1.0, linewidths=0)
         legend_types = targets
     else:
-        title = f"FOV: {fov_id}" + (f" ({description})" if description else "")
+        # The description goes on its own line: in a panel a one-line title runs past
+        # the map and into the letter beside it.
+        title = f"FOV: {fov_id}" + (f"\n{description}" if description else "")
         for ct, g in df_fov.groupby("cell type"):
             ax.scatter(g["x_um"], g["y_um"], s=cell_size,
                        c=[_CELL_COLORS.get(ct, (1, 1, 1))], label=ct,
@@ -742,31 +744,47 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
         _finish(fig, save)
 
 
-def plot_fov_panel(target_fovs, df_cells, df_fovs, num_cols=1, save=None):
+def plot_fov_panel(target_fovs, df_cells, df_fovs, num_cols=1, save=None,
+                   title_groups=None):
     """One map per FOV, side by side, lettered A, B, C … for the write-up.
 
     `target_fovs` is the {FOV: description} dict from
     `get_representative_fovs_for_pc`, so the panel reads left-to-right along
     the component.
+    `title_groups` : {FOV: group name}. Each group gets a row of its own and one title
+    color, so the maps that belong together read as one at a glance. `num_cols` is then
+    the longest group, and a shorter row leaves its places empty.
     """
     if not target_fovs:
         print("No FOVs to plot.")
         return
     fovs = list(target_fovs)
-    num_cols = max(1, min(num_cols, len(fovs)))
-    num_rows = (len(fovs) + num_cols - 1) // num_cols
+    if title_groups:
+        grouped = {}
+        for fov in fovs:
+            grouped.setdefault(title_groups[fov], []).append(fov)
+        rows = list(grouped.values())
+    else:
+        num_cols = max(1, min(num_cols, len(fovs)))
+        rows = [fovs[i:i + num_cols] for i in range(0, len(fovs), num_cols)]
+    num_cols = max(len(row) for row in rows)
 
-    fig, axes = plt.subplots(num_rows, num_cols,
-                             figsize=(10 * num_cols, 10 * num_rows),
+    fig, axes = plt.subplots(len(rows), num_cols,
+                             figsize=(10 * num_cols, 10 * len(rows)),
                              facecolor="#ffffff", squeeze=False)
-    axes = axes.flatten()
 
-    for i, fov in enumerate(fovs):
-        plot_fov(fov, target_fovs[fov], df_cells, df_fovs, ax=axes[i])
-        axes[i].text(-0.05, 1.05, chr(65 + i), transform=axes[i].transAxes,
-                     fontsize=20, fontweight="bold", va="top", ha="right")
-    for ax in axes[len(fovs):]:
-        ax.set_visible(False)
+    group_colors = _category_colors(list(title_groups.values()))[0] if title_groups else {}
+    letter = 0
+    for row_axes, row_fovs in zip(axes, rows):
+        for ax, fov in zip(row_axes, row_fovs):
+            plot_fov(fov, target_fovs[fov], df_cells, df_fovs, ax=ax)
+            color = group_colors.get((title_groups or {}).get(fov), "black")
+            ax.title.set_color(color)
+            ax.text(-0.07, 1.06, chr(65 + letter), transform=ax.transAxes, color=color,
+                    fontsize=20, fontweight="bold", va="bottom", ha="right")
+            letter += 1
+        for ax in row_axes[len(row_fovs):]:
+            ax.set_visible(False)
 
     plt.tight_layout()
     _finish(fig, save)

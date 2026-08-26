@@ -232,11 +232,11 @@ def plot_gain_dumbbell(table, class_labels=None, scope=None, metric="Lift",
     """The biggest gains, by name: where the best shorter rule sits, and where this one does.
 
     One row per rule, hollow dot the shorter rule, filled dot the longer one, and the bar
-    between them is the gain. The axis is the strength itself, so a pair sitting at 1.3 and
+    between them is the gain. Each is named on its own side - the shorter rule down the
+    left, the longer one down the right - so no row has to be read across twice. The axis is the strength itself, so a pair sitting at 1.3 and
     a pair sitting at 8 never read the same however equal their ratio.
 
-    The shorter rule it was measured against is named on the right, beside the gain. A
-    dotted bar means nothing shorter was mined, so the gain is a floor.
+    A dotted bar means nothing shorter was mined, so the gain is a floor.
     """
     if table.empty:
         print("No rules to plot.")
@@ -260,16 +260,17 @@ def plot_gain_dumbbell(table, class_labels=None, scope=None, metric="Lift",
     ax.scatter(strength, y, s=sizes, color=colors, edgecolor="white",
                linewidth=1.2, zorder=4)
 
-    ax.set_yticks(y, top["name"], fontsize=8.5)
+    ax.set_yticks(y, top["parent_name"], fontsize=8.5)
     ax.set_ylim(-0.9, len(top) - 0.1)
     ax.set_xscale("log")
     _plain_log_ticks(ax, "x", _GAIN_TICKS)
     ax.set_xlabel(f"how strong the rule is      ({metric.lower()}, 1 = chance)", fontsize=10)
     ax.tick_params(axis="y", length=0)
 
-    # Two columns down the right: what it was measured against, and by how much it won.
+    # Each name sits beside its own dot: the shorter rule on the left, the longer one
+    # on the right, then by how much it won and how many FOVs it was seen in.
     for row, (name, gain, fovs, is_bound) in enumerate(
-            zip(top["parent_name"], top["gain"], top["fovs"], bound)):
+            zip(top["name"], top["gain"], top["fovs"], bound)):
         ax.annotate(str(name), xy=(1.02, y[row]), xycoords=("axes fraction", "data"),
                     ha="left", va="center", fontsize=7.5, color=INK,
                     annotation_clip=False)
@@ -279,10 +280,12 @@ def plot_gain_dumbbell(table, class_labels=None, scope=None, metric="Lift",
         ax.annotate(f"{int(fovs)}", xy=(1.44, y[row]),
                     xycoords=("axes fraction", "data"), ha="left", va="center",
                     fontsize=8.5, color=INK, annotation_clip=False)
-    for at, header in ((1.02, "the shorter rule it beat"), (1.36, "gain"),
-                       (1.44, "FOVs")):
+    for at, header in ((1.02, "the longer rule"), (1.36, "gain"), (1.44, "FOVs")):
         ax.annotate(header, xy=(at, len(top) - 0.35), xycoords=("axes fraction", "data"),
                     ha="left", va="center", fontsize=8, color=INK, annotation_clip=False)
+    ax.annotate("the shorter rule it beat", xy=(-0.01, len(top) - 0.35),
+                xycoords=("axes fraction", "data"), ha="right", va="center",
+                fontsize=8, color=INK, annotation_clip=False)
 
     ax.set_title(_titled(f"The biggest gains, named  (top {top_n})", scope),
                  fontsize=12.5, loc="left", pad=14)

@@ -159,7 +159,7 @@ def _figure_titles(fig, title, subtitle, center):
 
 
 def _matrix_legends(fig, scale, color_col, size_col, size_label, cell_groups,
-                    left, top, max_area):
+                    left, top, max_area, outer_label=None):
     """The cell-group key, the colorbar and the dot-size key, stacked in the margin.
 
     Everything is placed in inches from `top`, so the stack looks the same whether the
@@ -185,7 +185,8 @@ def _matrix_legends(fig, scale, color_col, size_col, size_label, cell_groups,
     if scale["ticks"] is not None:
         cbar.set_ticks(scale["ticks"])
         cbar.set_ticklabels(scale["tick_labels"])
-    cbar.set_label(color_col.lower(), fontsize=10)
+    cbar.set_label(color_col.lower() + (" (log scale)" if scale["ticks"] else ""),
+                   fontsize=10)
     cbar.ax.tick_params(labelsize=9)
 
     ref, is_share = scale["size_ref"], size_col == "share"
@@ -193,10 +194,22 @@ def _matrix_legends(fig, scale, color_col, size_col, size_label, cell_groups,
                           markersize=float(np.sqrt(_size_points([v], ref, max_area)[0])),
                           label=f"{v:.0%}" if is_share else f"{v:.2g}")
                for v in (0.25 * ref, 0.5 * ref, ref)]
+    # The rows have to clear the biggest dot, which grows with the grid.
+    biggest = max(h.get_markersize() for h in handles)
+    spacing = max(1.6, biggest / 9)
     fig.legend(handles=handles, loc="upper left", frameon=False,
                bbox_to_anchor=(left + 0.55 / width, down(5.1)),
                title=size_label or size_col.lower(), fontsize=9, title_fontsize=10,
-               labelspacing=1.6, borderpad=0.6)
+               labelspacing=spacing, borderpad=0.6)
+
+    if outer_label:
+        ring = plt.Line2D([0], [0], marker="o", linestyle="none", markersize=13,
+                          markerfacecolor="none", markeredgecolor="0.72",
+                          markeredgewidth=1.1, label=outer_label)
+        fig.legend(handles=[ring], loc="upper left", frameon=False,
+                   bbox_to_anchor=(left + 0.55 / width,
+                                   down(6.0 + 3 * biggest * 1.2 / 72)),
+                   fontsize=9, handletextpad=1.2)
 
 
 # --- the two calls the notebook makes --------------------------------------
@@ -204,7 +217,8 @@ def _matrix_legends(fig, scale, color_col, size_col, size_label, cell_groups,
 def plot_rule_matrix(df, cell_order, cell_groups=None, color_col="Lift",
                      size_col="Confidence", title=None, subtitle=None, scale=None,
                      size_label=None, ax=None, per_cell=_SQUARE_ALONE,
-                     show_diagonal=True, save=None):
+                     show_diagonal=True, outer_size_col=None, outer_label=None,
+                     mark_lone=False, save=None):
     """One grid: a dot per rule, center cell (y) against neighbor cell (x).
 
     df         : one row per rule, with 'antecedent', 'consequent' and both metrics.
@@ -213,6 +227,10 @@ def plot_rule_matrix(df, cell_order, cell_groups=None, color_col="Lift",
     cell_groups: {cell type: group}, which colors the names and splits the grid.
     scale      : from `build_matrix_scale`; pass the panel's scale in to share it.
                  Left out, the grid builds its own scale from its own numbers.
+    outer_size_col: a second, never-smaller size drawn as a ring behind each dot, so
+                 the two can be read at once - the ring is what the dot could have been.
+    mark_lone  : outline the dots whose mirror rule was never mined, which is what makes
+                 the grid asymmetric.
     """
     if scale is None:
         scale = build_matrix_scale([df], color_col, size_col)
@@ -231,12 +249,24 @@ def plot_rule_matrix(df, cell_order, cell_groups=None, color_col="Lift",
 
     place = {cell: i for i, cell in enumerate(cell_order)}
     rows = df[df["antecedent"].isin(place) & df["consequent"].isin(place)]
+    if len(rows) and outer_size_col:
+        ax.scatter(rows["consequent"].map(place), rows["antecedent"].map(place),
+                   s=_size_points(rows[outer_size_col], scale["size_ref"], max_area),
+                   facecolor="none", edgecolor="0.72", linewidth=0.9, zorder=2)
     if len(rows):
         ax.scatter(rows["consequent"].map(place), rows["antecedent"].map(place),
                    s=_size_points(rows[size_col], scale["size_ref"], max_area),
                    c=scale["transform"](rows[color_col]),
                    cmap=scale["cmap"], norm=scale["norm"],
                    edgecolor="0.25", linewidth=0.4, zorder=3)
+        if mark_lone:
+            mined = set(zip(rows["antecedent"], rows["consequent"]))
+            lone = rows[[(c, a) not in mined
+                         for a, c in zip(rows["antecedent"], rows["consequent"])]]
+            if len(lone):
+                ax.scatter(lone["consequent"].map(place), lone["antecedent"].map(place),
+                           s=_size_points(lone[size_col], scale["size_ref"], max_area),
+                           facecolor="none", edgecolor="#111111", linewidth=1.5, zorder=4)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("neighbor cell", fontsize=11 if own_fig else 9)
     ax.set_ylabel("center cell", fontsize=11 if own_fig else 9)
@@ -252,14 +282,15 @@ def plot_rule_matrix(df, cell_order, cell_groups=None, color_col="Lift",
                          subtitle, center=left / 2)
     plt.tight_layout(rect=[0, 0, left, top])
     _matrix_legends(fig, scale, color_col, size_col, size_label, cell_groups,
-                    left=left, top=top, max_area=max_area)
+                    left=left, top=top, max_area=max_area, outer_label=outer_label)
     _finish(fig, save)
 
 
 def plot_rule_matrix_panel(frames, cell_order, cell_groups=None, color_col="Lift",
                            size_col="Confidence", num_cols=3, title=None,
                            subtitle=None, size_label=None, size_ref=None,
-                           show_diagonal=True, save=None):
+                           show_diagonal=True, outer_size_col=None, outer_label=None,
+                           save=None):
     """One grid per entry of `frames` ({title: table}), all on one shared scale.
 
     The color scale and the dot-size reference are built once over every table, so a
@@ -282,7 +313,8 @@ def plot_rule_matrix_panel(frames, cell_order, cell_groups=None, color_col="Lift
     for ax, (name, df) in zip(axes, frames.items()):
         plot_rule_matrix(df, cell_order, cell_groups=cell_groups, color_col=color_col,
                          size_col=size_col, title=name, scale=scale, ax=ax,
-                         per_cell=_SQUARE_PANEL, show_diagonal=show_diagonal)
+                         per_cell=_SQUARE_PANEL, show_diagonal=show_diagonal,
+                         outer_size_col=outer_size_col)
     for ax in axes[len(frames):]:
         ax.set_visible(False)
 
@@ -290,7 +322,69 @@ def plot_rule_matrix_panel(frames, cell_order, cell_groups=None, color_col="Lift
     top = _figure_titles(fig, title, subtitle, center=left / 2)
     plt.tight_layout(rect=[0, 0, left, top])
     _matrix_legends(fig, scale, color_col, size_col, size_label, cell_groups,
-                    left=left, top=top, max_area=_dot_area(size, _SQUARE_PANEL))
+                    left=left, top=top, max_area=_dot_area(size, _SQUARE_PANEL),
+                    outer_label=outer_label)
     _finish(fig, save)
 
 
+
+
+# --- one cell pair, every FOV that has it ----------------------------------
+
+_PAIR_WIDTH = 2.4           # inches per cell pair
+_PAIR_HEIGHT = 2.6
+
+
+def plot_pair_dots(panels, counts, stage_order, stage_colors, num_cols=3,
+                   value_col="log2_lift", ylabel="log2 lift\n(0 = chance)",
+                   baseline=0.0, footnote=None, title=None, subtitle=None, save=None):
+    """One panel per cell pair: every FOV carrying the rule as its own dot.
+
+    panels : {pair name: table with 'stage' and 'log2_lift'}, one row per FOV.
+    counts : {pair name: {stage: (FOVs with the rule, eligible FOVs)}}, written
+             under each stage so a panel says how common the rule is as well as how
+             strong it is.
+    """
+    if not panels:
+        print("No data to plot.")
+        return
+    num_cols = max(1, min(num_cols, len(panels)))
+    num_rows = (len(panels) + num_cols - 1) // num_cols
+    fig, axes = plt.subplots(num_rows, num_cols, squeeze=False, sharey=True,
+                             figsize=(_PAIR_WIDTH * num_cols + 1.4,
+                                      _PAIR_HEIGHT * num_rows + 1.6))
+    axes = axes.flatten()
+    spread = np.random.default_rng(0)
+
+    for ax, (name, table) in zip(axes, panels.items()):
+        if baseline is not None:
+            ax.axhline(baseline, color="0.55", lw=1.0, zorder=1)
+        for x, stage in enumerate(stage_order):
+            values = table.loc[table["stage"] == stage, value_col].to_numpy(dtype=float)
+            if len(values):
+                ax.scatter(x + spread.uniform(-0.16, 0.16, len(values)), values,
+                           s=26, color=stage_colors.get(stage, "0.5"),
+                           edgecolor="0.25", linewidth=0.4, alpha=0.85, zorder=3)
+                middle = np.median(values)
+                ax.plot([x - 0.28, x + 0.28], [middle] * 2, color="0.15", lw=1.6, zorder=4)
+                ax.annotate(f"{middle:.2f}", (x + 0.30, middle), fontsize=7,
+                            color="0.15", va="center", ha="left", zorder=5)
+        ax.set_xticks(range(len(stage_order)))
+        ax.set_xticklabels(["{}\n{}/{}".format(stage, *counts[name].get(stage, (0, 0)))
+                            for stage in stage_order], fontsize=9)
+        ax.set_xlim(-0.6, len(stage_order) - 0.4)
+        ax.set_title(name, fontsize=10)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(labelsize=9)
+
+    for ax in axes[len(panels):]:
+        ax.set_visible(False)
+    for ax in axes[::num_cols]:
+        ax.set_ylabel(ylabel, fontsize=9)
+
+    top = _figure_titles(fig, title, subtitle, center=0.5)
+    fig.tight_layout(rect=[0, 0.03, 1, top])
+    fig.text(0.5, 0.005, footnote or "each dot is one FOV  |  bar = median  |  "
+             "numbers = FOVs with the rule / FOVs holding both cell types",
+             ha="center", fontsize=8.5, color="0.35")
+    _finish(fig, save)

@@ -1,0 +1,307 @@
+\documentclass[10pt, a4paper]{article}
+
+% - Packages ---
+\usepackage[top=2cm, bottom=2cm, left=2cm, right=2cm]{geometry}
+\usepackage{graphicx} % For images
+\usepackage{amsmath}  % For math/equations
+\usepackage{hyperref} % For clickable links
+\usepackage{caption}  % For styling captions
+\usepackage{titlesec} % For controlling section title sizes
+\usepackage{float}
+\usepackage{xcolor} % Required for defining and using colors
+\usepackage{hyperref} % Keep this as your last \usepackage
+\usepackage{color}
+\usepackage{soul}
+
+% ברירת המחדל של המרקור היא צהוב. אם תרצי לשנות למשל לטורקיז/תכלת, הוסיפי גם את השורה הזו:
+% \sethlcolor{cyan}
+
+\hypersetup{
+    colorlinks=true, % Removes the default boxes and colors the text instead
+    linkcolor=blue,  % Color for internal links (e.g., Figure and Table references)
+    citecolor=blue,  % Color for bibliographical citations
+    urlcolor=blue    % Color for external web URLs
+}
+% - Document Formatting ---
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+\captionsetup{font=scriptsize, labelfont=bf}
+
+% - Customize Title Sizes ---
+\titleformat{\section}
+  {\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}
+  {\normalsize\bfseries}{\thesubsection}{1em}{}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{} % מנקה את הגדרות ברירת המחדל
+\fancyhead[L]{\footnotesize Weekly Summary \#6 \today} % יופיע למעלה בשמאל
+\fancyhead[R]{\footnotesize Rachel Broner $\vert$ Miri Adler's Lab} % יופיע למעלה בימין
+\fancyfoot[C]{\thepage} % מספר עמוד למטה באמצע
+
+% \usepackage{mathptmx}
+
+\usepackage{setspace}
+\onehalfspacing % For 1.5 line spacing
+
+
+\begin{document}
+
+\begin{center}
+    {\Large \textbf{Weekly Summary \#6 $\vert$ Association Rule Mining}} \\[0.5em]
+    {\large Part 3 $\vert$ Which cell type sits next to which} \\[0.5em]
+    \textit{GVHD Analysis} $\vert$ Week of: \today
+\end{center}
+\vspace{0.2cm}
+\hrule
+\vspace{0.5cm}
+
+\textbf{Muscle issue:} How much muscularis a biopsy caught
+differs by stage, and in opposite directions in the two organs: FOVs containing muscle rise
+with stage in the duodenum (58\%, 66\%, 68\%) and fall in the colon (80\%, 33\%, 52\%). Any
+result involving Muscle therefore mixes biology with what the biopsy happened to include,
+so every figure below that touches it is shown twice - all FOVs, then only those that
+sampled the muscularis. Restricting this way loses no patient from either severe group.
+
+% ---------------------------------------------------------
+\section{Claim 1 - the direction of a rule is anatomical}
+
+\textit{A $\rightarrow$ B} and \textit{B $\rightarrow$ A} are different measurements. \textbf{59\%} of mined rules exist in one direction only.
+
+\textbf{In one image, two squares are filled and their mirrors are empty.} Paneth cells
+have epithelium beside them; smooth muscle has endothelium beside it. Neither reverse rule
+was mined - which is what the anatomy predicts, since Paneth cells are under 1\% of the
+tissue and almost no epithelial cell has one nearby.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{summary_downloads/f1_one_fov_control.pdf}
+    \caption{\textbf{Reading the grid:} Center cell down the side, neighbor cell across the
+    bottom, one dot per mined rule. Color is lift on a log2 spacing, so 0.5 and 2 sit
+    equally far from white. Dot size is the share of FOVs carrying the rule; the ring is
+    that share among FOVs holding both cell types, so a gap means the cells are often
+    absent. Here: one healthy duodenal FOV (Control\_01\_FOV\_1), axes trimmed to the cell
+    types it uses.}
+    \label{fig:fov1}
+\end{figure}
+
+\textbf{Across the cohort the asymmetry holds:}
+Paneth $\rightarrow$ Epithelial fires in 12 of 29 eligible control FOVs; its mirror in
+\textbf{0 of 29}. SMV $\rightarrow$ Endothelial sits well above chance at every stage while
+its mirror reaches 1 of 30 controls.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f2_direction_pairs.pdf}
+    \caption{\textbf{Reading a dot panel:} One cell pair per panel; each dot is one FOV
+    carrying the rule, the bar is the median, and the fraction under each stage is FOVs with
+    the rule out of FOVs holding both cell types. The two right panels are the mirrors of
+    the two left ones.}
+    \label{fig:dir}
+\end{figure}
+
+\textbf{Pooled, the grid is visibly not symmetric about its diagonal,} with the
+asymmetry the right way round.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{summary_downloads/f3_group_control.pdf}
+    \caption{Healthy duodenum, 31 FOVs pooled, axes trimmed as before.}
+    \label{fig:group1}
+\end{figure}
+
+% ---------------------------------------------------------
+\section{Claim 2 - the rules reconstruct the layers of the gut}
+
+The gut is built in layers - epithelium, lamina propria, muscularis - and nothing about
+this was given to the mining.
+
+\textbf{Folded into lineages, grouped cells shows the layering.} The diagonal is warm
+(a layer sits with itself) and the epithelial row is cold against everything outside the
+epithelium. Epithelium against muscle is the strongest avoidance anywhere in the data.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{summary_downloads/f4a_layers_one.pdf}
+    \caption{Healthy duodenum, the 31 cell types folded into their lineages; Muscle and
+    Brunner glands keep their own row and column, forming a lineage with nothing else.}
+    \label{fig:layers1}
+\end{figure}
+
+\textbf{The same picture repeats in both organs and at every stage.} Epithelium keeps apart
+from immune cells (lift 0.36--0.62) and from stroma (0.26--0.48); stroma sits with stroma
+(1.33--1.54); epithelium against muscle stays at 0.03--0.09. This is the stereotypic
+organisation Azulay \textit{et al.} describe for healthy gut, recovered from rules alone,
+and it survives aGVHD intact.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f4b_layers_all.pdf}
+    \caption{All six organ $\times$ stage groups, folded as in Fig.~\ref{fig:layers1}.}
+    \label{fig:layers}
+\end{figure}
+
+\textbf{Dropping the FOVs with no muscularis changes nothing but the Muscle row.} The
+diagonal, the epithelial row and the stromal block are the same picture, so the layering is
+not an artefact of which biopsies caught muscle.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f4c_layers_muscularis.pdf}
+    \caption{Fig.~\ref{fig:layers} restricted to FOVs that sampled the muscularis.}
+    \label{fig:layersmusc}
+\end{figure}
+
+\textbf{Unfolded, each pair sits at the same height in every stage - the boundary does not
+loosen.} Tested one rule at a time: of 24 across-layer rules in the duodenum, none moves
+toward chance at BH FDR $<0.10$, and of 38 in the colon only 2 do. Several tighten instead
+--- Goblet $\rightarrow$ Plasma goes $-0.82 \rightarrow -1.76$ in the duodenum and
+$-0.90 \rightarrow -1.72$ in the colon. The paper's ``less organised'' is about villus and crypt
+\emph{shape}; a rule only asks which cell types end up within $25\,\mu$m of each other, and
+a crypt can lose its shape while its cells keep their neighbours.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.90\textwidth]{summary_downloads/f5_layer_pairs.pdf}
+    \caption{Colon. Three pairs across the layer boundary, drawn as in
+    Fig.~\ref{fig:dir}.}
+    \label{fig:layerpairs}
+\end{figure}
+
+\textbf{Epithelial $\rightarrow$ Muscle is the one pair the sampling could have invented,
+and it survives.} On muscularis FOVs only it stays far below chance at every stage; the
+other two pairs are unaffected, as they involve no muscle.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.90\textwidth]{summary_downloads/f5b_layer_pairs_muscularis.pdf}
+    \caption{Fig.~\ref{fig:layerpairs} restricted to FOVs that sampled the muscularis.}
+    \label{fig:layerpairsmusc}
+\end{figure}
+
+% ---------------------------------------------------------
+\section{Claim 3 - the paper's findings appear as rules arriving and leaving}
+
+\textbf{One diseased image already shows two of the paper's epithelial findings.} Against
+Fig.~\ref{fig:fov1}, the Paneth row has gone and an Endocrine row has appeared.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{summary_downloads/f6_one_fov_severe.pdf}
+    \caption{One severe duodenal FOV (GVHD\_14\_FOV\_4), drawn as Fig.~\ref{fig:fov1}.}
+    \label{fig:fov2}
+\end{figure}
+
+\textbf{Across the cohort, Paneth rules vanish and Endocrine rules appear - but the dots
+do not move up or down, only their number changes.} Paneth $\rightarrow$ Epithelial holds
+through mild disease (12/29 then 37/91 of eligible FOVs) and drops in severe (7/30).
+Endocrine $\rightarrow$ Epithelial is absent from healthy duodenum entirely (0/21) and
+present only with disease (22/87 mild, 7/35 severe).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{summary_downloads/f7_paper_duodenum.pdf}
+    \caption{Duodenum, drawn as in Fig.~\ref{fig:dir}. The vertical position of the dots is
+    the rule's strength; the count beneath is how many FOVs carry it.}
+    \label{fig:paper1}
+\end{figure}
+
+\textbf{The cells themselves moved, which is why the rules did.} Paneth cells fall from
+0.9\% of an FOV to 0.6\% and from 29 of 31 FOVs to 30 of 41; endocrine cells rise from
+0.1\% to 0.5\% and from 21 of 31 to 35 of 41. So these rules track the paper's
+\emph{compositional} findings, not a rearrangement.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{summary_downloads/f7b_cells_duodenum.pdf}
+    \caption{The same FOVs, now showing how much of each one the cell type makes up. Same
+    layout as Fig.~\ref{fig:paper1}, so the two can be read against each other.}
+    \label{fig:cells1}
+\end{figure}
+
+\textbf{Both rules are sharper against the pathological score than the clinical one.} Grouped
+by pathology, Paneth $\rightarrow$ Epithelial falls further in severe disease (2/24, 8\%,
+against 7/30, 23\% clinically) and Endocrine $\rightarrow$ Epithelial keeps rising
+(0\%, 22\%, 30\%) instead of levelling off (0\%, 25\%, 20\%). Both are histological changes
+and the Lerner pathological score is the histological readout, while the Glucksberg clinical
+score grades symptoms - the paper notes the two disagree in six of its patients. That the
+epithelial rules track the tissue score more closely is a small point in the method's favour:
+they are responding to damage rather than to how ill the patient felt.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{summary_downloads/f7c_paper_duodenum_pathological.pdf}
+    \caption{Fig.~\ref{fig:paper1} regrouped by the pathological score. Everything else in
+    this note uses the clinical score, as the paper does.}
+    \label{fig:paper1path}
+\end{figure}
+
+\textbf{The colon repeats the pattern in both directions.} Neutrophil $\rightarrow$
+Epithelial is absent from control and mild disease and appears only in severe (4/52);
+CD4T $\rightarrow$ Plasma runs the other way, from 14/25 down to 2/50.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{summary_downloads/f8_paper_colon.pdf}
+    \caption{Colon, drawn as in Fig.~\ref{fig:dir}.}
+    \label{fig:paper2}
+\end{figure}
+
+\textbf{Again the cells explain it}: neutrophils spread with severity while plasma and CD4 T
+cells fall away - the neutrophil enrichment and plasma/CD4T depletion the paper reports.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f8b_cells_colon.pdf}
+    \caption{Colon cell abundance, drawn as in Fig.~\ref{fig:cells1}.}
+    \label{fig:cells2}
+\end{figure}
+
+Requiring at least 20 cells of each type does not change this: Paneth $\rightarrow$
+Epithelial still falls from 77\% to 54\% of FOVs, but no pair's \emph{lift} differs between
+control and severe after correction. These figures confirm the paper's findings in the rule
+table; they do not rediscover them independently.
+
+\textbf{All six groups at once.} The Goblet rows say it most clearly: small dots inside
+large rings, so the rules hold wherever goblet cells remain and there are simply fewer such
+FOVs.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f9_all_groups.pdf}
+    \caption{All six groups on a shared axis, restricted to the 14 cell types carrying a
+    rule in over 25\% of the FOVs of at least three groups.}
+    \label{fig:all}
+\end{figure}
+
+\textbf{On muscularis FOVs only, the epithelial changes are unchanged and the Muscle rows
+move.} The Paneth, Endocrine and Goblet rows read the same, so the findings above do not
+depend on which biopsies caught muscle.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f10_muscularis.pdf}
+    \caption{Fig.~\ref{fig:all} restricted to FOVs that sampled the muscularis.}
+    \label{fig:muscularis}
+\end{figure}
+
+% ---------------------------------------------------------
+\section{What the method cannot answer}
+
+\textbf{The grid is sparse.} A median FOV yields 30 rules out of 930 possible pairs, so an
+untrimmed grid is about 97\% empty. Trimming to the cell types actually used lifts a pooled
+group grid from 5\% to 27\% filled; the shared axis is kept only where grids must be compared.
+
+\textbf{Abundant cell types are handicapped.} A cell type in nearly every neighborhood has
+a lift near 1 by construction and cannot clear the threshold. This puts the paper's
+intraepithelial-lymphocyte result out of reach: the signs are right at every stage
+(CD8T $\rightarrow$ Epithelial above 1, CD4T $\rightarrow$ Epithelial below 1) but the
+rules clear threshold in only 1--3 FOVs.
+
+\textbf{One FOV is coarser than one crypt.} The paper's local-microenvironment result
+(their Fig.~6) is measured in a ring around each crypt, where an infiltrated crypt can sit
+beside an untouched one. A rule is mined over a whole FOV, which averages the two together.
+Within-FOV patchiness would need mining at crypt level - the natural next step.
+
+\end{document}

@@ -35,6 +35,11 @@ MAX_FDR = 0.05
 # Control_S is the second control group, 21 FOVs.
 DROP_STAGES = ("Control_S",)         # () keeps everything. One name is fine: "Control_S"
 
+# Cell types left out of every rule. A rule naming one of these is dropped whole, so no
+# notebook sees it. Unidentified is not a cell type - it is the cells the classifier
+# could not name.
+DROP_CELLS = ("Unidentified",)       # () keeps everything. One name is fine: "Unidentified"
+
 
 # ---------------------------------------------------------------------------
 # 1. Load the spatial data (cells, FOVs, biopsies)
@@ -219,6 +224,14 @@ def load_results(result_csv_dir=None, rule_max_items=2, kind="attracts", max_fdr
     if informative_only and "Adds_Information" in rules.columns:
         rules = rules[rules["Adds_Information"].fillna(True).astype(bool)].copy()
         print(f"Kept {len(rules)} rules that add information.")
+
+    if DROP_CELLS:
+        drop = {DROP_CELLS} if isinstance(DROP_CELLS, str) else set(DROP_CELLS)
+        named = (rules["Antecedents"].apply(base_items)
+                 + rules["Consequents"].apply(base_items))
+        keep = ~named.apply(lambda items: bool(drop & set(items)))
+        rules = rules[keep].copy()
+        print(f"Kept {len(rules)} rules naming no {', '.join(sorted(drop))}.")
 
     rules = rules[rules.apply(count_items, axis=1) <= rule_max_items].copy()
     if kind is not None:

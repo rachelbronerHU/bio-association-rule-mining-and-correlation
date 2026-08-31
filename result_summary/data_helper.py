@@ -273,3 +273,23 @@ def check_rule_overlap(ant_list, con_list):
     """
     base = _strip(list(ant_list) + list(con_list))
     return len(base) != len(set(base))
+
+
+# ---------------------------------------------------------------------------
+# 4. Check where a rule can be measured
+# ---------------------------------------------------------------------------
+
+def eligible_fovs(rule_cells, cells, min_cells=20):
+    """Rule x FOV mask: True when every cell type has at least `min_cells` cells.
+
+    rule_cells : {rule name: the cell types it names}. The name is only the row label;
+                 which side a cell type sits on makes no difference here, so both sides
+                 go in one list. `base_items` turns a stored rule into that list.
+    """
+    counts = cells.groupby(["cell type", "fov"]).size().unstack(fill_value=0)
+    eligible = pd.DataFrame(False, index=pd.Index(rule_cells), columns=counts.columns)
+
+    for rule, cell_types in rule_cells.items():
+        eligible.loc[rule] = counts.reindex(cell_types, fill_value=0).ge(min_cells).all()
+
+    return eligible

@@ -61,9 +61,12 @@ def _color_scale(values, col):
             f = _finite(x)
             return np.log2(np.where(f > 0, f, np.nan))
         limit = _limit(to_log(v))
-        ticks = [t for t in _RATIO_TICKS if abs(np.log2(t)) <= limit]
+        # Whole steps of log2, the same units the dot panels use, so a reader does not
+        # have to switch scales between two figures on the same page.
+        step = 1 if limit <= 4 else 2
+        ticks = [t for t in range(-12, 13, step) if abs(t) <= limit]
         return (to_log, Normalize(-limit, limit), "RdBu_r",
-                [np.log2(t) for t in ticks], [f"{t:g}" for t in ticks])
+                ticks, [f"{t:g}" for t in ticks])
     if col in _ZERO_METRICS:
         limit = _limit(v)
         return _finite, Normalize(-limit, limit), "RdBu_r", None, None
@@ -185,8 +188,9 @@ def _matrix_legends(fig, scale, color_col, size_col, size_label, cell_groups,
     if scale["ticks"] is not None:
         cbar.set_ticks(scale["ticks"])
         cbar.set_ticklabels(scale["tick_labels"])
-    cbar.set_label(color_col.lower() + (" (log scale)" if scale["ticks"] else ""),
-                   fontsize=10)
+    ratio = scale["ticks"] is not None
+    cbar.set_label("log2 " + color_col.lower() + "\n(0 = chance)" if ratio
+                   else color_col.lower(), fontsize=10)
     cbar.ax.tick_params(labelsize=9)
 
     ref, is_share = scale["size_ref"], size_col == "share"

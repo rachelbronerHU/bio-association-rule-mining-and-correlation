@@ -77,12 +77,12 @@ tissue and almost no epithelial cell has one nearby.
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.78\textwidth]{summary_downloads/f1_one_fov_control.pdf}
-    \caption{\textbf{Reading the grid:} Center cell down the side, neighbor cell across the
-    bottom, one dot per mined rule. Color is lift on a log2 spacing, so 0.5 and 2 sit
-    equally far from white. Dot size is the share of FOVs carrying the rule; the ring is
-    that share among FOVs holding both cell types, so a gap means the cells are often
-    absent. Here: one healthy duodenal FOV (Control\_01\_FOV\_1), axes trimmed to the cell
-    types it uses.}
+    \caption{\textbf{Reading the grid:} each \emph{row} is a cell type taken as the centre
+    of a neighbourhood; each \emph{column} is a cell type found within $25\,\mu$m of it.
+    A dot means that rule was mined, and \textbf{a heavy black outline means the mirror
+    rule was not} --- it fired one way round only. Colour is log2 lift, so $+1$ and $-1$ sit
+    equally far from white. Dot size is confidence. Here: one healthy duodenal FOV
+    (Control\_01\_FOV\_1), axes trimmed to the cell types it uses.}
     \label{fig:fov1}
 \end{figure}
 
@@ -124,14 +124,18 @@ epithelium. Epithelium against muscle is the strongest avoidance anywhere in the
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{summary_downloads/f4a_layers_one.pdf}
-    \caption{Healthy duodenum, the 31 cell types folded into their lineages; Muscle and
-    Brunner glands keep their own row and column, forming a lineage with nothing else.}
+    \caption{Healthy colon, the 31 cell types folded into their lineages; Muscle and
+    Brunner glands keep their own row and column, forming a lineage with nothing else.
+    A box averages the log2 lift of every rule inside it, \textbf{weighted by how many
+    FOVs each rule appears in} --- otherwise a rule seen in one FOV would count as much as
+    one seen in nearly all of them.}
     \label{fig:layers1}
 \end{figure}
 
-\textbf{The same picture repeats in both organs and at every stage.} Epithelium keeps apart
-from immune cells (lift 0.36--0.62) and from stroma (0.26--0.48); stroma sits with stroma
-(1.33--1.54); epithelium against muscle stays at 0.03--0.09. This is the stereotypic
+\textbf{The same picture repeats in both organs and at every stage.} Each lineage sits with
+itself --- epithelium 1.48--2.00, stroma 1.37--2.10, immune 1.03--1.33 --- while epithelium
+keeps apart from immune cells (0.31--0.52) and from stroma (0.26--0.41), and epithelium
+against muscle stays at 0.03--0.09. This is the stereotypic
 organisation Azulay \textit{et al.} describe for healthy gut, recovered from rules alone,
 and it survives aGVHD intact.
 

@@ -5,6 +5,7 @@ Keep it simple: this file only reads files and tidies them. No plotting, no anal
 """
 import os
 import ast
+import numpy as np
 import pandas as pd
 
 
@@ -273,6 +274,34 @@ def check_rule_overlap(ant_list, con_list):
     """
     base = _strip(list(ant_list) + list(con_list))
     return len(base) != len(set(base))
+
+
+def prepare_rules(results, no_self=True):
+    """Clean rule names and encode attraction (+1) or avoidance (-1)."""
+    rules = results.copy()
+    if no_self:
+        repeated = rules.apply(
+            lambda row: check_rule_overlap(
+                base_items(row["Antecedents"]), base_items(row["Consequents"])
+            ),
+            axis=1,
+        )
+        rules = rules.loc[~repeated].copy()
+
+    rules["Clean_Ant"] = rules["Antecedents"].apply(clean_items)
+    rules["Clean_Con"] = rules["Consequents"].apply(clean_items)
+    rules["Clean_Rule"] = rules["Clean_Ant"] + " -> " + rules["Clean_Con"]
+    kind = (
+        rules["Kind"].astype(str).str.lower()
+        if "Kind" in rules
+        else pd.Series("", index=rules.index)
+    )
+    rules["state"] = np.select(
+        [kind.str.startswith("attract"), kind.str.startswith("avoid")],
+        [1, -1],
+        default=np.where(rules["Lift"] > 1, 1, -1),
+    )
+    return rules
 
 
 # ---------------------------------------------------------------------------

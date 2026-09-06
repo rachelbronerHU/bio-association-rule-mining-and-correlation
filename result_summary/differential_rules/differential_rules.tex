@@ -1,0 +1,448 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[top=1.7cm,bottom=1.8cm,left=1.8cm,right=1.8cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{titlesec}
+
+\definecolor{ink}{HTML}{252525}
+\definecolor{muted}{HTML}{66645F}
+\definecolor{accent}{HTML}{2878D0}
+\definecolor{soft}{HTML}{F3F5F7}
+
+\hypersetup{colorlinks=true,urlcolor=accent,linkcolor=accent}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\captionsetup{font=footnotesize,labelfont=bf,skip=5pt}
+\titleformat{\section}{\Large\bfseries\color{ink}}{\thesection}{0.7em}{}
+
+\newcommand{\paperquote}[1]{\textcolor{muted}{\textit{The atlas reports ``#1.''}}}
+\newcommand{\evidence}[1]{\textcolor{muted}{\textit{Evidence strength: #1.}}\par}
+\newcommand{\changevalues}[3]{Blue is the change in #1 net score
+(attraction percentage minus avoidance percentage among eligible FOVs). Orange and green
+are changes in the mean within-FOV percentages of #2 and #3 cells, using those same FOVs.
+Every value is the stage mean minus the Control mean, in percentage points.}
+\newcommand{\organvalues}[3]{The upper panel gives the absolute #1 net score
+(attraction percentage minus avoidance percentage among eligible FOVs) for each organ and
+stage. The lower panels give the absolute mean within-FOV percentages of #2 and #3 cells,
+using the same eligible FOVs.}
+\newcommand{\countstatevalues}[2]{The left panel shows the raw number of #1 cells in every
+FOV; the dashed line marks 20 cells. In the right stacked bars, each segment is the percentage
+of all stage FOVs classified as attraction, no rule, avoidance, or insufficient cells for #2.
+The printed net is attraction minus avoidance as a percentage of eligible FOVs.}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries Differential pair rules in gastrointestinal aGVHD}\\[0.35em]
+  {\large What the method resolves, what agrees with the atlas, and what is new}
+\end{center}
+\vspace{0.25cm}
+\hrule
+\vspace{0.45cm}
+
+\colorbox{soft}{\parbox{0.96\textwidth}{
+Each FOV-level pair is attraction ($+1$), avoidance ($-1$), or no significant rule ($0$).
+A rule is eligible only when both cell types have at least 20 cells. Net score is
+$100(N_{\rm attraction}-N_{\rm avoidance})/N_{\rm eligible}$.
+\hypertarget{test-guide}{\textbf{How to read the tests.}}
+``Ordered FDR'' asks whether values move consistently from Control to Mild to Severe.
+C--M, M--S and C--S compare the named pair of stages. ``Organ FDR'' compares Colon with
+Duodenum within one stage. FDR values are corrected for the relevant rule screen; smaller
+is stronger, and values below 0.05 are called significant.
+Temporal FDR tests the largest biopsy-level net-score gap among the three post-transplant
+windows; Control is shown only as context. Pooled temporal FDR jointly corrects all rules
+in two broader post-transplant comparisons.
+The discovery notebook screens every pair rule and draws a result when its best corrected
+test has FDR $\leq0.05$ and its largest stage gap is at least 20 percentage points; no rule
+name participates in selection. Rule--abundance plots use the same eligible FOVs for all
+three lines. These are spatial associations, not causal mechanisms.
+}}
+
+% -----------------------------------------------------------------------------
+\section{Evidence that the method resolves spatial structure}
+
+The clearest separation between composition and organization is Duodenal
+Fibroblast $\rightarrow$ Muscle: under pathological staging the rule becomes much more
+avoidant while both cell populations increase, so the blue trajectory cannot be a copy of
+cell loss.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_method_fibroblast_muscle_path.pdf}
+  \caption{\changevalues{Fibroblast $\rightarrow$ Muscle}{Fibroblast}{Muscle}
+  The x-axis reports FOVs with a significant rule / eligible FOVs. Eligibility requires at
+  least 20 cells of both types. See the \hyperlink{test-guide}{test guide above}.}
+  \label{fig:change-values}
+\end{figure}
+
+The same Fibroblast $\rightarrow$ Muscle separation appears when the biopsies are regrouped
+by clinical score, which makes it unlikely that the result is created by one severity
+definition.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_method_fibroblast_muscle_clinical.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages are defined by clinical score.}
+\end{figure}
+
+Direction is also retained rather than collapsing a cell pair into undirected co-occurrence:
+Colon CD4T $\rightarrow$ Goblet relaxes strongly with pathological severity, while the
+reverse rule starts more avoidant and changes by a different amount.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_colon_cd4_goblet.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in Colon.}
+\end{figure}
+
+Reading the reverse direction separately shows why it must remain a separate rule: Goblet
+$\rightarrow$ CD4T has its own baseline, trend, corrected tests, and abundance context.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_method_direction_goblet_cd4.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; this reverse rule is calculated
+  independently from CD4T $\rightarrow$ Goblet.}
+\end{figure}
+
+The method also preserves organ context. Goblet $\rightarrow$ Endothelial remains strongly
+avoidant in Colon but is much nearer neutral in Duodenum at matched clinical stages, and the
+lower panels show that this is not simply the same difference in cell abundance.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.94\textwidth]{summary_downloads/tex_method_organ_goblet_endothelial.pdf}
+  \caption{\organvalues{Goblet $\rightarrow$ Endothelial}{Goblet}{Endothelial}
+  Colon and Duodenum are compared within each clinical stage; organ FDR is corrected jointly
+  across all tested rules and stages. Point labels report FOVs with a significant rule /
+  eligible FOVs. See the \hyperlink{test-guide}{test guide above}.}
+  \label{fig:organ-values}
+\end{figure}
+
+% -----------------------------------------------------------------------------
+\section{Rule-level alignment with the spatial-atlas paper}
+
+The strongest direct alignment is Paneth-cell loss. \paperquote{loss of Paneth cells}
+The count panel shows that Paneth eligibility collapses in Severe Duodenum, while the rule
+panel shows what remains measurable rather than confusing ineligibility with ``no rule.''
+
+\evidence{Strong for Paneth loss; moderate for the spatial rule}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.96\textwidth]{summary_downloads/tex_paper_paneth_to_epithelial.pdf}
+  \caption{\countstatevalues{Paneth}{Paneth $\rightarrow$ Epithelial}
+  Both panels use pathological stages in Duodenum. See the
+  \hyperlink{test-guide}{test guide above}.}
+  \label{fig:count-state-values}
+\end{figure}
+
+The reverse direction adds a spatial hypothesis within the small Paneth-rich remainder:
+Epithelial $\rightarrow$ Paneth rises with severity, but only 6 Severe FOVs are eligible, so
+the figure supports a selected surviving niche rather than the whole Severe group.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.96\textwidth]{summary_downloads/tex_paper_epithelial_to_paneth.pdf}
+  \caption{Values follow Figure~\ref{fig:count-state-values}; the reverse rule is calculated
+  independently and ``eligible'' gives the FOV count passing the 20-cell threshold.}
+\end{figure}
+
+Endocrine accumulation is recovered just as directly. \paperquote{accumulation of endocrine
+cells in the crypts} No Control FOV reaches the eligibility threshold, whereas disease
+creates eligible FOVs with a predominantly attractive Endocrine $\rightarrow$ Epithelial
+rule; this is a clear qualitative translation, not a Control-to-disease significance test.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.96\textwidth]{summary_downloads/tex_paper_endocrine_context.pdf}
+  \caption{Values follow Figure~\ref{fig:count-state-values}; no Control FOV is eligible for
+  Endocrine $\rightarrow$ Epithelial.}
+\end{figure}
+
+The atlas also reports a ``prominent reduction in immunoglobulin A--secreting plasma cells.''
+Colon CD4T $\rightarrow$ Plasma falls from a clearly attractive Control context toward
+neutrality in disease, while the abundance lines show how much of that shift accompanies
+the changing cell populations.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_colon_cd4_plasma.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use clinical score in Colon.}
+\end{figure}
+
+CD8T $\rightarrow$ Plasma independently shows the same loss of an attractive Control
+context, making the plasma result broader than one T-cell antecedent; the Mild estimate is
+nevertheless based on very few eligible FOVs.
+
+\evidence{Moderate-to-weak}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_colon_cd8_plasma.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use clinical score in Colon.}
+\end{figure}
+
+The atlas found CD8 enrichment only in a subset of patients. Duodenal CD8T $\rightarrow$
+Goblet changes strongly in the pathological grouping, so it is a relevant immune--epithelial
+signal, but this FOV-level plot cannot identify or validate the paper's patient subset.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_duodenum_cd8_goblet.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
+  Duodenum, and these are FOV averages rather than patient-cluster values.}
+\end{figure}
+
+The current pairwise analysis does not recover the paper's patient-specific
+macrophage/neutrophil immune states, and no post-transplant time rule passes FDR 0.05. Those
+paper results are therefore kept outside the alignment claim rather than represented by a
+weak substitute.
+
+% -----------------------------------------------------------------------------
+\section{New biologically interpretable findings}
+
+Duodenal Macrophage $\rightarrow$ Muscle becomes markedly more avoidant with pathological
+severity even though neither cell population disappears. This is biologically interesting
+because muscularis macrophages are known to participate in gut neuromuscular homeostasis
+(\href{https://pmc.ncbi.nlm.nih.gov/articles/PMC4149228/}{M\"uller et al., 2014}), but the
+present result does not identify that macrophage subtype.
+
+\evidence{Strong data signal; biologically exploratory}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_macrophage_muscle.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
+  Duodenum.}
+\end{figure}
+
+Duodenal CD4T $\rightarrow$ Goblet becomes substantially less avoidant under pathological
+staging, while the cell-share trajectories are much smaller than the rule movement; this
+suggests altered immune access to the epithelial compartment rather than composition alone.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_duodenum_cd4_goblet_path.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
+  Duodenum.}
+\end{figure}
+
+The clinical grouping independently preserves the same CD4T $\rightarrow$ Goblet direction,
+which strengthens the observation because the two severity definitions assign biopsies
+differently.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_duodenum_cd4_goblet_clinical.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; here biopsies are grouped by clinical
+  rather than pathological score.}
+\end{figure}
+
+Colon Goblet $\rightarrow$ Muscle is strongly avoidant in Control and relaxes in disease;
+the matched cell shares do not reproduce the blue trajectory, making this a candidate change
+in epithelial--stromal organization.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_method_goblet_muscle_forward.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in Colon.}
+\end{figure}
+
+Muscle $\rightarrow$ Goblet changes in the same broad direction but has independently
+estimated states and effect sizes, supporting a bidirectional reorganization rather than
+using the reverse arrow as a duplicate.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_method_goblet_muscle_reverse.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; the reverse rule is tested
+  independently under pathological staging in Colon.}
+\end{figure}
+
+The same Goblet $\rightarrow$ Muscle rule is also organ-specific at matched clinical stages:
+Colon is strongly avoidant while Duodenum stays near neutral, and both cell-abundance
+profiles are visible below the rule comparison.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.94\textwidth]{summary_downloads/tex_new_organ_goblet_muscle.pdf}
+  \caption{Values and ``$n$'' follow Figure~\ref{fig:organ-values}; clinical stages are matched
+  between organs, and the organ difference passes FDR 0.05 in at least two stages.}
+\end{figure}
+
+Fibroblast $\rightarrow$ Goblet shows the opposite organ ordering in disease, becoming more
+avoidant in Duodenum than Colon at Mild and Severe; the result is interesting because the
+organ gap persists after using rule-specific eligible FOVs for the abundance context.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.94\textwidth]{summary_downloads/tex_new_organ_fibroblast_goblet.pdf}
+  \caption{Values and ``$n$'' follow Figure~\ref{fig:organ-values}; clinical stages are matched
+  between organs.}
+\end{figure}
+
+Colon Goblet $\rightarrow$ SMV is nearly maximally avoidant in Control and Mild but relaxes
+in Severe while Goblet and SMV abundance move differently; this makes it a strong numerical
+lead for epithelial--vascular reorganization, although the atlas did not state this rule.
+
+\evidence{Strong data signal; biologically exploratory}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_goblet_smv.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in Colon.}
+\end{figure}
+
+Colon Fibroblast $\rightarrow$ Plasma moves from attraction toward neutrality, a plausible
+loss of an immune--stromal niche that complements the paper's plasma-cell depletion; it is
+kept as a hypothesis because the ordered trend is borderline and the atlas gives no direct
+spatial counterpart.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_fibroblast_plasma.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
+  Colon. The Control--Severe contrast passes FDR 0.05,
+  whereas ordered-trend FDR is approximately 0.052.}
+\end{figure}
+
+The remaining three results are scientifically interesting precisely because the plots make
+their limitation visible: each concerns a rare-cell niche and therefore has a very small
+eligible endpoint group. Paneth $\rightarrow$ Mast becomes strongly avoidant, but only three
+Severe FOVs support the estimate.
+
+\evidence{Exploratory}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_paneth_mast.pdf}
+  \caption{Values and ``rule $n$'' follow Figure~\ref{fig:change-values}; stages use
+  pathological score in Duodenum.}
+\end{figure}
+
+Paneth $\rightarrow$ Plasma\_CD38 also becomes avoidant and passes corrected comparisons,
+which could mark reorganization of the surviving Paneth-rich niche, but only five Severe
+FOVs contain enough of both cell types.
+
+\evidence{Exploratory}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_paneth_plasma_cd38.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
+  Duodenum and only jointly eligible FOVs contribute.}
+\end{figure}
+
+Goblet $\rightarrow$ Mesenchymal\_VIM has a large ordered change and therefore deserves
+follow-up as an epithelial--mesenchymal hypothesis, but its endpoint estimates use only
+three and four eligible FOVs and no individual stage contrast passes FDR 0.05.
+
+\evidence{Exploratory}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_goblet_mesenchymal_vim.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
+  Duodenum, ordered-trend FDR is 0.027, and eligible FOV counts are shown.}
+\end{figure}
+
+\subsection*{Exploratory changes after transplantation}
+
+Although it does not pass correction (temporal FDR 0.335), Colon CD8T $\rightarrow$ Goblet
+shifts from a mildly avoidant Control context toward markedly stronger avoidance after
+100 days, making it the clearest immune--epithelial temporal lead in Colon.
+
+\evidence{Exploratory; not statistically significant}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{summary_downloads/tex_new_time_colon_cd8_goblet.pdf}
+  \caption{Each dot is one biopsy's mean rule state across eligible FOVs, multiplied by 100;
+  diamonds are time-group means and eligible $n$ is the contributing biopsy count.
+  Temporal FDR tests the largest difference among $<30$, 30--100 and $>100$ days and is
+  corrected across all tested Colon pair rules; Control is not part of that test. See the
+  \hyperlink{test-guide}{test guide above}.}
+  \label{fig:time-values}
+\end{figure}
+
+Colon SMV $\rightarrow$ Endothelial loses much of its attractive net score after 100 days;
+the trajectory is large and vascularly relevant, but remains exploratory because temporal
+FDR is 0.362.
+
+\evidence{Exploratory; not statistically significant}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{summary_downloads/tex_new_time_colon_smv_endothelial.pdf}
+  \caption{Values follow Figure~\ref{fig:time-values}; this is a separately tested directional
+  Colon rule.}
+\end{figure}
+
+Colon SMV $\rightarrow$ Goblet becomes more avoidant again after an early relaxation,
+suggesting a possible late epithelial--vascular change; temporal FDR is 0.362, so this is a
+follow-up lead rather than confirmed evidence.
+
+\evidence{Exploratory; not statistically significant}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\textwidth]{summary_downloads/tex_new_time_colon_smv_goblet.pdf}
+  \caption{Values follow Figure~\ref{fig:time-values}; the same biopsy-level calculation and
+  eligibility threshold are used.}
+\end{figure}
+
+In Duodenum, Plasma\_CD38 $\rightarrow$ Fibroblast is the closest pooled temporal lead:
+the $<30$ versus $\geq30$-day comparison has a 34-percentage-point gap and joint FDR 0.086,
+which is suggestive but does not pass 0.05.
+
+\evidence{Exploratory; near-significant but not statistically significant}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.94\textwidth]{summary_downloads/tex_new_time_duodenum_pooled.pdf}
+  \caption{Each point is one directional pair rule. The x-axis is the difference between the
+  two named groups in biopsy-level net score, in percentage points; the y-axis is joint FDR.
+  The lower panel contains the Plasma\_CD38 $\rightarrow$ Fibroblast result. FDR is corrected
+  jointly across both pooled contrasts and every tested Duodenal pair rule.}
+\end{figure}
+
+\end{document}

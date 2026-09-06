@@ -6,12 +6,23 @@ The shared pieces - saving, titles, group colours - come from `vis_helper.py`.
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
 from matplotlib.colors import to_rgba
 from matplotlib.lines import Line2D
 
-from vis_helper import (_finish, _titled, _category_colors, tidy_axes, spread_labels,
+from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, spread_labels,
                         NEUTRAL as _NEUTRAL, HAIRLINE as _HAIRLINE,
                         ZERO as _ZERO, INK as _INK)
+
+
+_FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
+
+
+def _finish(fig, save=None, dpi=200):
+    """Save differential-rule figures beside their notebooks, then show them."""
+    save_figure(fig, save, dpi=dpi, figure_dir=_FIGURE_DIR)
+    plt.show()
 
 
 def _group_colors(label_a, label_b):
@@ -439,4 +450,937 @@ def plot_trend(trend, stages, scope=None, fdr_threshold=0.05, top_n=8,
     fig.suptitle(_titled(f"{what} that move with severity (top {top_n} each way)", scope),
                  fontsize=13, y=0.97)
     _room_for_names(fig)
+    _finish(fig, save)
+
+
+def plot_state_breakdown(states, selected, fovs_by_stage, stages, scope=None, save=None):
+    """For selected rules, split each stage into attract, avoid, and no-rule FOVs."""
+    if selected.empty:
+        print("No eligible trends passed the cutoff.")
+        return
+
+    colors = {"Attract": "#2a78d6", "No rule": "#dddcd5", "Avoid": "#eb6834"}
+    ncols = 2 if len(selected) > 1 else 1
+    nrows = int(np.ceil(len(selected) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(11, 2.65 * nrows + 1),
+                             squeeze=False)
+
+    for ax, rule in zip(axes.flat, selected.index):
+        shares, totals = [], []
+        for stage in stages:
+            values = states.reindex(columns=fovs_by_stage[stage]).loc[rule].dropna()
+            totals.append(len(values))
+            shares.append([100 * (values == value).mean() for value in (1, 0, -1)])
+
+        shares = np.asarray(shares)
+        bottom = np.zeros(len(stages))
+        for column, label in enumerate(("Attract", "No rule", "Avoid")):
+            bars = ax.bar(np.arange(len(stages)), shares[:, column], bottom=bottom,
+                          color=colors[label], width=0.68, label=label)
+            for bar, percent in zip(bars, shares[:, column]):
+                if percent >= 10:
+                    ax.text(bar.get_x() + bar.get_width() / 2,
+                            bar.get_y() + bar.get_height() / 2, f"{percent:.0f}%",
+                            ha="center", va="center", fontsize=8,
+                            color="white" if label != "No rule" else _INK)
+            bottom += shares[:, column]
+
+        slope = selected.loc[rule, "slope"] * 100
+        arrow = "increasing" if slope > 0 else "decreasing"
+        ax.set_title(f"{rule}\n{arrow} {abs(slope):.0f} pp/stage · "
+                     f"FDR {selected.loc[rule, 'fdr']:.3g}", fontsize=9.5, loc="left")
+        ax.set_xticks(np.arange(len(stages)),
+                      [f"{stage}\nn={total}" for stage, total in zip(stages, totals)])
+        ax.set_ylim(0, 100)
+        ax.set_ylabel("eligible FOVs (%)", fontsize=8)
+        tidy_axes(ax, grid="y", hide=("top", "right", "left"))
+        ax.tick_params(length=0, labelsize=8)
+
+    for ax in axes.flat[len(selected):]:
+        ax.set_visible(False)
+
+    handles = [Line2D([0], [0], marker="s", linestyle="none", markersize=8,
+                      markerfacecolor=colors[label], markeredgecolor="none", label=label)
+               for label in ("Attract", "No rule", "Avoid")]
+    fig.legend(handles=handles, loc="upper center", ncol=3, frameon=False,
+               bbox_to_anchor=(0.5, 0.925))
+    fig.suptitle(_titled("What changes inside the strongest eligible trends", scope),
+                 fontsize=13, y=0.99)
+    fig.subplots_adjust(top=0.82, hspace=0.72, wspace=0.32)
+    _finish(fig, save)
+
+
+# ---------------------------------------------------------------------------
+# Focused evidence views used by the paper-alignment and time notebooks
+# ---------------------------------------------------------------------------
+
+_STATE_COLORS = {
+    "Attraction": "#2878D0",
+    "No rule": "#E8E7E2",
+    "Avoidance": "#E66A4E",
+    "Insufficient cells": "#B8B4C7",
+}
+
+_STAGE_COLORS = {"Control": "#67B58A", "Mild": "#E7A33E", "Severe": "#D85D62"}
+_STATE_ORDER = ["Attraction", "No rule", "Avoidance", "Insufficient cells"]
+
+
+def _rule_test_text(spec, trend_results=None, pair_results=None):
+    """Compact corrected-test summary for one rule panel."""
+    rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
+    scope_key = (organ, group_col)
+    trend = (trend_results or {}).get(scope_key, pd.DataFrame())
+    pair = (pair_results or {}).get(scope_key, pd.DataFrame())
+    tests = []
+    if rule in trend.index:
+        tests.append(f"ordered FDR {trend.at[rule, 'fdr']:.3g}")
+    if isinstance(pair, dict):
+        labels = {
+            ("Control", "Mild"): "C–M",
+            ("Mild", "Severe"): "M–S",
+            ("Control", "Severe"): "C–S",
+        }
+        for comparison, result in pair.items():
+            if rule in result.index:
+                label = labels.get(comparison, "–".join(comparison))
+                tests.append(f"{label} FDR {result.at[rule, 'fdr']:.3g}")
+    elif rule in pair.index:
+        tests.append(f"C–S FDR {pair.at[rule, 'fdr']:.3g}")
+    return " · ".join(tests) if tests else spec.get("test_text", "")
+
+
+def _stage_state_counts(states, eligibility, metadata, rule, organ, group_col,
+                        stages, unit_col="FOV"):
+    """Counts and net scores for one rule in each displayed stage."""
+    stage_counts, eligible_counts, nets = [], [], []
+    for stage in stages:
+        mask = (metadata["Organ"] == organ) & (metadata[group_col] == stage)
+        units = metadata.loc[mask, unit_col].drop_duplicates()
+        state = states.reindex(columns=units).loc[rule]
+        can_test = eligibility.reindex(columns=units).loc[rule]
+        eligible_n = int(can_test.sum())
+        counts = {
+            "Attraction": int((can_test & (state > 0)).sum()),
+            "No rule": int((can_test & (state == 0)).sum()),
+            "Avoidance": int((can_test & (state < 0)).sum()),
+            "Insufficient cells": int((~can_test).sum()),
+        }
+        stage_counts.append(counts)
+        eligible_counts.append((eligible_n, len(units)))
+        nets.append(
+            100 * (counts["Attraction"] - counts["Avoidance"]) / eligible_n
+            if eligible_n else np.nan
+        )
+    return stage_counts, eligible_counts, nets
+
+
+def _draw_state_bars(ax, stage_counts, eligible_counts, nets, stages,
+                     unit_label="FOVs", label_threshold=8):
+    """Draw the shared all-unit rule-state bars."""
+    x = np.arange(len(stages))
+    bottom = np.zeros(len(stages))
+    for label in _STATE_ORDER:
+        percentages = np.array([
+            100 * counts[label] / total if total else 0
+            for counts, (_, total) in zip(stage_counts, eligible_counts)
+        ])
+        bars = ax.bar(
+            x, percentages, bottom=bottom, width=0.64,
+            color=_STATE_COLORS[label], edgecolor="white", linewidth=0.8,
+        )
+        for bar, percent, counts in zip(bars, percentages, stage_counts):
+            if percent >= label_threshold:
+                ink = _INK if label == "No rule" else "white"
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"{counts[label]}\n{percent:.0f}%", ha="center", va="center",
+                    fontsize=8, color=ink,
+                )
+        bottom += percentages
+
+    for position, net in enumerate(nets):
+        text = "net n/a" if np.isnan(net) else f"net {net:+.0f}%"
+        ax.text(position, 103, text, ha="center", va="bottom", fontsize=8.5,
+                color="#454440", fontweight="bold")
+    ax.set_xticks(x, [
+        f"{stage}\n{eligible_n}/{total} eligible"
+        for stage, (eligible_n, total) in zip(stages, eligible_counts)
+    ])
+    ax.set_ylim(0, 114)
+    ax.set_ylabel(f"all {unit_label} (%)")
+    tidy_axes(ax, grid="y", hide=("top", "right", "left", "bottom"))
+    ax.tick_params(length=0)
+
+
+def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
+                     trend_results=None, pair_results=None, unit_col="FOV",
+                     unit_label="FOVs", save=None):
+    """Show attraction, no rule, avoidance and insufficient cells for every unit.
+
+    Each item in ``specs`` names a rule, organ and grouping column. The full bar uses
+    every unit in that group, so loss of a cell type remains visible instead of being
+    hidden by the eligibility filter.
+    """
+    n_panels = len(specs)
+    figure_height = 3.7 * n_panels + 1.8
+    fig, axes = plt.subplots(
+        n_panels, 1, figsize=(11.8, figure_height), squeeze=False,
+    )
+    axes = axes[:, 0]
+    threshold = eligibility.attrs.get("min_cells")
+    eligibility_text = (
+        f"eligibility ≥{threshold} cells/type" if threshold is not None
+        else "eligibility-controlled"
+    )
+    groupings = list(dict.fromkeys(
+        spec["score"].replace(" score", "").lower() for spec in specs
+    ))
+    grouping_scope = (
+        f"{groupings[0]} score" if len(groupings) == 1
+        else " + ".join(f"{grouping} score" for grouping in groupings)
+    )
+    figure_subtitle = (
+        f"Pairwise FOV states · {grouping_scope} · {' / '.join(stages)} · "
+        f"{eligibility_text} · bars include all FOVs"
+    )
+    if any(isinstance(value, dict) for value in (pair_results or {}).values()):
+        figure_subtitle += (
+            "\npairwise FDR jointly corrected across C–M / M–S / C–S"
+        )
+
+    for ax, spec in zip(axes, specs):
+        rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
+        summary = _stage_state_counts(
+            states, eligibility, metadata, rule, organ, group_col, stages, unit_col,
+        )
+        _draw_state_bars(ax, *summary, stages, unit_label)
+
+        panel = spec.get("panel", rule.replace(" -> ", " → "))
+        tests = _rule_test_text(spec, trend_results, pair_results)
+        detail = group_col.lower()
+        if tests:
+            detail += f" · {tests}"
+        ax.set_title(panel, fontsize=10.8, pad=31, loc="center")
+        ax.text(0.5, 1.02, detail, transform=ax.transAxes, ha="center",
+                va="bottom", fontsize=8.6, color="#66645F")
+
+    handles = [
+        Line2D([0], [0], marker="s", linestyle="none", markersize=9,
+               markerfacecolor=_STATE_COLORS[label], markeredgecolor="none", label=label)
+        for label in _STATE_ORDER
+    ]
+    # Keep the header a fixed physical size. Fixed fractional positions create
+    # several inches of empty space when a figure contains many rule panels.
+    title_y = 1 - 0.15 / figure_height
+    subtitle_y = 1 - 0.63 / figure_height
+    legend_y = 1 - 1.05 / figure_height
+    axes_top = 1 - 1.55 / figure_height
+    fig.legend(handles=handles, ncol=4, frameon=False, loc="upper center",
+               bbox_to_anchor=(0.5, legend_y))
+    fig.suptitle(heading, fontsize=14.5, x=0.5, ha="center", y=title_y)
+    fig.text(0.5, subtitle_y, figure_subtitle, ha="center", va="top", fontsize=8.6,
+             color="#66645F", linespacing=1.5)
+    fig.subplots_adjust(left=0.12, right=0.985, top=axes_top, bottom=0.07, hspace=0.9)
+    _finish(fig, save)
+
+
+def plot_rule_metric(metrics, eligibility, metadata, spec, stages, metric="Lift",
+                     reference=1, heading=None, unit_col="FOV", save=None):
+    """Show raw metric values only where an eligible FOV contains the rule."""
+    rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
+    rows = metrics.loc[metrics["Clean_Rule"] == rule, [unit_col, metric]].copy()
+    values_by_fov = rows.dropna(subset=[metric]).groupby(unit_col)[metric].mean()
+    plot_rows, labels, medians = [], [], []
+
+    for position, stage in enumerate(stages):
+        fovs = metadata.loc[
+            (metadata["Organ"] == organ) & (metadata[group_col] == stage), unit_col
+        ].drop_duplicates()
+        can_test = eligibility.reindex(columns=fovs).loc[rule]
+        eligible_fovs = can_test.index[can_test]
+        values = values_by_fov.reindex(eligible_fovs).dropna()
+        plot_rows.extend(
+            {"stage": stage, "position": position, metric: value}
+            for value in values
+        )
+        labels.append(f"{stage}\nrule / eligible FOVs = {len(values)}/{len(eligible_fovs)}")
+        medians.append(values.median() if len(values) else np.nan)
+
+    data = pd.DataFrame(plot_rows)
+    fig, ax = plt.subplots(figsize=(8.8, 4.4))
+    if not data.empty:
+        sns.stripplot(
+            data=data, x="stage", y=metric, order=stages, palette=_STAGE_COLORS,
+            jitter=0.18, size=5, alpha=0.72, edgecolor="white", linewidth=0.6, ax=ax,
+        )
+        ax.plot(range(len(stages)), medians, color="#777570", lw=1.5, zorder=4)
+        ax.scatter(range(len(stages)), medians, marker="D", s=58,
+                   color=[_STAGE_COLORS[stage] for stage in stages],
+                   edgecolor="white", linewidth=0.8, zorder=5, label="median")
+    if reference is not None:
+        ax.axhline(reference, color=_ZERO, lw=1.1)
+    ax.set_xticks(range(len(stages)), labels)
+    ax.set_xlabel("")
+    ax.set_ylabel(f"{metric} where the rule is present")
+    ax.set_title(heading or f"{rule.replace(' -> ', ' → ')} — {metric}",
+                 fontsize=13.5, pad=30)
+    ax.text(
+        0.5, 1.02,
+        f"{organ} · {group_col.lower()} · dots are eligible FOVs with a significant rule · diamonds are medians",
+        transform=ax.transAxes, ha="center", va="bottom", fontsize=8.3, color="#706E68",
+    )
+    tidy_axes(ax, grid="y", hide=("top", "right"))
+    ax.tick_params(length=0)
+    fig.subplots_adjust(top=0.79, bottom=0.19, left=0.12, right=0.98)
+    _finish(fig, save)
+
+
+def plot_cell_counts(cells, metadata, cell_type, organ, group_col, stages,
+                     threshold, heading, save=None, stage_colors=None):
+    """Per-unit cell counts with the rule-eligibility threshold shown explicitly."""
+    counts = cells.loc[cells["cell type"] == cell_type].groupby("fov").size()
+    data = metadata.loc[metadata["Organ"] == organ, ["FOV", group_col]].copy()
+    data["count"] = data["FOV"].map(counts).fillna(0)
+    data = data[data[group_col].isin(stages)]
+    colors = stage_colors or _STAGE_COLORS
+
+    fig, ax = plt.subplots(figsize=(9.8, 4.9))
+    sns.boxplot(data=data, x=group_col, y="count", order=stages, color="#F4F2EC",
+                width=0.48, fliersize=0, linewidth=1.1, ax=ax)
+    sns.stripplot(data=data, x=group_col, y="count", order=stages,
+                  palette=colors, size=5.2, alpha=0.72, edgecolor="white",
+                  linewidth=0.7, jitter=0.22, ax=ax)
+    ax.axhline(threshold, color="#665C9A", lw=1.5, linestyle=(0, (5, 3)))
+    ax.annotate(f"eligibility threshold = {threshold}", xy=(0.01, threshold),
+                xycoords=("axes fraction", "data"), xytext=(0, 6),
+                textcoords="offset points", ha="left", va="bottom", fontsize=9,
+                color="#574F83")
+
+    upper = max(float(data["count"].max()), threshold) * 1.16 + 1
+    for position, stage in enumerate(stages):
+        values = data.loc[data[group_col] == stage, "count"]
+        enough = int((values >= threshold).sum())
+        ax.text(position, upper * 0.97, f"{enough}/{len(values)} reach threshold",
+                ha="center", va="top", fontsize=8.5, fontweight="bold")
+
+    ax.set_ylim(0, upper)
+    ax.set_xlabel("")
+    ax.set_ylabel(f"{cell_type} cells per FOV")
+    ax.set_title(heading, fontsize=14, pad=31)
+    ax.text(0.5, 1.02,
+            f"FOV-level cell counts · eligibility threshold ≥{threshold} cells · dots are FOVs",
+            transform=ax.transAxes, ha="center", va="bottom", fontsize=8.6,
+            color="#66645F")
+    tidy_axes(ax, grid="y", hide=("top", "right"))
+    _finish(fig, save)
+
+
+def plot_rule_with_cell_count(states, eligibility, cells, metadata, spec, cell_type,
+                              stages, heading, trend_results=None, pair_results=None,
+                              save=None):
+    """Put the cell-count explanation beside one rule-state result."""
+    rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
+    threshold = eligibility.attrs.get("min_cells", 20)
+    counts = cells.loc[cells["cell type"] == cell_type].groupby("fov").size()
+    data = metadata.loc[
+        (metadata["Organ"] == organ) & metadata[group_col].isin(stages),
+        ["FOV", group_col],
+    ].copy()
+    data["count"] = data["FOV"].map(counts).fillna(0)
+
+    fig, (count_ax, rule_ax) = plt.subplots(1, 2, figsize=(13.2, 5.2))
+    sns.boxplot(data=data, x=group_col, y="count", order=stages, color="#F4F2EC",
+                width=0.48, fliersize=0, linewidth=1.0, ax=count_ax)
+    sns.stripplot(data=data, x=group_col, y="count", order=stages,
+                  palette=_STAGE_COLORS, size=4.8, alpha=0.70, edgecolor="white",
+                  linewidth=0.6, jitter=0.20, ax=count_ax)
+    count_ax.axhline(threshold, color="#665C9A", lw=1.4, linestyle=(0, (5, 3)))
+    count_ax.set_title(f"{cell_type} cells available", fontsize=10.8, pad=10)
+    count_ax.set_xlabel("")
+    count_ax.set_ylabel(f"{cell_type} cells per FOV")
+    tidy_axes(count_ax, grid="y", hide=("top", "right"))
+    count_ax.tick_params(length=0)
+
+    summary = _stage_state_counts(
+        states, eligibility, metadata, rule, organ, group_col, stages,
+    )
+    _draw_state_bars(rule_ax, *summary, stages, label_threshold=9)
+    rule_ax.set_title(rule.replace(" -> ", " → "), fontsize=10.8, pad=28)
+    detail = _rule_test_text(spec, trend_results, pair_results)
+    if detail:
+        rule_ax.text(0.5, 1.01, detail, transform=rule_ax.transAxes, ha="center",
+                     va="bottom", fontsize=8, color="#706E68")
+    tidy_axes(rule_ax, grid="y", hide=("top", "right", "left", "bottom"))
+    rule_ax.tick_params(length=0)
+
+    handles = [
+        Line2D([0], [0], marker="s", linestyle="none", markersize=8,
+               markerfacecolor=_STATE_COLORS[label], markeredgecolor="none", label=label)
+        for label in _STATE_ORDER
+    ]
+    fig.legend(handles=handles, ncol=4, frameon=False, loc="upper center",
+               bbox_to_anchor=(0.68, 0.885), fontsize=8.5)
+    fig.suptitle(heading, fontsize=14, y=0.985)
+    fig.text(0.5, 0.934,
+             f"{organ} · {group_col.lower()} · threshold ≥{threshold} cells/type",
+             ha="center", va="top", fontsize=8.5, color="#706E68")
+    fig.subplots_adjust(top=0.72, wspace=0.27, left=0.08, right=0.98, bottom=0.15)
+    _finish(fig, save)
+
+
+def plot_time_coverage(metadata, day_col, group_col, groups, save=None):
+    """One dot per biopsy, showing where the temporal evidence is concentrated."""
+    data = metadata.dropna(subset=[day_col]).drop_duplicates("Biopsy").copy()
+    colors = {"<30": "#58A6A6", "30-100": "#E3A33D", ">100": "#806FB3"}
+    fig, ax = plt.subplots(figsize=(10.5, 3.5))
+    organs = [organ for organ in ("Colon", "Duodenum") if organ in set(data["Organ"])]
+    y_by_organ = {organ: i for i, organ in enumerate(organs)}
+    rng = np.random.default_rng(4)
+    for group in groups:
+        part = data[data[group_col] == group]
+        y = np.array([y_by_organ[o] for o in part["Organ"]], float)
+        y += rng.uniform(-0.09, 0.09, len(part))
+        ax.scatter(part[day_col], y, s=54, color=colors.get(group, _NEUTRAL),
+                   edgecolor="white", linewidth=0.8, alpha=0.85, label=group)
+    ax.set_yticks(range(len(organs)), organs)
+    ax.set_xlabel("days after transplantation")
+    ax.set_ylabel("")
+    fig.suptitle("Biopsy coverage across time", fontsize=13, y=0.98)
+    ax.legend(title="post-transplant window", frameon=False, ncol=len(groups),
+              loc="lower center", bbox_to_anchor=(0.5, 1.08))
+    tidy_axes(ax, grid="x", hide=("top", "right", "left"))
+    ax.tick_params(axis="y", length=0)
+    fig.subplots_adjust(top=0.72)
+    _finish(fig, save)
+
+
+def plot_temporal_screen(result, scope=None, fdr_threshold=0.05, name_top=8, save=None):
+    """All tested rules: largest between-bin change against temporal FDR."""
+    if result.empty:
+        print("No temporal rules could be tested.")
+        return
+    x = result["range"].to_numpy(float) * 100
+    fdr = result["fdr"].to_numpy(float)
+    y = -np.log10(np.clip(fdr, 1e-300, None))
+    passed = fdr <= fdr_threshold
+    fig, (ax, key) = plt.subplots(
+        1, 2, figsize=(12, 5.4), gridspec_kw={"width_ratios": [4.2, 1.7]},
+    )
+    ax.scatter(x[~passed], y[~passed], s=28, color=_NEUTRAL, alpha=0.55,
+               edgecolor="none")
+    ax.scatter(x[passed], y[passed], s=48, color="#6A5AA8", alpha=0.9,
+               edgecolor="white", linewidth=0.7)
+    ax.axhline(-np.log10(fdr_threshold), color=_HAIRLINE, lw=1.1)
+    names = result.sort_values(["fdr", "range"], ascending=[True, False]).head(name_top)
+    colors = sns.color_palette("colorblind", n_colors=max(len(names), 1))
+    for color, (rule, row) in zip(colors, names.iterrows()):
+        px = 100 * row["range"]
+        py = -np.log10(max(row["fdr"], 1e-300))
+        ax.scatter(px, py, s=62, facecolor=color, edgecolor="white",
+                   linewidth=0.8, zorder=4)
+
+    key.axis("off")
+    status = ("FDR-significant signals" if passed.any()
+              else "Largest exploratory signals\n(none passes FDR 0.05)")
+    key.set_title(status, fontsize=10.5, loc="left", pad=7)
+    for rank, (color, (rule, row)) in enumerate(zip(colors, names.iterrows()), start=1):
+        ypos = 1 - (rank - 0.4) / max(name_top, len(names))
+        key.scatter(0.02, ypos - 0.005, s=48, color=color, edgecolor="white",
+                    linewidth=0.7, transform=key.transAxes)
+        key.text(0.08, ypos, rule.replace(" -> ", " → "),
+                 transform=key.transAxes, fontsize=8.5, fontweight="bold",
+                 va="top", color=_INK)
+        key.text(0.08, ypos - 0.055,
+                 f"gap {100 * row['range']:.0f} pp · FDR {row['fdr']:.3g}",
+                 transform=key.transAxes, fontsize=7.8, va="top", color="#706E68")
+    top = max(-np.log10(fdr_threshold) + 0.15, np.nanmax(y) * 1.08)
+    ax.set_ylim(-0.05, top)
+    _fdr_ticks(ax, top)
+    ax.set_xlabel("largest gap between any two post-transplant windows (percentage points)")
+    ax.set_ylabel("FDR across all tested rules  (smaller = stronger)")
+    ax.set_title(_titled("Temporal pair-rule screen", scope), fontsize=13, pad=30)
+    ax.text(
+        0, 1.015,
+        (f"Pairwise only · largest gap across <30, 30–100 and >100 days · "
+         f"biopsy-level · eligibility-controlled · {len(result)} tested rules"),
+        transform=ax.transAxes, ha="left", va="bottom", fontsize=8.5,
+        color="#706E68",
+    )
+    tidy_axes(ax, grid="both", hide=("top", "right"))
+    fig.subplots_adjust(wspace=0.08)
+    _finish(fig, save)
+
+
+def plot_time_profiles(values, metadata, rules, result, groups, group_col,
+                       scope=None, save=None):
+    """Biopsy-level rule scores across Control and post-transplant time bins."""
+    rules = [rule for rule in rules if rule in values.index]
+    if not rules:
+        print("No requested temporal rules are available.")
+        return
+    ncols = 2 if len(rules) > 1 else 1
+    nrows = int(np.ceil(len(rules) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(12, 3.7 * nrows + 0.8),
+                             squeeze=False)
+    colors = {"Control": "#67B58A", "<30": "#58A6A6",
+              "30-100": "#E3A33D", ">100": "#806FB3"}
+    rng = np.random.default_rng(7)
+
+    for ax, rule in zip(axes.flat, rules):
+        means = []
+        for position, group in enumerate(groups):
+            units = metadata.loc[metadata[group_col] == group, "Biopsy"].drop_duplicates()
+            observed = values.reindex(columns=units).loc[rule].dropna() * 100
+            jitter = rng.uniform(-0.12, 0.12, len(observed))
+            ax.scatter(position + jitter, observed, s=33, color=colors.get(group, _NEUTRAL),
+                       alpha=0.62, edgecolor="white", linewidth=0.6)
+            mean = observed.mean() if len(observed) else np.nan
+            means.append(mean)
+            if len(observed):
+                ax.scatter(position, mean, s=92, marker="D", color=colors.get(group, _INK),
+                           edgecolor="white", linewidth=1.2, zorder=5)
+            ax.text(position, -108, f"eligible n={len(observed)}", ha="center", va="top",
+                    fontsize=8, color="#66645F")
+        ax.plot(range(len(groups)), means, color="#4A4844", lw=1.4, alpha=0.7,
+                zorder=3)
+        ax.axhline(0, color=_ZERO, lw=1.2)
+        ax.set_xticks(range(len(groups)), groups)
+        ax.set_ylim(-118, 108)
+        ax.set_ylabel("net score among eligible FOVs (%)")
+        evidence = f"temporal FDR {result.at[rule, 'fdr']:.3g}" if rule in result.index else "context rule"
+        ax.set_title(f"{rule.replace(' -> ', ' → ')}\n{evidence}", fontsize=10, pad=8)
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+
+    for ax in axes.flat[len(rules):]:
+        ax.set_visible(False)
+    parts = str(scope or "").split(" — ", 1)
+    organ = parts[0] if parts and parts[0] else ""
+    context = parts[1] if len(parts) > 1 else ""
+    title = _titled("Biopsy-level temporal pair-rule profiles", organ)
+    subtitle = "Pairwise only · biopsy-level · eligible FOVs only"
+    if context:
+        subtitle = f"{context} · {subtitle}"
+    fig.suptitle(title, fontsize=14, y=0.99)
+    fig.text(0.5, 0.947, subtitle, ha="center", va="top", fontsize=8.5,
+             color="#706E68")
+    fig.subplots_adjust(top=0.81, hspace=0.62, wspace=0.28)
+    _finish(fig, save)
+
+
+def plot_pooled_time_contrasts(results, contrasts, organ, fdr_threshold=0.05,
+                               name_top=6, save=None):
+    """Two pooled biopsy-level time contrasts with one joint FDR family."""
+    shown = [(key, contrasts[key], results[key]) for key in contrasts if key in results]
+    if not shown:
+        print("No pooled temporal contrasts could be tested.")
+        return
+
+    total_tests = sum(len(result) for _, _, result in shown)
+    fig, axes = plt.subplots(
+        len(shown), 2, figsize=(12, 4.25 * len(shown) + 1.4),
+        gridspec_kw={"width_ratios": [4.8, 1.7]}, squeeze=False,
+    )
+
+    for row, (key_name, spec, result) in enumerate(shown):
+        ax, key = axes[row]
+        gap = result["effect_size"].to_numpy(float) * 100
+        fdr = result["fdr"].to_numpy(float)
+        evidence = -np.log10(np.clip(fdr, 1e-300, None))
+        passed = fdr <= fdr_threshold
+        cutoff = -np.log10(fdr_threshold)
+
+        ax.scatter(gap, evidence, s=28, color=_NEUTRAL, alpha=0.55,
+                   edgecolor="none")
+        ax.axvline(0, color=_ZERO, lw=1.2)
+        ax.axhline(cutoff, color=_HAIRLINE, lw=1.1)
+
+        names = result.sort_values(
+            ["fdr", "effect_size"], key=lambda s: s.abs() if s.name == "effect_size" else s,
+            ascending=[True, False],
+        ).head(name_top)
+        colors = sns.color_palette("colorblind", n_colors=max(len(names), 1))
+        for color, (_, item) in zip(colors, names.iterrows()):
+            ax.scatter(
+                100 * item["effect_size"],
+                -np.log10(max(item["fdr"], 1e-300)),
+                s=60, color=color, edgecolor="white", linewidth=0.8, zorder=4,
+            )
+
+        limit = max(float(np.nanmax(np.abs(gap))) * 1.12, 1)
+        top = max(cutoff + 0.15, float(np.nanmax(evidence)) * 1.08)
+        ax.set_xlim(-limit, limit)
+        ax.set_ylim(-0.05, top)
+        _fdr_ticks(ax, top)
+        ax.set_title(spec["title"], fontsize=11, pad=10)
+        ax.set_xlabel(
+            "gap in eligible-biopsy net score (percentage points)\n"
+            f"← higher in {spec['b_name']}     higher in {spec['a_name']} →",
+            fontsize=9,
+        )
+        ax.set_ylabel("joint FDR  (smaller = stronger)")
+        tidy_axes(ax, grid="both", hide=("top", "right"))
+
+        key.axis("off")
+        passed_n = int(passed.sum())
+        key.set_title(
+            f"Largest signals · {passed_n} pass FDR {fdr_threshold:g}",
+            fontsize=10, loc="left", pad=7,
+        )
+        for rank, (color, (rule, item)) in enumerate(zip(colors, names.iterrows()), start=1):
+            ypos = 1 - (rank - 0.35) / max(name_top, len(names))
+            key.scatter(0.02, ypos - 0.005, s=46, color=color, edgecolor="white",
+                        linewidth=0.7, transform=key.transAxes)
+            label = rule.replace(" -> ", " → ").replace("_", " ")
+            key.text(0.08, ypos, label,
+                     transform=key.transAxes, fontsize=7.8, fontweight="bold",
+                     va="top", color=_INK)
+            key.text(
+                0.08, ypos - 0.055,
+                f"gap {item['effect_size'] * 100:+.0f} pp · FDR {item['fdr']:.3g}",
+                transform=key.transAxes, fontsize=7.7, va="top", color="#706E68",
+            )
+
+    fig.suptitle(f"Pooled temporal contrasts — {organ}", fontsize=14, y=0.985)
+    fig.text(
+        0.5, 0.937,
+        (f"Pairwise only · biopsy-level · eligible FOVs only · "
+         f"joint FDR: 2 contrasts, {total_tests} tests"),
+        ha="center", va="top", fontsize=8.5, color="#706E68",
+    )
+    fig.subplots_adjust(left=0.09, right=0.985, top=0.84, hspace=0.64, wspace=0.07)
+    _finish(fig, save)
+
+
+# ---------------------------------------------------------------------------
+# Rule-state context used by the new-findings notebook
+# ---------------------------------------------------------------------------
+
+def _cell_share_table(cells, metadata, cell_types, columns):
+    """Per-FOV percentage of all cells belonging to each requested cell type."""
+    totals = cells.groupby("fov").size()
+    counts = (
+        cells.loc[cells["cell type"].isin(cell_types)]
+        .groupby(["fov", "cell type"]).size().unstack(fill_value=0)
+        .reindex(columns=cell_types, fill_value=0)
+    )
+    shares = counts.div(totals, axis=0).mul(100).rename_axis("FOV").reset_index()
+    return metadata[["FOV", *columns]].drop_duplicates().merge(shares, on="FOV", how="left")
+
+
+def plot_cell_share_trends(cells, metadata, cell_types, organ, group_col, stages,
+                           heading, save=None):
+    """Show per-FOV cell abundance beside rule-state trends."""
+    data = _cell_share_table(cells, metadata, cell_types, ["Organ", group_col])
+    data = data.loc[(data["Organ"] == organ) & data[group_col].isin(stages)]
+    colors = _STAGE_COLORS
+    ncols = min(3, len(cell_types))
+    nrows = int(np.ceil(len(cell_types) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.1 * ncols, 3.35 * nrows + 1.2),
+                             squeeze=False)
+    rng = np.random.default_rng(12)
+
+    for ax, cell_type in zip(axes.flat, cell_types):
+        means = []
+        for position, stage in enumerate(stages):
+            values = data.loc[data[group_col] == stage, cell_type].fillna(0)
+            jitter = rng.uniform(-0.13, 0.13, len(values))
+            ax.scatter(position + jitter, values, s=29, color=colors.get(stage, _NEUTRAL),
+                       alpha=0.55, edgecolor="white", linewidth=0.5)
+            mean = values.mean() if len(values) else np.nan
+            means.append(mean)
+            if len(values):
+                ax.scatter(position, mean, s=84, marker="D",
+                           color=colors.get(stage, _INK), edgecolor="white",
+                           linewidth=1.1, zorder=4)
+        ax.plot(range(len(stages)), means, color="#55534F", lw=1.35, alpha=0.72)
+        ax.set_xticks(range(len(stages)), stages)
+        ax.set_ylabel("cells in each FOV (%)")
+        ax.set_title(cell_type.replace("_", " "), fontsize=10.5)
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+
+    for ax in axes.flat[len(cell_types):]:
+        ax.set_visible(False)
+    subtitle = f"{organ} · {group_col.lower()} · each dot is one FOV · diamonds are means"
+    fig.suptitle(heading, fontsize=14, y=0.985)
+    fig.text(0.5, 0.937, subtitle, ha="center", va="top", fontsize=8.5,
+             color="#706E68")
+    fig.subplots_adjust(top=0.78, hspace=0.52, wspace=0.30)
+    _finish(fig, save)
+
+
+def plot_rule_and_cell_changes(states, eligibility, cells, metadata, specs, stages,
+                               heading, trend_results=None, pair_results=None,
+                               save=None):
+    """Place each rule beside changes in its antecedent and consequent abundance."""
+    score_columns = list(dict.fromkeys(spec["score"] for spec in specs))
+    cell_types = list(dict.fromkeys(
+        cell_type
+        for spec in specs
+        for cell_type in spec["rule"].split(" -> ")
+    ))
+    shares = _cell_share_table(cells, metadata, cell_types,
+                               ["Organ", *score_columns])
+    ncols = min(2, len(specs))
+    nrows = int(np.ceil(len(specs) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6.2 * ncols, 3.8 * nrows + 1.2),
+                             squeeze=False)
+    colors = {"rule": "#2878D0", "ant": "#D97832", "con": "#169873"}
+
+    for ax, spec in zip(axes.flat, specs):
+        rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
+        antecedent, consequent = rule.split(" -> ")
+        rule_values, ant_values, con_values = [], [], []
+        eligible_counts, rule_counts = [], []
+
+        for stage in stages:
+            mask = (metadata["Organ"] == organ) & (metadata[group_col] == stage)
+            fovs = metadata.loc[mask, "FOV"].drop_duplicates()
+            state = states.reindex(columns=fovs).loc[rule]
+            can_test = eligibility.reindex(columns=fovs).loc[rule]
+            tested = state[can_test]
+            rule_values.append(100 * tested.mean() if len(tested) else np.nan)
+            eligible_counts.append(len(tested))
+            rule_counts.append(int((tested != 0).sum()))
+
+            stage_shares = shares.loc[
+                (shares["Organ"] == organ)
+                & (shares[group_col] == stage)
+                & shares["FOV"].isin(can_test.index[can_test])
+            ]
+            ant_values.append(stage_shares[antecedent].fillna(0).mean())
+            con_values.append(stage_shares[consequent].fillna(0).mean())
+
+        lines = [
+            ("Rule net", rule_values, colors["rule"], 2.4),
+            (f"Ant: {antecedent.replace('_', ' ')}", ant_values, colors["ant"], 1.8),
+            (f"Con: {consequent.replace('_', ' ')}", con_values, colors["con"], 1.8),
+        ]
+        for label, values, color, width in lines:
+            values = np.asarray(values, dtype=float)
+            change = values - values[0]
+            ax.plot(range(len(stages)), change, marker="D", markersize=6,
+                    color=color, lw=width, label=label)
+
+        ax.axhline(0, color=_ZERO, lw=1.1)
+        ax.set_xticks(
+            range(len(stages)),
+            [
+                f"{stage}\nrule / eligible FOVs = {found}/{eligible}"
+                for stage, found, eligible in zip(stages, rule_counts, eligible_counts)
+            ],
+        )
+        ax.set_ylabel("change from Control (percentage points)")
+        ax.set_title(rule.replace(" -> ", " → "), fontsize=10.5, pad=27)
+        detail = f"{organ} · {group_col.lower()}"
+        tests = _rule_test_text(spec, trend_results, pair_results)
+        if tests:
+            detail += f" · {tests}"
+        ax.text(0.5, 1.01, detail, transform=ax.transAxes, ha="center",
+                va="bottom", fontsize=8, color="#706E68")
+        ax.legend(frameon=False, fontsize=8, loc="best")
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+
+    for ax in axes.flat[len(specs):]:
+        ax.set_visible(False)
+    threshold = eligibility.attrs.get("min_cells")
+    threshold_text = f"eligibility ≥{threshold} cells/type" if threshold else "eligibility-controlled"
+    fig.suptitle(heading, fontsize=14, y=0.985)
+    fig.text(
+        0.5, 0.942,
+        ("Each line starts at 0 in Control · rule and cell shares use the same eligible FOVs · "
+         f"{threshold_text}"),
+        ha="center", va="top", fontsize=8.5, color="#706E68",
+    )
+    fig.subplots_adjust(top=0.79, hspace=0.58, wspace=0.26)
+    _finish(fig, save)
+
+
+def plot_organ_rule_profiles(states, eligibility, metadata, rules, group_col, stages,
+                             stage_results, heading, organs=("Colon", "Duodenum"),
+                             save=None):
+    """Compare the same eligible rule state between organs at every stage."""
+    colors = {"Colon": "#2878D0", "Duodenum": "#D97832"}
+    threshold = eligibility.attrs.get("min_cells")
+    ncols = min(2, len(rules))
+    nrows = int(np.ceil(len(rules) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6.1 * ncols, 3.7 * nrows + 1.25),
+                             squeeze=False)
+
+    for ax, rule in zip(axes.flat, rules):
+        for organ in organs:
+            means, counts = [], []
+            for stage in stages:
+                mask = (metadata["Organ"] == organ) & (metadata[group_col] == stage)
+                fovs = metadata.loc[mask, "FOV"].drop_duplicates()
+                values = states.reindex(columns=fovs).loc[rule]
+                can_test = eligibility.reindex(columns=fovs).loc[rule]
+                observed = values[can_test]
+                means.append(100 * observed.mean() if len(observed) else np.nan)
+                counts.append((int((observed != 0).sum()), len(observed)))
+            ax.plot(range(len(stages)), means, color=colors[organ], lw=1.8,
+                    marker="D", markersize=7, label=organ)
+            for position, (mean, count) in enumerate(zip(means, counts)):
+                if np.isfinite(mean):
+                    offset = 8 if organ == "Colon" else -10
+                    ax.annotate(f"rule/eligible={count[0]}/{count[1]}",
+                                (position, mean), xytext=(0, offset),
+                                textcoords="offset points", ha="center", fontsize=7.5,
+                                color=colors[organ])
+
+        evidence = []
+        for stage in stages:
+            result = stage_results.get(stage, pd.DataFrame())
+            if rule in result.index:
+                evidence.append(f"{stage} {result.at[rule, 'fdr']:.3g}")
+        ax.axhline(0, color=_ZERO, lw=1.1)
+        ax.set_xticks(range(len(stages)), stages)
+        ax.set_ylim(-112, 112)
+        ax.set_ylabel("net rule score among eligible FOVs (%)")
+        ax.set_title(rule.replace(" -> ", " → "), fontsize=10.8, pad=25)
+        ax.text(0.5, 1.01, "organ FDR: " + " · ".join(evidence),
+                transform=ax.transAxes, ha="center", va="bottom", fontsize=8.2,
+                color="#706E68")
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+
+    for ax in axes.flat[len(rules):]:
+        ax.set_visible(False)
+    handles = [Line2D([0], [0], color=colors[organ], marker="D", lw=1.8, label=organ)
+               for organ in organs]
+    fig.legend(handles=handles, ncol=len(organs), frameon=False, loc="upper center",
+               bbox_to_anchor=(0.5, 0.89))
+    threshold_text = f"eligibility ≥{threshold} cells/type" if threshold else "eligibility-controlled"
+    subtitle = (f"Pairwise FOV states · {group_col.lower()} · {threshold_text} · "
+                "FDR jointly corrected across stages and rules")
+    fig.suptitle(heading, fontsize=14, y=0.985)
+    fig.text(0.5, 0.942, subtitle, ha="center", va="top", fontsize=8.5,
+             color="#706E68")
+    fig.subplots_adjust(top=0.75, hspace=0.58, wspace=0.25)
+    _finish(fig, save)
+
+
+def plot_organ_rule_context(states, eligibility, cells, metadata, rule, group_col,
+                            stages, stage_results, heading,
+                            organs=("Colon", "Duodenum"), save=None):
+    """Show one organ rule contrast together with both cell-abundance profiles."""
+    antecedent, consequent = rule.split(" -> ")
+    shares = _cell_share_table(cells, metadata, [antecedent, consequent],
+                               ["Organ", group_col])
+    organ_colors = {"Colon": "#2878D0", "Duodenum": "#D97832"}
+    cell_colors = {antecedent: "#D97832", consequent: "#169873"}
+    threshold = eligibility.attrs.get("min_cells")
+
+    fig = plt.figure(figsize=(12.2, 8.0))
+    grid = fig.add_gridspec(2, 2, height_ratios=(1.18, 1), hspace=0.56, wspace=0.25)
+    rule_ax = fig.add_subplot(grid[0, :])
+    abundance_axes = [fig.add_subplot(grid[1, i]) for i in range(2)]
+
+    for organ in organs:
+        means, counts = [], []
+        for stage in stages:
+            fovs = metadata.loc[
+                (metadata["Organ"] == organ) & (metadata[group_col] == stage), "FOV"
+            ].drop_duplicates()
+            state = states.reindex(columns=fovs).loc[rule]
+            can_test = eligibility.reindex(columns=fovs).loc[rule]
+            observed = state[can_test]
+            means.append(100 * observed.mean() if len(observed) else np.nan)
+            counts.append((int((observed != 0).sum()), len(observed)))
+        rule_ax.plot(range(len(stages)), means, color=organ_colors[organ], lw=2.1,
+                     marker="D", markersize=7, label=organ)
+        for position, (mean, count) in enumerate(zip(means, counts)):
+            if np.isfinite(mean):
+                offset = 9 if organ == "Colon" else -12
+                rule_ax.annotate(f"rule/eligible={count[0]}/{count[1]}",
+                                 (position, mean), xytext=(0, offset),
+                                 textcoords="offset points", ha="center", fontsize=8,
+                                 color=organ_colors[organ])
+
+    evidence = []
+    for stage in stages:
+        result = stage_results.get(stage, pd.DataFrame())
+        if rule in result.index:
+            evidence.append(f"{stage} {result.at[rule, 'fdr']:.3g}")
+    rule_ax.axhline(0, color=_ZERO, lw=1.1)
+    rule_ax.set_xticks(range(len(stages)), stages)
+    rule_ax.set_ylim(-112, 112)
+    rule_ax.set_ylabel("net rule score among eligible FOVs (%)")
+    rule_ax.set_title(rule.replace(" -> ", " → "), fontsize=11, pad=26)
+    rule_ax.text(0.5, 1.01, "organ FDR: " + " · ".join(evidence),
+                 transform=rule_ax.transAxes, ha="center", va="bottom",
+                 fontsize=8.3, color="#706E68")
+    rule_ax.legend(frameon=False, ncol=len(organs), loc="lower center",
+                   bbox_to_anchor=(0.5, 1.18))
+    tidy_axes(rule_ax, grid="y", hide=("top", "right"))
+    rule_ax.tick_params(length=0)
+
+    for ax, organ in zip(abundance_axes, organs):
+        for cell_type in (antecedent, consequent):
+            means = []
+            for stage in stages:
+                fovs = metadata.loc[
+                    (metadata["Organ"] == organ) & (metadata[group_col] == stage), "FOV"
+                ].drop_duplicates()
+                can_test = eligibility.reindex(columns=fovs).loc[rule]
+                eligible_fovs = can_test.index[can_test]
+                values = shares.loc[shares["FOV"].isin(eligible_fovs), cell_type]
+                means.append(values.fillna(0).mean())
+            ax.plot(range(len(stages)), means, color=cell_colors[cell_type], lw=2,
+                    marker="D", markersize=6, label=cell_type.replace("_", " "))
+        ax.set_xticks(range(len(stages)), stages)
+        ax.set_ylabel("mean cells in each FOV (%)")
+        ax.set_title(f"{organ}: cell abundance", fontsize=10.5)
+        ax.legend(frameon=False, fontsize=8.5)
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+
+    threshold_text = f"eligibility ≥{threshold} cells/type" if threshold else "eligibility-controlled"
+    fig.suptitle(heading, fontsize=14, y=0.99)
+    fig.text(0.5, 0.950,
+             (f"Pairwise FOV states · {group_col.lower()} · {threshold_text} · "
+              "rule and cell abundance use the same eligible FOVs · labels show rule/eligible FOVs"),
+             ha="center", va="top", fontsize=8.5, color="#706E68")
+    fig.subplots_adjust(top=0.82, left=0.09, right=0.98, bottom=0.08)
+    _finish(fig, save)
+
+
+def plot_organ_cell_shares(cells, metadata, cell_types, group_col, stages,
+                           heading, organs=("Colon", "Duodenum"), save=None):
+    """Stage-matched cell abundance in two organs."""
+    data = _cell_share_table(cells, metadata, cell_types, ["Organ", group_col])
+    colors = {"Colon": "#2878D0", "Duodenum": "#D97832"}
+    ncols = min(2, len(cell_types))
+    nrows = int(np.ceil(len(cell_types) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6.1 * ncols, 3.45 * nrows + 1.2),
+                             squeeze=False)
+
+    for ax, cell_type in zip(axes.flat, cell_types):
+        for organ in organs:
+            means = [
+                data.loc[(data["Organ"] == organ) & (data[group_col] == stage), cell_type]
+                .fillna(0).mean()
+                for stage in stages
+            ]
+            ax.plot(range(len(stages)), means, color=colors[organ], lw=1.8,
+                    marker="D", markersize=7, label=organ)
+        ax.set_xticks(range(len(stages)), stages)
+        ax.set_ylabel("mean cells in each FOV (%)")
+        ax.set_title(cell_type.replace("_", " "), fontsize=10.5)
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+
+    for ax in axes.flat[len(cell_types):]:
+        ax.set_visible(False)
+    handles = [Line2D([0], [0], color=colors[organ], marker="D", lw=1.8, label=organ)
+               for organ in organs]
+    fig.legend(handles=handles, ncol=len(organs), frameon=False, loc="upper center",
+               bbox_to_anchor=(0.5, 0.89))
+    fig.suptitle(heading, fontsize=14, y=0.985)
+    fig.text(0.5, 0.937, f"{group_col.lower()} · stage means from per-FOV cell percentages",
+             ha="center", va="top", fontsize=8.5, color="#706E68")
+    fig.subplots_adjust(top=0.76, hspace=0.50, wspace=0.25)
     _finish(fig, save)

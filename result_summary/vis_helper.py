@@ -29,7 +29,8 @@ def _prevalence_norm(df_pct, gamma=0.5):
     return PowerNorm(gamma=gamma, vmin=0.0, vmax=max(vmax, 1e-9))
 
 
-def _build_annotations(df_plot, orig_col_by_display, total_col, total_units, stage_totals):
+def _build_annotations(df_plot, orig_col_by_display, total_col, total_units, stage_totals,
+                       denominators=None):
     """Return (percentage matrix, 'count (pct%)' annotation matrix)."""
     df_pct = df_plot.astype(float).copy()
     annot = []
@@ -37,10 +38,14 @@ def _build_annotations(df_plot, orig_col_by_display, total_col, total_units, sta
         annot_row = []
         for display_col, val in row.items():
             orig = orig_col_by_display[display_col]
-            total = total_units if orig == total_col else stage_totals.get(orig, val)
+            if denominators is None:
+                total = total_units if orig == total_col else stage_totals.get(orig, val)
+            else:
+                total = denominators.at[idx, orig]
             pct = (val / total * 100) if total else 0.0
             df_pct.at[idx, display_col] = pct
-            annot_row.append(f"{int(val)} ({pct:.1f}%)")
+            count = f"{int(val)}" if denominators is None else f"{int(val)}/{int(total)}"
+            annot_row.append(f"{count} ({pct:.1f}%)")
         annot.append(annot_row)
     return df_pct, annot
 
@@ -57,6 +62,7 @@ def plot_rule_stage_heatmap(
     norm_gamma=0.5,
     max_rules_to_show=30,
     cmap="YlOrRd",
+    denominators=None,
     save=None,
 ):
     """Heatmap of top-rule prevalence (% of `id_col` units) across stages.
@@ -73,6 +79,8 @@ def plot_rule_stage_heatmap(
     rule_abundance : DataFrame indexed by Clean_Rule with 'ant' and 'con' columns
         (mean cell fraction over the rule's own FOVs). When given, draws back-to-back
         antecedent/consequent abundance bars beside the heatmap.
+    denominators : optional rule x column table of eligible-unit counts. When given,
+        every percentage uses its own rule-specific denominator.
     norm_gamma : PowerNorm gamma for the color scale (None = linear). <1 boosts low values.
     """
     if df_agg.empty:
@@ -95,7 +103,9 @@ def plot_rule_stage_heatmap(
     orig_col_by_display = {}
     renamed = {}
     for col in df_plot.columns:
-        if col == total_col:
+        if denominators is not None:
+            disp = f"{col}\n(rule-specific n)"
+        elif col == total_col:
             disp = f"{col}\n(n={total_units})"
         elif col in stage_totals:
             disp = f"{col}\n(n={stage_totals[col]})"
@@ -105,7 +115,13 @@ def plot_rule_stage_heatmap(
         orig_col_by_display[disp] = col
     df_plot = df_plot.rename(columns=renamed)
 
-    df_pct, annot = _build_annotations(df_plot, orig_col_by_display, total_col, total_units, stage_totals)
+    if denominators is not None:
+        denominators = denominators.reindex(
+            index=df_plot.index, columns=df_agg.columns, fill_value=0
+        ).fillna(0)
+    df_pct, annot = _build_annotations(
+        df_plot, orig_col_by_display, total_col, total_units, stage_totals, denominators
+    )
 
     draw_bars = rule_abundance is not None
     height = max(6, len(df_plot) * 0.3)
@@ -120,7 +136,7 @@ def plot_rule_stage_heatmap(
     norm = _prevalence_norm(df_pct, norm_gamma) if norm_gamma else None
     sns.heatmap(
         df_pct, annot=annot, fmt="", cmap=cmap, ax=ax, norm=norm,
-        cbar_kws={"label": f"Percentage of {id_col} (%)"},
+        cbar_kws={"label": f"Percentage of {'eligible ' if denominators is not None else ''}{id_col} (%)"},
     )
 
     if draw_bars:
@@ -157,7 +173,8 @@ def plot_rule_stage_heatmap(
         ax_bar.tick_params(left=False)
         ax.set_yticks([])
 
-    title = f"Top Rules Prevalence across {score_col} (by {id_col})"
+    prefix = "Eligibility-controlled " if denominators is not None else ""
+    title = f"{prefix}Top Rules Prevalence across {score_col} (by {id_col})"
     if organs:
         title += f" ({', '.join(organs)})"
     if stages:

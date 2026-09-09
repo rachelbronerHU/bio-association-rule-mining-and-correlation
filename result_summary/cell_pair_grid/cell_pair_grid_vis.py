@@ -341,13 +341,18 @@ _PAIR_HEIGHT = 2.6
 
 def plot_pair_dots(panels, counts, stage_order, stage_colors, num_cols=3,
                    value_col="log2_lift", ylabel="log2 lift\n(0 = chance)",
-                   baseline=0.0, footnote=None, title=None, subtitle=None, save=None):
+                   baseline=0.0, footnote=None, title=None, subtitle=None,
+                   label_as_lift=False, save=None):
     """One panel per cell pair: every FOV carrying the rule as its own dot.
 
     panels : {pair name: table with 'stage' and 'log2_lift'}, one row per FOV.
     counts : {pair name: {stage: (FOVs with the rule, eligible FOVs)}}, written
              under each stage so a panel says how common the rule is as well as how
              strong it is.
+    label_as_lift : the axis stays in log2 - it has to, so that twice as likely
+             and half as likely sit equally far from the line - but the number
+             printed beside each median is turned back into plain lift, which is
+             what a reader can interpret: 1.50x is half as many again as chance.
     """
     if not panels:
         print("No data to plot.")
@@ -371,7 +376,8 @@ def plot_pair_dots(panels, counts, stage_order, stage_colors, num_cols=3,
                            edgecolor="0.25", linewidth=0.4, alpha=0.85, zorder=3)
                 middle = np.median(values)
                 ax.plot([x - 0.28, x + 0.28], [middle] * 2, color="0.15", lw=1.6, zorder=4)
-                ax.annotate(f"{middle:.2f}", (x + 0.30, middle), fontsize=7,
+                mark = f"{2 ** middle:.2f}x" if label_as_lift else f"{middle:.2f}"
+                ax.annotate(mark, (x + 0.30, middle), fontsize=7,
                             color="0.15", va="center", ha="left", zorder=5)
         ax.set_xticks(range(len(stage_order)))
         ax.set_xticklabels(["{}\n{}/{}".format(stage, *counts[name].get(stage, (0, 0)))
@@ -389,6 +395,122 @@ def plot_pair_dots(panels, counts, stage_order, stage_colors, num_cols=3,
     top = _figure_titles(fig, title, subtitle, center=0.5)
     fig.tight_layout(rect=[0, 0.03, 1, top])
     fig.text(0.5, 0.005, footnote or "each dot is one FOV  |  bar = median  |  "
-             "numbers = FOVs with the rule / FOVs holding both cell types",
+             "numbers = FOVs with the rule / FOVs where it could be mined",
+             ha="center", fontsize=8.5, color="0.35")
+    _finish(fig, save)
+
+
+# --- a cell type with its own kind -----------------------------------------
+
+def plot_self_rules(table, cell_groups=None, title=None, subtitle=None,
+                    footnote=None, save=None):
+    """One row per cell type: every FOV where the type carries a rule with itself.
+
+    table : one row per FOV per cell type, with 'cell' and 'log2_lift'.
+    Rows are ordered by median strength, and the name of each is colored by its
+    group, the same way the grids above color their axes.
+    """
+    if not len(table):
+        print("No data to plot.")
+        return
+    middle = table.groupby("cell")["log2_lift"].median().sort_values()
+    order = list(middle.index)
+    counts = table.groupby("cell")["log2_lift"].size()
+
+    fig, ax = plt.subplots(figsize=(6.4, 0.30 * len(order) + 1.9))
+    ax.axvline(0, color="0.55", lw=1.0, zorder=1)
+    spread = np.random.default_rng(0)
+    for y, cell in enumerate(order):
+        values = table.loc[table["cell"] == cell, "log2_lift"].to_numpy(dtype=float)
+        group = (cell_groups or {}).get(cell, "other")
+        ax.scatter(values, y + spread.uniform(-0.18, 0.18, len(values)), s=18,
+                   color=CELL_GROUP_COLORS.get(group, "0.5"),
+                   edgecolor="0.25", linewidth=0.3, alpha=0.75, zorder=3)
+        ax.plot([middle[cell]] * 2, [y - 0.30, y + 0.30], color="0.15", lw=1.8, zorder=4)
+
+    ax.set_yticks(range(len(order)))
+    ax.set_yticklabels([f"{cell}  ({counts[cell]})" for cell in order], fontsize=9)
+    for label in ax.get_yticklabels():
+        group = (cell_groups or {}).get(label.get_text().split("  (")[0], "other")
+        label.set_color(CELL_GROUP_COLORS.get(group, "black"))
+    ax.set_ylim(-0.8, len(order) - 0.2)
+    ax.set_xlabel("log2 lift of the rule with itself\n(0 = chance)", fontsize=10)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    ax.tick_params(axis="y", length=0)
+
+    top = _figure_titles(fig, title, subtitle, center=0.5)
+    fig.tight_layout(rect=[0, 0.04, 1, top])
+    fig.text(0.5, 0.008, footnote or "each dot is one FOV  |  bar = median  |  "
+             "the number after a name is how many FOVs carry the rule",
+             ha="center", fontsize=8.5, color="0.35")
+    _finish(fig, save)
+
+
+# --- does a rule say more than how common its cells are? -------------------
+
+_OPPOSITE = "#c0392b"       # a rule that moved against its own cells
+_WITH = "0.62"
+
+
+def plot_dissociation(table, rho=None, title=None, subtitle=None, save=None):
+    """Two panels asking whether a rule is only its cells counted twice.
+
+    Left: how strong a rule is against how common its two cell types are, in
+    healthy tissue. A flat cloud means strength is not a stand-in for abundance.
+    Right: how much each moves between control and severe. A rule in the upper
+    left or lower right moved against its own cells - the thing counting cannot say.
+
+    table : one row per rule, with 'abundance', 'strength', 'd_abundance',
+            'd_strength', 'opposite' (bool) and 'rule'.
+    """
+    if not len(table):
+        print("No data to plot.")
+        return
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.6))
+
+    ax = axes[0]
+    ax.scatter(table["abundance"], table["strength"], s=26, color=_WITH,
+               edgecolor="0.25", linewidth=0.4, alpha=0.85)
+    ax.axhline(0, color="0.55", lw=1.0)
+    ax.set_xlabel("how common the two cell types are\n(log10 of their shares multiplied)",
+                  fontsize=9)
+    ax.set_ylabel("how strong the rule is\n(log2 lift, 0 = chance)", fontsize=9)
+    ax.set_title("healthy tissue: strength against abundance", fontsize=10)
+    if rho is not None:
+        ax.annotate(f"Spearman rho = {rho[0]:+.2f}\np = {rho[1]:.2f}",
+                    (0.03, 0.94), xycoords="axes fraction", fontsize=9,
+                    va="top", color="0.25")
+
+    ax = axes[1]
+    other = table[~table["opposite"]]
+    moved = table[table["opposite"]]
+    ax.axhline(0, color="0.55", lw=1.0)
+    ax.axvline(0, color="0.55", lw=1.0)
+    ax.scatter(other["d_abundance"], other["d_strength"], s=26, color=_WITH,
+               edgecolor="0.25", linewidth=0.4, alpha=0.75)
+    ax.scatter(moved["d_abundance"], moved["d_strength"], s=54, color=_OPPOSITE,
+               edgecolor="0.15", linewidth=0.5, zorder=4)
+    # These few points sit close together, so the names are stacked apart and
+    # each one is tied back to its dot with a thin line.
+    steps = [(10, 16), (10, -18), (10, 38), (10, -40), (10, 60), (10, -62)]
+    order = moved.sort_values("d_strength", ascending=False)
+    for n, (_, row) in enumerate(order.iterrows()):
+        ax.annotate(row["rule"], (row["d_abundance"], row["d_strength"]),
+                    fontsize=7.5, color=_OPPOSITE, zorder=5,
+                    xytext=steps[n % len(steps)], textcoords="offset points",
+                    arrowprops=dict(arrowstyle="-", color=_OPPOSITE,
+                                    lw=0.6, shrinkA=0, shrinkB=3))
+    ax.set_xlabel("change in how common the cells are\n(control to severe)", fontsize=9)
+    ax.set_ylabel("change in rule strength\n(control to severe)", fontsize=9)
+    ax.set_title("what moved: the cells, or the arrangement?", fontsize=10)
+
+    for ax in axes:
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(labelsize=9)
+
+    top = _figure_titles(fig, title, subtitle, center=0.5)
+    fig.tight_layout(rect=[0, 0.03, 1, top])
+    fig.text(0.5, 0.005, "each dot is one cell pair  |  red = the rule moved against its "
+             "own cells, with the change in strength significant at BH FDR < 0.10",
              ha="center", fontsize=8.5, color="0.35")
     _finish(fig, save)

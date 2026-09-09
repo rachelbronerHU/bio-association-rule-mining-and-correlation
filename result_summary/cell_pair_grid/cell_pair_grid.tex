@@ -57,93 +57,124 @@
 \hrule
 \vspace{0.5cm}
 
-\textbf{Muscle issue:} How much muscularis a biopsy caught
-differs by stage, and in opposite directions in the two organs: FOVs containing muscle rise
-with stage in the duodenum (58\%, 66\%, 68\%) and fall in the colon (80\%, 33\%, 52\%). Any
-result involving Muscle therefore mixes biology with what the biopsy happened to include,
-so every figure below that touches it is shown twice - all FOVs, then only those that
-sampled the muscularis. Restricting this way loses no patient from either severe group.
+\textbf{Muscle issue:} how much muscularis a biopsy caught differs by stage, and in
+opposite directions in the two organs - it rises with stage in the duodenum and falls in
+the colon. Any result involving Muscle therefore mixes biology with what the biopsy
+happened to include, so every figure below that touches it is shown twice: all FOVs, then
+only those that sampled the muscularis. The restricted version drops a few patients from
+each severe group, so it is a check on the others rather than a replacement.
+
+\textbf{Rules of a cell type with itself:} a rule may name the same cell type twice ---
+\emph{Muscle beside Muscle}. These are \textbf{kept everywhere in this note}, and each one
+lands on the diagonal of its grid. Every subtitle says whether they are in or out.
+Section~4 is about what they show; Section~2 is the one place where keeping them changes
+what a reader should conclude, so it draws that figure both ways.
+
+\textbf{Counting a rule fairly:} a rule is counted only in an FOV that could have carried
+it - one holding enough of both of its cell types to mine. Every fraction under a dot panel
+is out of those FOVs, and every ring on a grid is the same thing drawn as a circle.
 
 % ---------------------------------------------------------
 \section{Claim 1 - the direction of a rule is anatomical}
 
-\textit{A $\rightarrow$ B} and \textit{B $\rightarrow$ A} are different measurements. \textbf{59\%} of mined rules exist in one direction only.
+\textit{A $\rightarrow$ B} and \textit{B $\rightarrow$ A} are different measurements here,
+and most mined rules fire one way round only. This is not an artefact of the thresholds: a
+rule and its mirror have genuinely different lift, because a neighbourhood is centred on a
+cell, so \emph{epithelium beside a Paneth cell} and \emph{a Paneth cell beside epithelium}
+count different things.
 
-\textbf{In one image, two squares are filled and their mirrors are empty.} Paneth cells
-have epithelium beside them; smooth muscle has endothelium beside it. Neither reverse rule
-was mined - which is what the anatomy predicts, since Paneth cells are under 1\% of the
-tissue and almost no epithelial cell has one nearby.
+\textbf{In one image, two squares are filled and their mirrors are empty.} Paneth cells have
+epithelium beside them; smooth muscle has endothelium beside it. Neither reverse rule was
+mined --- which is what the anatomy predicts, since Paneth cells are a fraction of a percent
+of the tissue and almost no epithelial cell has one nearby.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.78\textwidth]{summary_downloads/f1_one_fov_control.pdf}
     \caption{\textbf{Reading the grid:} each \emph{row} is a cell type taken as the centre
     of a neighbourhood; each \emph{column} is a cell type found within $25\,\mu$m of it.
-    A dot means that rule was mined, and \textbf{a heavy black outline means the mirror
-    rule was not} --- it fired one way round only. Colour is log2 lift, so $+1$ and $-1$ sit
-    equally far from white. Dot size is confidence. Here: one healthy duodenal FOV
-    (Control\_01\_FOV\_1), axes trimmed to the cell types it uses.}
+    A dot means that rule was mined, and \textbf{a heavy black outline means the mirror rule
+    was not} --- it fired one way round only. A dot on the dashed diagonal is a cell type
+    beside its own kind; it is its own mirror, so it is never outlined. Colour is log2 lift,
+    so twice as likely and half as likely sit equally far from white. Dot size is
+    confidence. Here: one healthy duodenal FOV, axes trimmed to the cell types it uses.}
     \label{fig:fov1}
 \end{figure}
 
-\textbf{Across the cohort the asymmetry holds:}
-Paneth $\rightarrow$ Epithelial fires in 12 of 29 eligible control FOVs; its mirror in
-\textbf{0 of 29}. SMV $\rightarrow$ Endothelial sits well above chance at every stage while
-its mirror reaches 1 of 30 controls.
+\textbf{Across the cohort the asymmetry holds.} Paneth $\rightarrow$ Epithelial fires in
+most of the control FOVs that could carry it and its mirror in none of them; SMV
+$\rightarrow$ Endothelial sits above chance at every stage while its mirror is rare. The
+panel below shows both pairs beside their mirrors, so the gap can be read directly.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{summary_downloads/f2_direction_pairs.pdf}
-    \caption{\textbf{Reading a dot panel:} One cell pair per panel; each dot is one FOV
-    carrying the rule, the bar is the median, and the fraction under each stage is FOVs with
-    the rule out of FOVs holding both cell types. The two right panels are the mirrors of
-    the two left ones.}
+    \caption{\textbf{Reading a dot panel:} one cell pair per panel; each dot is one FOV
+    carrying the rule, the bar is the median, and the number beside it is the median lift
+    ($1.00$x is chance). The fraction under each stage is FOVs with the rule out of the FOVs
+    where it could have been mined. The two right panels are the mirrors of the two left.}
     \label{fig:dir}
 \end{figure}
 
-\textbf{Pooled, the grid is visibly not symmetric about its diagonal,} with the
-asymmetry the right way round.
+\textbf{Pooled, the grid is visibly not symmetric about its diagonal,} with the asymmetry
+the right way round.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.78\textwidth]{summary_downloads/f3_group_control.pdf}
-    \caption{Healthy duodenum, 31 FOVs pooled, axes trimmed as before.}
+    \caption{Healthy duodenum, all its FOVs pooled, axes trimmed as before.}
     \label{fig:group1}
 \end{figure}
 
 % ---------------------------------------------------------
 \section{Claim 2 - the rules reconstruct the layers of the gut}
 
-The gut is built in layers - epithelium, lamina propria, muscularis - and nothing about
-this was given to the mining.
+The gut is built in layers --- epithelium, lamina propria, muscularis --- and \textbf{nothing
+about this was given to the mining}. No coordinates, no tissue regions, no anatomy: only
+which cell types were found within $25\,\mu$m of each other. If the rules put that structure
+back, they are measuring the tissue rather than the cell-type table.
 
-\textbf{Folded into lineages, grouped cells shows the layering.} The diagonal is warm
-(a layer sits with itself) and the epithelial row is cold against everything outside the
+\textbf{Folded into lineages, the grid shows the layering.} The diagonal is warm --- a layer
+sits with itself --- and the epithelial row is cold against everything outside the
 epithelium. Epithelium against muscle is the strongest avoidance anywhere in the data.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{summary_downloads/f4a_layers_one.pdf}
-    \caption{Healthy colon, the 31 cell types folded into their lineages; Muscle and
-    Brunner glands keep their own row and column, forming a lineage with nothing else.
-    A box averages the log2 lift of every rule inside it, \textbf{weighted by how many
-    FOVs each rule appears in} --- otherwise a rule seen in one FOV would count as much as
-    one seen in nearly all of them.}
+    \caption{Healthy colon, the cell types folded into their lineages; Muscle and Brunner
+    glands keep their own row and column, forming a lineage with nothing else. A box
+    averages the log2 lift of every rule inside it, \textbf{weighted by how many FOVs each
+    rule appears in} --- otherwise a rule seen in one FOV would count as much as one seen in
+    nearly all of them.}
     \label{fig:layers1}
 \end{figure}
 
-\textbf{The same picture repeats in both organs and at every stage.} Each lineage sits with
-itself --- epithelium 1.48--2.00, stroma 1.37--2.10, immune 1.03--1.33 --- while epithelium
-keeps apart from immune cells (0.31--0.52) and from stroma (0.26--0.41), and epithelium
-against muscle stays at 0.03--0.09. This is the stereotypic
-organisation Azulay \textit{et al.} describe for healthy gut, recovered from rules alone,
-and it survives aGVHD intact.
+\textbf{The same picture repeats in both organs and at every stage,} and this is the
+stereotypic organisation Azulay \textit{et al.} describe for healthy gut, recovered from
+rules alone. That it barely moves with disease is the second half of the result rather than
+a disappointment: a method that invented structure would drift, and this one does not, so
+the changes it does report are worth taking seriously. Claim~3 is where they are.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{summary_downloads/f4b_layers_all.pdf}
     \caption{All six organ $\times$ stage groups, folded as in Fig.~\ref{fig:layers1}.}
     \label{fig:layers}
+\end{figure}
+
+\textbf{The warm diagonal is a layer sitting with itself, not only a cell type sitting with
+itself.} A rule naming one cell type twice lands on the diagonal, so a warm
+\emph{epithelial} box could in principle be nothing but Goblet beside Goblet. Dropping every
+such rule cools the diagonal a little and leaves every box off it untouched, since no such
+rule ever lands there. The layering is the stronger of the two statements.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f4d_layers_all_noself.pdf}
+    \caption{Fig.~\ref{fig:layers} with every rule of a cell type with itself dropped. The
+    Muscle and Brunner gland boxes on the diagonal empty out, because those two lineages
+    hold one cell type each and had nothing but their own rule in them.}
+    \label{fig:layersnoself}
 \end{figure}
 
 \textbf{Dropping the FOVs with no muscularis changes nothing but the Muscle row.} The
@@ -157,18 +188,17 @@ not an artefact of which biopsies caught muscle.
     \label{fig:layersmusc}
 \end{figure}
 
-\textbf{Unfolded, each pair sits at the same height in every stage - the boundary does not
-loosen.} Tested one rule at a time: of 24 across-layer rules in the duodenum, none moves
-toward chance at BH FDR $<0.10$, and of 38 in the colon only 2 do. Several tighten instead
---- Goblet $\rightarrow$ Plasma goes $-0.82 \rightarrow -1.76$ in the duodenum and
-$-0.90 \rightarrow -1.72$ in the colon. The paper's ``less organised'' is about villus and crypt
+\textbf{Unfolded, each pair sits at the same height in every stage --- the boundary does not
+loosen.} Tested one rule at a time, with a Mann-Whitney on log2 lift and Benjamini-Hochberg
+correction, almost no across-layer rule moves toward chance between control and severe.
+Several tighten instead. The paper's ``less organised'' is about villus and crypt
 \emph{shape}; a rule only asks which cell types end up within $25\,\mu$m of each other, and
 a crypt can lose its shape while its cells keep their neighbours.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.90\textwidth]{summary_downloads/f5_layer_pairs.pdf}
-    \caption{Colon. Three pairs across the layer boundary, drawn as in
+    \caption{Colon, all FOVs. Three pairs across the layer boundary, drawn as in
     Fig.~\ref{fig:dir}.}
     \label{fig:layerpairs}
 \end{figure}
@@ -185,53 +215,81 @@ other two pairs are unaffected, as they involve no muscle.
 \end{figure}
 
 % ---------------------------------------------------------
-\section{Claim 3 - the paper's findings appear as rules arriving and leaving}
+\section{Claim 3 - a rule is not its two cell types, counted}
 
-\textbf{One diseased image already shows two of the paper's epithelial findings.} Against
+Everything so far could still be answered with a cell-type table: if a rule only fired where
+its two cell types happened to be common, the method would be an expensive way of counting.
+Lift is built not to be --- it divides by how common each cell type is, so a rule away from
+chance is already a claim about arrangement. This section tests that directly, and it is
+the claim the method stands on.
+
+\textbf{How strong a rule is has nothing to do with how common its cells are.} In healthy
+tissue the two are uncorrelated (Spearman $\rho = 0.03$): a rule between two abundant cell
+types is no stronger than one between two rare ones. Whatever the grid is measuring, it is
+not the cell-type table read twice.
+
+\textbf{And the two can move in opposite directions.} A handful of rules change strength
+between control and severe \emph{against} the direction both of their cell types went ---
+the cells go one way and the arrangement goes the other. They are named in red on the right
+of the figure: Paneth and Goblet against epithelium and Plasma\_CD38 against Plasma all
+\emph{tighten} while both their cell types thin out, and SMV beside SMV \emph{loosens} while
+those cells become more common.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{summary_downloads/f13_dissociation.pdf}
+    \caption{\textbf{Left:} each dot is a cell pair in healthy tissue --- how common its two
+    cell types are, against how strong the rule between them is. The cloud is flat.
+    \textbf{Right:} how far each moved between control and severe. A dot in the upper left
+    or lower right moved against its own cells; those are drawn in red and named.}
+    \label{fig:dissoc}
+\end{figure}
+
+This is the part counting cannot reach. A cell-type table says \emph{Paneth cells are
+disappearing}. The rule says \emph{the Paneth cells still there are packed against
+epithelium more tightly than they were in health} --- a statement about what the surviving
+tissue looks like, not about how much of it is left. Only the second needs spatial data.
+
+\textbf{One diseased image already shows the composition changing too.} Against
 Fig.~\ref{fig:fov1}, the Paneth row has gone and an Endocrine row has appeared.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.78\textwidth]{summary_downloads/f6_one_fov_severe.pdf}
-    \caption{One severe duodenal FOV (GVHD\_14\_FOV\_4), drawn as Fig.~\ref{fig:fov1}.}
+    \caption{One severe duodenal FOV, drawn as Fig.~\ref{fig:fov1}.}
     \label{fig:fov2}
 \end{figure}
 
-\textbf{Across the cohort, Paneth rules vanish and Endocrine rules appear - but the dots
-do not move up or down, only their number changes.} Paneth $\rightarrow$ Epithelial holds
-through mild disease (12/29 then 37/91 of eligible FOVs) and drops in severe (7/30).
-Endocrine $\rightarrow$ Epithelial is absent from healthy duodenum entirely (0/21) and
-present only with disease (22/87 mild, 7/35 severe).
+\textbf{The paper's compositional findings are visible here too, and they are the weaker
+half.} Paneth $\rightarrow$ Epithelial thins out with disease; Endocrine $\rightarrow$
+Epithelial cannot be measured in healthy duodenum at all, because no control FOV holds
+enough endocrine cells, and appears once disease sets in. These track the Paneth loss and
+endocrine gain the paper reports. They confirm the rule table against a known result; they
+do not add to it, and on their own they would not be worth the machinery.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.72\textwidth]{summary_downloads/f7_paper_duodenum.pdf}
-    \caption{Duodenum, drawn as in Fig.~\ref{fig:dir}. The vertical position of the dots is
-    the rule's strength; the count beneath is how many FOVs carry it.}
+    \caption{Duodenum, drawn as in Fig.~\ref{fig:dir}. The height of a dot is the rule's
+    strength; the count beneath is how many FOVs carry it out of how many could.}
     \label{fig:paper1}
 \end{figure}
-
-\textbf{The cells themselves moved, which is why the rules did.} Paneth cells fall from
-0.9\% of an FOV to 0.6\% and from 29 of 31 FOVs to 30 of 41; endocrine cells rise from
-0.1\% to 0.5\% and from 21 of 31 to 35 of 41. So these rules track the paper's
-\emph{compositional} findings, not a rearrangement.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.72\textwidth]{summary_downloads/f7b_cells_duodenum.pdf}
     \caption{The same FOVs, now showing how much of each one the cell type makes up. Same
-    layout as Fig.~\ref{fig:paper1}, so the two can be read against each other.}
+    layout as Fig.~\ref{fig:paper1}, so the two can be read against each other: the counts
+    move, and Fig.~\ref{fig:dissoc} is what is left once that movement is divided out.}
     \label{fig:cells1}
 \end{figure}
 
-\textbf{Both rules are sharper against the pathological score than the clinical one.} Grouped
-by pathology, Paneth $\rightarrow$ Epithelial falls further in severe disease (2/24, 8\%,
-against 7/30, 23\% clinically) and Endocrine $\rightarrow$ Epithelial keeps rising
-(0\%, 22\%, 30\%) instead of levelling off (0\%, 25\%, 20\%). Both are histological changes
-and the Lerner pathological score is the histological readout, while the Glucksberg clinical
-score grades symptoms - the paper notes the two disagree in six of its patients. That the
-epithelial rules track the tissue score more closely is a small point in the method's favour:
-they are responding to damage rather than to how ill the patient felt.
+\textbf{The Paneth rule is sharper against the pathological score than the clinical one,}
+falling further in severe disease when the groups are cut by pathology. The endocrine rule
+rises either way. The Lerner pathological score is the histological readout while the
+Glucksberg clinical score grades symptoms --- the paper notes the two disagree in six of its
+patients --- so a rule tracking the tissue score more closely is a small point in the
+method's favour.
 
 \begin{figure}[H]
     \centering
@@ -242,8 +300,9 @@ they are responding to damage rather than to how ill the patient felt.
 \end{figure}
 
 \textbf{The colon repeats the pattern in both directions.} Neutrophil $\rightarrow$
-Epithelial is absent from control and mild disease and appears only in severe (4/52);
-CD4T $\rightarrow$ Plasma runs the other way, from 14/25 down to 2/50.
+Epithelial is absent from control and mild disease and appears only in severe, though in too
+few FOVs to lean on; CD4T $\rightarrow$ Plasma is the firmer of the two and runs the other
+way, common in healthy colon and rare in severe.
 
 \begin{figure}[H]
     \centering
@@ -252,30 +311,78 @@ CD4T $\rightarrow$ Plasma runs the other way, from 14/25 down to 2/50.
     \label{fig:paper2}
 \end{figure}
 
-\textbf{Again the cells explain it}: neutrophils spread with severity while plasma and CD4 T
-cells fall away - the neutrophil enrichment and plasma/CD4T depletion the paper reports.
-
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{summary_downloads/f8b_cells_colon.pdf}
-    \caption{Colon cell abundance, drawn as in Fig.~\ref{fig:cells1}.}
+    \caption{Colon cell abundance, drawn as in Fig.~\ref{fig:cells1}: neutrophils spread
+    with severity while plasma and CD4 T cells fall away, which is the enrichment and
+    depletion the paper reports.}
     \label{fig:cells2}
 \end{figure}
 
-Requiring at least 20 cells of each type does not change this: Paneth $\rightarrow$
-Epithelial still falls from 77\% to 54\% of FOVs, but no pair's \emph{lift} differs between
-control and severe after correction. These figures confirm the paper's findings in the rule
-table; they do not rediscover them independently.
+% ---------------------------------------------------------
+\section{Claim 4 - a cell type sits with its own kind}
 
-\textbf{All six groups at once.} The Goblet rows say it most clearly: small dots inside
-large rings, so the rules hold wherever goblet cells remain and there are simply fewer such
-FOVs.
+A fair share of the mined rules name the same cell type twice, and for some of those the
+answer is known before the mining runs: muscle is a continuous band, and Paneth cells sit
+packed at the base of a crypt. Both should sit with their own kind, strongly. Both do, which makes
+this the cheapest check in the note --- a method that got it wrong would be broken.
+
+\textbf{Not one cell type avoids its own kind.} Every cell type carrying such a rule sits
+above chance. The strongest are the ones the anatomy names --- Paneth, muscle, endocrine
+cells, fibrotic epithelium, Brunner glands --- and the weakest are the ones spread thinly
+through the lamina propria, macrophages and fibroblasts and T cells, which is where cells
+that fill the tissue evenly belong.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.62\textwidth]{summary_downloads/f11_self_rules.pdf}
+    \caption{Every FOV carrying a rule of a cell type with itself, both organs and every
+    stage pooled, drawn as in Fig.~\ref{fig:dir}. The number after a name is how many FOVs
+    carry the rule, and the names are coloured by cell group as on the grids above.}
+    \label{fig:self}
+\end{figure}
+
+\textbf{Three cell types carry no such rule anywhere, and one of them is Epithelial} --- the
+most common cell type in the data. That is the abundance handicap of the next section seen
+from the inside: a cell type in nearly every neighbourhood cannot clear a lift threshold,
+not even beside itself. The other two, APC and NK, sit at the opposite end, among the
+rarest.
+
+\textbf{Two of these rules follow the disease, and two make good controls.} In the colon,
+Plasma beside Plasma is common in healthy tissue and rare in severe, which is the plasma
+cell loss the paper reports; in the duodenum, Paneth beside Paneth thins the same way. The
+controls stay put: Goblet beside Goblet holds throughout the colon, and Muscle beside Muscle
+through the duodenum, which is what a band of muscle should do whether or not the patient is
+ill. As in Claim~3, the count is what carries the signal --- the heights barely move, except
+for Plasma, which climbs: the plasma cells still there sit closer together than they did in
+health.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{summary_downloads/f12_self_pairs_colon.pdf}
+    \caption{Colon, drawn as in Fig.~\ref{fig:dir}.}
+    \label{fig:selfcolon}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{summary_downloads/f12b_self_pairs_duodenum.pdf}
+    \caption{Duodenum, drawn as in Fig.~\ref{fig:dir}.}
+    \label{fig:selfduo}
+\end{figure}
+
+% ---------------------------------------------------------
+\section{All six groups at once}
+
+The Goblet rows say it most clearly: small dots inside large rings, so the rules hold
+wherever goblet cells remain and there are simply fewer such FOVs.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{summary_downloads/f9_all_groups.pdf}
-    \caption{All six groups on a shared axis, restricted to the 14 cell types carrying a
-    rule in over 25\% of the FOVs of at least three groups.}
+    \caption{All six groups on a shared axis, restricted to the cell types carrying a rule
+    in over a quarter of the FOVs of at least three groups.}
     \label{fig:all}
 \end{figure}
 
@@ -293,19 +400,21 @@ depend on which biopsies caught muscle.
 % ---------------------------------------------------------
 \section{What the method cannot answer}
 
-\textbf{The grid is sparse.} A median FOV yields 30 rules out of 930 possible pairs, so an
-untrimmed grid is about 97\% empty. Trimming to the cell types actually used lifts a pooled
-group grid from 5\% to 27\% filled; the shared axis is kept only where grids must be compared.
+\textbf{The grid is sparse.} A median FOV yields a few dozen rules out of nearly a thousand
+possible pairs, so an untrimmed grid is almost entirely empty. Trimming to the cell types
+actually used makes one grid far easier to read; the shared axis is kept only where grids
+must be compared.
 
-\textbf{Abundant cell types are handicapped.} A cell type in nearly every neighborhood has
-a lift near 1 by construction and cannot clear the threshold. This puts the paper's
-intraepithelial-lymphocyte result out of reach: the signs are right at every stage
-(CD8T $\rightarrow$ Epithelial above 1, CD4T $\rightarrow$ Epithelial below 1) but the
-rules clear threshold in only 1--3 FOVs.
+\textbf{Abundant cell types are handicapped.} A cell type in nearly every neighbourhood has a
+lift near chance by construction and cannot clear the threshold. Epithelial cells are the
+case in point: the most common type in the data, and not one rule with themselves anywhere
+in the cohort. This also puts the paper's intraepithelial-lymphocyte result out of reach ---
+the signs are right at every stage, CD8T $\rightarrow$ Epithelial above chance and CD4T
+$\rightarrow$ Epithelial below it, but the rules clear threshold in too few FOVs to test.
 
-\textbf{One FOV is coarser than one crypt.} The paper's local-microenvironment result
-(their Fig.~6) is measured in a ring around each crypt, where an infiltrated crypt can sit
-beside an untouched one. A rule is mined over a whole FOV, which averages the two together.
-Within-FOV patchiness would need mining at crypt level - the natural next step.
+\textbf{One FOV is coarser than one crypt.} The paper's local-microenvironment result (their
+Fig.~6) is measured in a ring around each crypt, where an infiltrated crypt can sit beside an
+untouched one. A rule is mined over a whole FOV, which averages the two together. Within-FOV
+patchiness would need mining at crypt level --- the natural next step.
 
 \end{document}

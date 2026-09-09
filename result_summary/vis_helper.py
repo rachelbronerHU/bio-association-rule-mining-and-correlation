@@ -1,4 +1,4 @@
-"""Visualization helpers for the result-summary pairwise-rule analysis.
+"""Visualization helpers shared by the result-summary investigations.
 
 Only plotting lives here; data prep / aggregation stays in the notebook.
 """
@@ -64,6 +64,7 @@ def plot_rule_stage_heatmap(
     cmap="YlOrRd",
     denominators=None,
     save=None,
+    scope=None,
 ):
     """Heatmap of top-rule prevalence (% of `id_col` units) across stages.
 
@@ -173,18 +174,25 @@ def plot_rule_stage_heatmap(
         ax_bar.tick_params(left=False)
         ax.set_yticks([])
 
-    prefix = "Eligibility-controlled " if denominators is not None else ""
-    title = f"{prefix}Top Rules Prevalence across {score_col} (by {id_col})"
+    title = ("Eligibility-controlled top rule prevalence"
+             if denominators is not None else "Top rule prevalence")
+    score = score_col.replace(" score", "").lower()
+    details = [scope, f"Score: {score}", f"Unit: {id_col}"]
     if organs:
-        title += f" ({', '.join(organs)})"
-    if stages:
-        title += f" | Stages: {', '.join(map(str, stages))}"
-    ax.set_title(title, fontsize=14, pad=15)
+        details.append("Organ: " + " / ".join(organs))
+    shown_stages = stage_order or stages
+    if shown_stages:
+        details.append("Stages: " + " / ".join(map(str, shown_stages)))
+    details.append("Denominator: eligible units" if denominators is not None
+                   else "Denominator: all units")
+    fig.suptitle(title, fontsize=14, y=0.99)
+    fig.text(0.5, 0.955, " · ".join(x for x in details if x),
+             ha="center", va="top", fontsize=8.5, color="#706E68")
     ax.set_ylabel("" if draw_bars else "Cleaned Rule", fontsize=12)
     ax.set_xlabel(score_col, fontsize=12)
     ax.tick_params(axis="both", which="major", labelsize=10,
                    top=True, labeltop=True, bottom=False, labelbottom=False)
-    plt.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.91))
     _finish(fig, save)
 
 
@@ -319,8 +327,14 @@ def plot_patient_fingerprint(
                fontsize=8, title_fontsize=9)
 
     what = "FOV" if by == "fov" else "patient"
-    (strip_axes[0] if n_strip else main_ax).set_title(
-        _titled(f"Which rules each {what} has", scope), fontsize=13, pad=10)
+    fig.suptitle(f"Which rules each {what} has", fontsize=13, y=0.99)
+    fig.text(
+        0.5, 0.957,
+        (f"{scope or 'Rules: all'} · Score: {score_col.replace(' score', '').lower()} · "
+         f"Unit: {what} · Rules shown: {len(mat)}"),
+        ha="center", va="top", fontsize=8.5, color="#706E68",
+    )
+    fig.subplots_adjust(top=0.90)
     _finish(fig, save)          # no tight_layout: it would undo the gridspec alignment
 
 
@@ -363,7 +377,7 @@ def _plain_log_ticks(ax, which="x", nice=None):
 
 
 def plot_metric_vs_abundance(rule_rows, fov_frac, metric="Lift", show_trend=True,
-                             title_note=None, save=None):
+                             title_note=None, save=None, scope=None):
     """One score against how common the cells are: antecedent on the left, consequent on the right.
 
     One dot per rule occurrence (one rule in one FOV) — nothing is averaged. Both panels
@@ -408,15 +422,21 @@ def plot_metric_vs_abundance(rule_rows, fov_frac, metric="Lift", show_trend=True
         if yscale == "log":
             _plain_log_ticks(ax, "y")
         ax.tick_params(labelsize=8)
-    note = f" — {title_note}" if title_note else ""
-    fig.suptitle(f"Does {metric.lower()} follow how common the cells are?{note}"
-                 f"   (one dot per rule per FOV, n={len(rule_rows)})", fontsize=10)
-    plt.tight_layout()
+    note = f" · {title_note}" if title_note else ""
+    fig.suptitle(f"{metric} and cell abundance", fontsize=12.5, y=0.99)
+    fig.text(
+        0.5, 0.94,
+        (f"{scope or 'Rules: all'} · Unit: rule occurrence (rule × FOV) · "
+         f"Observations: {len(rule_rows)}{note}"),
+        ha="center", va="top", fontsize=8.5, color="#706E68",
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.87))
     _finish(fig, save)
 
 
 def plot_rule_metric_scatter(table, x="med_Lift", y="med_Conviction", size_col="n_Patient",
-                             color_col="med_Confidence", annotate_top=8, save=None):
+                             color_col="med_Confidence", annotate_top=8, save=None,
+                             scope=None):
     """How strong each rule is vs how many patients have it.
 
     x / y = the rule's median lift and conviction (log axes); dot size = `size_col`;
@@ -466,11 +486,16 @@ def plot_rule_metric_scatter(table, x="med_Lift", y="med_Conviction", size_col="
             for t in texts:
                 t.set_ha("left")
 
-    ax.set_title(f"How strong each rule is vs how many patients have it "
-                 f"(dot size = {size_col})", fontsize=12)
+    fig.suptitle("Rule strength and reproducibility", fontsize=13, y=0.99)
+    fig.text(
+        0.5, 0.95,
+        (f"{scope or 'Rules: all'} · Unit: rule · X: {x} · Y: {y} · "
+         f"Size: {size_col} · Color: {color_col}"),
+        ha="center", va="top", fontsize=8.5, color="#706E68",
+    )
     if is_inf.any():
         ax.legend(fontsize=8, loc="lower right")
-    plt.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.91))
     _finish(fig, save)
     cols = [c for c in ["antecedent", "consequent", x, color_col, y, size_col,
                         "n_FOV", "ant_abund", "con_abund"] if c in df.columns]
@@ -561,6 +586,28 @@ PCA_STAGE_COLORS = {
 }
 PCA_STAGE_ORDER = ["Control_S", "Control", "Mild", "Severe"]
 
+# Corner colors for the archetype figures: the names on the PCA and the map titles that
+# go with them. Deliberately clear of the stage palette above - no green, amber or red -
+# so a corner color can never be read as a stage. All dark enough to stay legible as text
+# on white, spread in lightness as well as hue, and ordered so that the first few are the
+# furthest apart. Cycles when there are more corners than colors.
+CORNER_COLORS = ["#4B2E83",     # violet
+                 "#1B9AAA",     # teal
+                 "#A11D5B",     # magenta
+                 "#8A6A2F",     # bronze
+                 "#3C6FB4",     # blue
+                 "#55566A"]     # slate
+
+
+def corner_colors(names):
+    """{name: color} for the archetype corners, in the order the names first appear.
+
+    One place, so the PCA labels and the map titles cannot drift apart.
+    """
+    ordered = list(dict.fromkeys(names))
+    return {name: CORNER_COLORS[i % len(CORNER_COLORS)]
+            for i, name in enumerate(ordered)}
+
 # The ink and furniture every figure shares, so the whole summary reads as one set.
 INK = "#52514e"           # text that is not a title
 NEUTRAL = "#b8b7b1"       # measured, but not worth colouring in
@@ -600,6 +647,10 @@ def tidy_axes(ax, grid=None, hide=("top", "right")):
 # Filled once by set_cell_colors(); every FOV map then uses the same colors.
 _CELL_COLORS = {}
 _OTHER_COLOR = (0.5, 0.5, 0.5)
+_CELL_COLOR_OVERRIDES = {
+    "Endothelial": "#0072B2",
+    "Epithelial": "#7A9E3F",
+}
 
 
 def save_figure(fig, name, dpi=200, figure_dir=None):
@@ -638,6 +689,10 @@ def set_cell_colors(df_cells, cmap="tab20b"):
     except AttributeError:                              # older matplotlib
         palette = plt.cm.get_cmap(cmap, max(len(types), 1))
     _CELL_COLORS = {ct: palette(i) for i, ct in enumerate(types)}
+    _CELL_COLORS.update({
+        cell: color for cell, color in _CELL_COLOR_OVERRIDES.items()
+        if cell in _CELL_COLORS
+    })
     return _CELL_COLORS
 
 
@@ -666,6 +721,29 @@ def _titled(base, scope):
     return f"{base}  —  {scope}" if scope else base
 
 
+def figure_titles(fig, title, organ=None, subtitle=None, params=None, note=None,
+                  align="center"):
+    """Draw a short title hierarchy with a fixed physical gap above the axes."""
+    lines = [
+        (subtitle, 9.8, "#5F5D58", "medium"),
+        (params, 8.5, "#898781", "normal"),
+        (note, 8.1, "#898781", "normal"),
+    ]
+    lines = [line for line in lines if line[0]]
+    height_points = fig.get_figheight() * 72
+    x = 0.5 if align == "center" else 0.01
+    ha = "center" if align == "center" else "left"
+    y = 1 - 7 / height_points
+    fig.suptitle(_titled(title, organ), fontsize=13.5, x=x, y=y, ha=ha)
+    for line, fontsize, color, weight in lines:
+        y -= (17 if fontsize > 9 else 15) / height_points
+        fig.text(x, y, line, fontsize=fontsize, color=color, fontweight=weight,
+                 ha=ha, va="top")
+    axes_top = y - 42 / height_points
+    fig.subplots_adjust(top=axes_top)
+    return axes_top
+
+
 # ---------------------------------------------------------------------------
 # Which rules pull the FOVs apart
 # ---------------------------------------------------------------------------
@@ -685,7 +763,8 @@ def _add_scale_bar_50um(ax, x_max, y_max):
 
 
 def plot_fov(fov_id, description, df_cells, df_fovs,
-             target_ant_cells=None, target_cons_cells=None, ax=None, save=None):
+             target_ant_cells=None, target_cons_cells=None, ax=None, save=None,
+             show_legend=True, cell_size=None):
     """A map of one FOV: every cell drawn where it sits, colored by its type.
 
     Give `target_ant_cells` / `target_cons_cells` to grey out everything except
@@ -699,7 +778,7 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
 
     meta = df_fovs[df_fovs["FOV"] == fov_id]
     size_um = meta["Size [um]"].iloc[0] if not meta.empty else 400
-    cell_size = 90 if size_um == 400 else 45
+    cell_size = cell_size if cell_size is not None else (90 if size_um == 400 else 45)
 
     own_fig = ax is None
     if own_fig:
@@ -753,12 +832,77 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
     ax.tick_params(axis="both", colors="black", labelsize=9)
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.legend(handles=handles, title="Cell type", bbox_to_anchor=(1.02, 1),
-              loc="upper left", fontsize=9, title_fontsize=10, frameon=True)
+    if show_legend:
+        ax.legend(handles=handles, title="Cell type", bbox_to_anchor=(1.02, 1),
+                  loc="upper left", fontsize=9, title_fontsize=10, frameon=True)
 
     if own_fig:
         plt.tight_layout()
         _finish(fig, save)
+
+
+def _complex_plot(module, name, args, kwargs):
+    """Keep old notebooks working while complex layouts live with their investigation."""
+    import importlib
+    plot = getattr(importlib.import_module(module), name)
+    return plot(*args, **kwargs)
+
+
+def plot_rule_fov_pairs(*args, **kwargs):
+    return _complex_plot("complex_vis", "plot_rule_fov_pairs", args, kwargs)
+
+
+def plot_stage_rule_fovs(*args, **kwargs):
+    return _complex_plot("complex_stages_vis", "plot_stage_rule_fovs", args, kwargs)
+
+
+def plot_group_profiles(values, metadata, rules, groups, group_col, unit_col,
+                        result=None, scope=None, ylabel="value", save=None):
+    """One unit-level profile figure per rule across ordered groups."""
+    rules = [rule for rule in rules if rule in values.index]
+    if not rules:
+        print("No requested rules are available.")
+        return []
+
+    rng = np.random.default_rng(7)
+    figures = []
+    for rule in rules:
+        fig, ax = plt.subplots(figsize=(6.4, 4.1))
+        means = []
+        for position, group in enumerate(groups):
+            units = metadata.loc[metadata[group_col] == group, unit_col].drop_duplicates()
+            observed = values.reindex(columns=units).loc[rule].dropna()
+            jitter = rng.uniform(-0.12, 0.12, len(observed))
+            color = _STAGE_PALETTE.get(group, "#777777")
+            ax.scatter(position + jitter, observed, s=32, color=color, alpha=0.68,
+                       edgecolor="white", linewidth=0.6)
+            mean = observed.mean() if len(observed) else np.nan
+            means.append(mean)
+            if len(observed):
+                ax.scatter(position, mean, s=86, marker="D", color=color,
+                           edgecolor="white", linewidth=1.1, zorder=5)
+            ax.text(position, -0.12, f"eligible n={len(observed)}", ha="center",
+                    va="top", fontsize=8, color="#66645F",
+                    transform=ax.get_xaxis_transform())
+        ax.plot(range(len(groups)), means, color="#4A4844", lw=1.3, alpha=0.7)
+        ax.set_xticks(range(len(groups)), groups)
+        ax.set_ylim(-0.04, 1.04)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda value, _: f"{value:.0%}"))
+        ax.set_ylabel(ylabel)
+        evidence = None
+        if result is not None and rule in result.index and "fdr" in result:
+            evidence = f"Patient-level FDR = {result.at[rule, 'fdr']:.3g}"
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+        figure_titles(
+            fig, str(rule).replace(" -> ", " → "), organ=scope,
+            subtitle="Patient-level rule profile · informative complex rule",
+            params=evidence,
+        )
+        fig.subplots_adjust(bottom=0.17)
+        _finish(fig, save)
+        figures.append(fig)
+    return figures
 
 
 def plot_fov_panel(target_fovs, df_cells, df_fovs, num_cols=1, save=None,
@@ -790,7 +934,7 @@ def plot_fov_panel(target_fovs, df_cells, df_fovs, num_cols=1, save=None,
                              figsize=(10 * num_cols, 10 * len(rows)),
                              facecolor="#ffffff", squeeze=False)
 
-    group_colors = _category_colors(list(title_groups.values()))[0] if title_groups else {}
+    group_colors = corner_colors(list(title_groups.values())) if title_groups else {}
     letter = 0
     for row_axes, row_fovs in zip(axes, rows):
         for ax, fov in zip(row_axes, row_fovs):

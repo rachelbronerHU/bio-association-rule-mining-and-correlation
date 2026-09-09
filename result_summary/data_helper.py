@@ -145,6 +145,15 @@ def load_spatial_data(data_dir=None):
     return df_cells, df_fovs, df_biopsy
 
 
+def fov_fractions(cells):
+    """FOV x cell type, each row summing to 1: what each FOV is made of.
+
+    Transpose it for cell types x FOVs.
+    """
+    counts = cells.groupby(["fov", "cell type"]).size().unstack(fill_value=0)
+    return counts.div(counts.sum(axis=1), axis=0)
+
+
 # ---------------------------------------------------------------------------
 # 2. Load the mined rules (same table for both notebooks)
 # ---------------------------------------------------------------------------

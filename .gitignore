@@ -10,6 +10,7 @@ data/
 results/*
 results/debug_run
 result_summary/*/summary_downloads/
+result_summary/*/param_runs/
 
 
 

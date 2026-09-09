@@ -3,6 +3,9 @@
 Only plotting lives here; the counting stays in the notebook.
 The shared pieces - saving, titles, ink, axis chrome - come from `vis_helper.py`.
 """
+import textwrap
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,8 +13,25 @@ from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from vis_helper import (_finish, _titled, tidy_axes, _plain_log_ticks,
-                        INK, ZERO, NEUTRAL)
+from vis_helper import (
+    save_figure, figure_titles, tidy_axes, _plain_log_ticks,
+    plot_fov, set_cell_colors, INK, ZERO, NEUTRAL,
+)
+
+
+_FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
+
+
+def _finish(fig, save=None, dpi=200):
+    """Save complex-rule figures beside their notebooks, then show them."""
+    save_figure(fig, save, dpi=dpi, figure_dir=_FIGURE_DIR)
+    plt.show()
+
+
+def clear_exports(names):
+    """Remove known report figures before rebuilding them."""
+    for name in filter(None, names):
+        (_FIGURE_DIR / name).unlink(missing_ok=True)
 
 # A ramp, not a set of categories: the verdicts are ordered, nothing -> something.
 # Plum sits off the ramp on purpose - a rule whose parent was never measured is a
@@ -41,6 +61,141 @@ def text_on(color):
     """Ink or white, whichever stays readable on this colour. Shared with complex_stages_vis."""
     r, g, b = to_rgb(color)
     return "white" if (0.299 * r + 0.587 * g + 0.114 * b) < 0.55 else INK
+
+
+def _rule_parts(rule):
+    """Cell types on each side of one stored rule name."""
+    ant, con = str(rule).split(" -> ", 1)
+    clean = lambda side: [
+        item.replace("_CENTER", "").replace("_NEIGHBOR", "")
+        for item in side.split(" + ")
+    ]
+    return clean(ant), clean(con)
+
+
+def _plain_rule(rule):
+    ant, con = _rule_parts(rule)
+    return f"{', '.join(sorted(ant))} → {', '.join(sorted(con))}"
+
+
+def _rule_metric_text(values, include_fdr=False, wrap=False):
+    """Compact metric line used above rule-highlighted FOVs."""
+    if not isinstance(values, dict):
+        return ""
+    parts = []
+    for key, label in (("Lift", "lift"), ("Support", "support"),
+                       ("Conviction", "conviction")):
+        value = values.get(key, np.nan)
+        if pd.notna(value):
+            parts.append(f"{label} {value:.3g}")
+    fdr = values.get("Individual_FDR", np.nan)
+    if include_fdr and pd.notna(fdr):
+        parts.append(f"FDR {fdr:.3g}")
+    if wrap and len(parts) > 2:
+        return " · ".join(parts[:2]) + "\n" + " · ".join(parts[2:])
+    return " · ".join(parts)
+
+
+def plot_rule_fov_pairs(examples, df_cells, df_fovs, save=None, cell_size=16):
+    """One figure per rule: full FOV, higher-order rule, then its mined parents."""
+    if examples is None or len(examples) == 0:
+        print("No FOV examples to plot.")
+        return []
+    cell_colors = set_cell_colors(df_cells)
+
+    figures = []
+    for _, example in pd.DataFrame(examples).reset_index(drop=True).iterrows():
+        fov = example["FOV"]
+        detail = str(example.get("detail", "")).strip()
+        simpler = example.get("simpler_rules", [])
+        simpler = simpler if isinstance(simpler, (list, tuple)) else []
+        panels = [(
+            "Higher-order rule", example["rule"],
+            list(example["antecedent_cells"]), list(example["consequent_cells"]),
+            example.get("complex_metrics", {}),
+        )]
+        simpler_metrics = example.get("simpler_metrics", [])
+        for number, rule in enumerate(simpler, 1):
+            ant, con = _rule_parts(rule)
+            metrics = (
+                simpler_metrics[number - 1]
+                if number <= len(simpler_metrics) else {}
+            )
+            label = (
+                "Strongest simpler rule"
+                if len(simpler) == 1 else f"Simpler rule {number}"
+            )
+            panels.append((label, rule, ant, con, metrics))
+
+        panel_count = 1 + len(panels)
+        nrows = int(np.ceil(panel_count / 4))
+        ncols = int(np.ceil(panel_count / nrows))
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(4.0 * ncols, 4.25 * nrows + 0.9),
+            squeeze=False, facecolor="white",
+            gridspec_kw={"wspace": 0.18, "hspace": 0.30},
+        )
+        axes = axes.ravel()
+        plot_fov(
+            fov, "", df_cells, df_fovs, ax=axes[0], show_legend=False,
+            cell_size=cell_size,
+        )
+        axes[0].set_title("Full FOV", fontsize=10)
+
+        target_types = []
+        for ax, (label, rule, ant, con, metrics) in zip(axes[1:], panels):
+            target_types.extend(ant + con)
+            plot_fov(
+                fov, "", df_cells, df_fovs, target_ant_cells=ant,
+                target_cons_cells=con, ax=ax, show_legend=False,
+                cell_size=cell_size,
+            )
+            is_simpler = label != "Higher-order rule"
+            name = (
+                _plain_rule(rule)
+                if is_simpler else str(rule).replace(" -> ", " → ")
+            )
+            name = "\n".join(textwrap.wrap(
+                name, width=34, break_long_words=False, break_on_hyphens=False,
+            ))
+            metrics = _rule_metric_text(
+                metrics, include_fdr=is_simpler, wrap=is_simpler,
+            )
+            ax.set_title(
+                f"{label}\n{name}" + (f"\n{metrics}" if metrics else ""),
+                fontsize=8.8,
+            )
+        for ax in axes[panel_count:]:
+            ax.set_visible(False)
+
+        target_types = list(dict.fromkeys(target_types))
+        handles = [
+            plt.Line2D(
+                [0], [0], marker="o", linestyle="none",
+                markerfacecolor=cell_colors.get(cell, "black"),
+                markeredgecolor="none", markersize=7, label=cell,
+            )
+            for cell in target_types
+        ]
+        fig.legend(
+            handles=handles, title="Cell type", frameon=False,
+            ncol=max(len(handles), 1), loc="lower center",
+            bbox_to_anchor=(0.5, 0.005), fontsize=8, title_fontsize=9,
+        )
+        meta = df_fovs[df_fovs["FOV"] == fov]
+        organ = meta["Organ"].iat[0] if not meta.empty and "Organ" in meta else None
+        axes_top = figure_titles(
+            fig, str(example["rule"]).replace(" -> ", " → "),
+            organ=organ, subtitle=f"FOV {fov}", params=detail,
+        )
+        axes_top -= 34 / (fig.get_figheight() * 72)
+        fig.subplots_adjust(
+            bottom=0.10 if nrows > 1 else 0.14,
+            top=axes_top, wspace=0.18, hspace=0.30,
+        )
+        _finish(fig, save)
+        figures.append(fig)
+    return figures
 
 
 def _key(handles, ax, at):
@@ -80,7 +235,8 @@ def _blocks(counts):
     return y, [(names[a], range(a, b)) for a, b in zip(starts, edges[1:])]
 
 
-def plot_class_split(counts, labels=None, class_labels=None, scope=None,
+def plot_class_split(counts, labels=None, class_labels=None, organ=None,
+                     subtitle=None, params=None,
                      title="What the longer rules add", save=None):
     """How the library's verdicts split, one bar per rule shape.
 
@@ -138,9 +294,10 @@ def plot_class_split(counts, labels=None, class_labels=None, scope=None,
                   fontsize=10)
     ax.tick_params(axis="y", length=0)
 
-    ax.set_title(_titled(title, scope), fontsize=12.5, loc="left", pad=14)
     _key(_class_keys(counts.columns, class_labels), ax, 1.10)
     tidy_axes(ax, grid="x", hide=("top", "right", "left"))
+    figure_titles(fig, title, organ=organ, subtitle=subtitle, params=params,
+                  align="left")
     _finish(fig, save)
 
 
@@ -166,8 +323,8 @@ def _no_change_band(ax, min_gain):
     ax.set_ylim(bottom=bottom)
 
 
-def plot_gain_scatter(table, class_labels=None, scope=None, metric="Lift",
-                      min_gain=1.1, save=None):
+def plot_gain_scatter(table, class_labels=None, organ=None, subtitle=None,
+                      params=None, metric="Lift", min_gain=1.1, save=None):
     """Every mined instance of a surviving longer rule: how strong, and how much it won by.
 
     One dot per rule per FOV, so nothing is averaged: each dot's strength, parent and gain
@@ -217,18 +374,18 @@ def plot_gain_scatter(table, class_labels=None, scope=None, metric="Lift",
     tidy_axes(side, grid="y", hide=("top", "right", "left"))
     side.tick_params(axis="y", length=0, labelleft=False)
 
-    ax.set_title(_titled("What the longer rules gain over their parts", scope),
-                 fontsize=12.5, loc="left", pad=14)
     keys = _class_keys(table["verdict"], class_labels)
     keys.append(Line2D([0], [0], marker="o", linestyle="none", markersize=8,
                        markerfacecolor="none", markeredgecolor=INK, markeredgewidth=1.3,
                        label="hollow: no parent measured"))
     _key(keys, side, 1.25)
+    figure_titles(fig, "What the longer rules gain over their parts", organ=organ,
+                  subtitle=subtitle, params=params, align="left")
     _finish(fig, save)
 
 
-def plot_gain_dumbbell(table, class_labels=None, scope=None, metric="Lift",
-                       top_n=15, save=None):
+def plot_gain_dumbbell(table, class_labels=None, organ=None, subtitle=None,
+                       params=None, metric="Lift", top_n=15, save=None):
     """The biggest gains, by name: where the best shorter rule sits, and where this one does.
 
     One row per rule, hollow dot the shorter rule, filled dot the longer one, and the bar
@@ -287,8 +444,6 @@ def plot_gain_dumbbell(table, class_labels=None, scope=None, metric="Lift",
                 xycoords=("axes fraction", "data"), ha="right", va="center",
                 fontsize=8, color=INK, annotation_clip=False)
 
-    ax.set_title(_titled(f"The biggest gains, named  (top {top_n})", scope),
-                 fontsize=12.5, loc="left", pad=14)
     keys = [Line2D([0], [0], marker="o", linestyle="none", markersize=8,
                    markerfacecolor="white", markeredgecolor=INK, label="shorter rule"),
             Line2D([0], [0], marker="o", linestyle="none", markersize=8,
@@ -296,4 +451,61 @@ def plot_gain_dumbbell(table, class_labels=None, scope=None, metric="Lift",
     keys += _class_keys(top["verdict"], class_labels)
     _key(keys, ax, 1.53)
     tidy_axes(ax, grid="x", hide=("top", "right", "left"))
+    figure_titles(fig, "The biggest gains, named", organ=organ,
+                  subtitle=subtitle, params=params, align="left")
+    _finish(fig, save)
+
+
+def plot_rule_occurrences(rows, rule, metric="Lift", stage_column="Pathological score",
+                          organ_order=None, stage_order=None, threshold=None, save=None):
+    """Show every FOV carrying one recurring rule, grouped by organ and stage."""
+    current = rows[rows["name"] == rule].copy()
+    if current.empty:
+        print(f"No occurrences to plot for {rule}.")
+        return
+    organ_order = organ_order or list(current["Organ"].dropna().unique())
+    stage_order = stage_order or list(current[stage_column].dropna().unique())
+    groups = [(organ, stage) for organ in organ_order for stage in stage_order]
+    present = [(organ, stage) for organ, stage in groups if not current[
+        (current["Organ"] == organ) & (current[stage_column] == stage)
+    ].empty]
+
+    fig, ax = plt.subplots(figsize=(max(7.2, 1.8 * len(present)), 4.6))
+    labels = []
+    for position, (organ, stage) in enumerate(present):
+        block = current[
+            (current["Organ"] == organ) & (current[stage_column] == stage)
+        ]
+        values = block[metric].astype(float).to_numpy()
+        jitter = np.linspace(-0.08, 0.08, len(values)) if len(values) > 1 else [0]
+        ax.scatter(position + np.asarray(jitter), values, s=34, color=CLASS_COLORS["new"],
+                   alpha=0.65, edgecolor="white", linewidth=0.6, zorder=3)
+        ax.scatter(position, np.median(values), s=78, marker="D",
+                   color=CLASS_COLORS["new"], edgecolor="white", linewidth=0.8, zorder=4)
+        patients = block["PatientID"].nunique()
+        fov_label = "FOV" if len(block) == 1 else "FOVs"
+        patient_label = "patient" if patients == 1 else "patients"
+        labels.append(
+            f"{organ}\n{stage}\n{len(block)} {fov_label}\n{patients} {patient_label}"
+        )
+
+    ax.axhline(1, color="#bab8b1", lw=1.0)
+    if threshold is not None:
+        ax.axhline(threshold, color=CLASS_COLORS["new"], lw=1.0, ls=(0, (3, 2)),
+                   label=f"selection threshold = {threshold:g}")
+        ax.legend(frameon=False, fontsize=8.3)
+    ax.set_xticks(range(len(present)), labels)
+    ax.set_ylabel(metric)
+    if metric in {"Lift", "Conviction"}:
+        ax.set_yscale("log")
+        _plain_log_ticks(ax, "y")
+    tidy_axes(ax, grid="y", hide=("top", "right"))
+    ax.tick_params(length=0)
+    figure_titles(
+        fig, rule.replace(" -> ", " → "),
+        subtitle="Reproducibility of a recurring new rule",
+        params=(f"stage column: {stage_column} · all rule-bearing FOVs are shown · "
+                "dots are FOVs · diamonds are group medians"),
+    )
+    fig.subplots_adjust(bottom=0.28)
     _finish(fig, save)

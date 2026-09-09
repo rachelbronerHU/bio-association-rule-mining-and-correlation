@@ -12,6 +12,7 @@ from matplotlib.colors import to_rgba
 from matplotlib.lines import Line2D
 
 from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, spread_labels,
+                        plot_fov, set_cell_colors,
                         NEUTRAL as _NEUTRAL, HAIRLINE as _HAIRLINE,
                         ZERO as _ZERO, INK as _INK)
 
@@ -66,8 +67,12 @@ def _flip_marks(comparison, label_a, label_b):
 
 
 def _title(ax, text, scope):
-    """Left-aligned and a line above the legend, so the two never run into each other."""
-    ax.set_title(_titled(text, scope), fontsize=12, pad=28, loc="left")
+    """Short figure title followed by a separate scope subtitle."""
+    fig = ax.figure
+    fig.suptitle(text, fontsize=13.5, y=0.985)
+    if scope:
+        fig.text(0.5, 0.943, str(scope), ha="center", va="top",
+                 fontsize=8.5, color="#706E68")
 
 
 # Below this FDR the exact number stops meaning anything - the rule is simply certain -
@@ -204,7 +209,7 @@ def plot_volcano(comparison, label_a, label_b, scope=None, fdr_threshold=0.05,
     _legend(ax, label_a, label_b, color_a, color_b,
             over_label=f"surer than {10 ** -ceiling:g}" if over.any() else None)
     tidy_axes(ax, grid="both")
-    plt.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
     _finish(fig, save)
 
 
@@ -288,7 +293,7 @@ def plot_dumbbell(comparison, label_a, label_b, scope=None, fdr_threshold=0.05,
     _legend(ax, label_a, label_b, color_a, color_b, show_hollow=bool((~won).any()))
     tidy_axes(ax, grid="x", hide=("top", "right", "left"))
     ax.tick_params(axis="y", length=0)
-    plt.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
     _finish(fig, save)
 
 
@@ -418,8 +423,11 @@ def plot_rules_with_cells(trend, cell_trend, stages, rising=True, scope=None,
     for ax in axes:
         _plain(ax)
 
-    fig.suptitle(_titled(f"{way} rules and the cells behind them (top {top_n})", scope),
-                 fontsize=13, y=0.97)
+    fig.suptitle(f"{way} rules and the cells behind them (top {top_n})",
+                 fontsize=13, y=0.985)
+    if scope:
+        fig.text(0.5, 0.943, str(scope), ha="center", va="top",
+                 fontsize=8.5, color="#706E68")
     _room_for_names(fig)
     _finish(fig, save)
 
@@ -447,8 +455,11 @@ def plot_trend(trend, stages, scope=None, fdr_threshold=0.05, top_n=8,
                      unit=value_label or _NET_LABEL)
         _plain(ax)
 
-    fig.suptitle(_titled(f"{what} that move with severity (top {top_n} each way)", scope),
-                 fontsize=13, y=0.97)
+    fig.suptitle(f"{what} that move with severity (top {top_n} each way)",
+                 fontsize=13, y=0.985)
+    if scope:
+        fig.text(0.5, 0.943, str(scope), ha="center", va="top",
+                 fontsize=8.5, color="#706E68")
     _room_for_names(fig)
     _finish(fig, save)
 
@@ -503,10 +514,13 @@ def plot_state_breakdown(states, selected, fovs_by_stage, stages, scope=None, sa
                       markerfacecolor=colors[label], markeredgecolor="none", label=label)
                for label in ("Attract", "No rule", "Avoid")]
     fig.legend(handles=handles, loc="upper center", ncol=3, frameon=False,
-               bbox_to_anchor=(0.5, 0.925))
-    fig.suptitle(_titled("What changes inside the strongest eligible trends", scope),
+               bbox_to_anchor=(0.5, 0.89))
+    fig.suptitle("What changes inside the strongest eligible trends",
                  fontsize=13, y=0.99)
-    fig.subplots_adjust(top=0.82, hspace=0.72, wspace=0.32)
+    if scope:
+        fig.text(0.5, 0.947, str(scope), ha="center", va="top",
+                 fontsize=8.5, color="#706E68")
+    fig.subplots_adjust(top=0.78, hspace=0.72, wspace=0.32)
     _finish(fig, save)
 
 
@@ -525,15 +539,16 @@ _STAGE_COLORS = {"Control": "#67B58A", "Mild": "#E7A33E", "Severe": "#D85D62"}
 _STATE_ORDER = ["Attraction", "No rule", "Avoidance", "Insufficient cells"]
 
 
-def _rule_test_text(spec, trend_results=None, pair_results=None):
+def _rule_test_text(spec, trend_results=None, pair_results=None, test_label=None):
     """Compact corrected-test summary for one rule panel."""
     rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
     scope_key = (organ, group_col)
     trend = (trend_results or {}).get(scope_key, pd.DataFrame())
     pair = (pair_results or {}).get(scope_key, pd.DataFrame())
     tests = []
+    prefix = f"{test_label} " if test_label else ""
     if rule in trend.index:
-        tests.append(f"ordered FDR {trend.at[rule, 'fdr']:.3g}")
+        tests.append(f"ordered {prefix}FDR {trend.at[rule, 'fdr']:.3g}")
     if isinstance(pair, dict):
         labels = {
             ("Control", "Mild"): "C–M",
@@ -543,9 +558,9 @@ def _rule_test_text(spec, trend_results=None, pair_results=None):
         for comparison, result in pair.items():
             if rule in result.index:
                 label = labels.get(comparison, "–".join(comparison))
-                tests.append(f"{label} FDR {result.at[rule, 'fdr']:.3g}")
+                tests.append(f"{label} {prefix}FDR {result.at[rule, 'fdr']:.3g}")
     elif rule in pair.index:
-        tests.append(f"C–S FDR {pair.at[rule, 'fdr']:.3g}")
+        tests.append(f"C–S {prefix}FDR {pair.at[rule, 'fdr']:.3g}")
     return " · ".join(tests) if tests else spec.get("test_text", "")
 
 
@@ -615,7 +630,7 @@ def _draw_state_bars(ax, stage_counts, eligible_counts, nets, stages,
 
 def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
                      trend_results=None, pair_results=None, unit_col="FOV",
-                     unit_label="FOVs", save=None):
+                     unit_label="FOVs", test_label=None, save=None):
     """Show attraction, no rule, avoidance and insufficient cells for every unit.
 
     Each item in ``specs`` names a rule, organ and grouping column. The full bar uses
@@ -641,12 +656,13 @@ def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
         else " + ".join(f"{grouping} score" for grouping in groupings)
     )
     figure_subtitle = (
-        f"Pairwise FOV states · {grouping_scope} · {' / '.join(stages)} · "
-        f"{eligibility_text} · bars include all FOVs"
+        f"Analysis: pairwise rule states · Unit: FOV · Score: {grouping_scope} · "
+        f"Stages: {' / '.join(stages)} · Eligibility: {eligibility_text.replace('eligibility ', '')} · "
+        "Bars: all FOVs"
     )
     if any(isinstance(value, dict) for value in (pair_results or {}).values()):
         figure_subtitle += (
-            "\npairwise FDR jointly corrected across C–M / M–S / C–S"
+            "\nFDR correction: all rules and C–M / M–S / C–S comparisons"
         )
 
     for ax, spec in zip(axes, specs):
@@ -657,7 +673,7 @@ def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
         _draw_state_bars(ax, *summary, stages, unit_label)
 
         panel = spec.get("panel", rule.replace(" -> ", " → "))
-        tests = _rule_test_text(spec, trend_results, pair_results)
+        tests = _rule_test_text(spec, trend_results, pair_results, test_label)
         detail = group_col.lower()
         if tests:
             detail += f" · {tests}"
@@ -686,10 +702,14 @@ def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
 
 
 def plot_rule_metric(metrics, eligibility, metadata, spec, stages, metric="Lift",
-                     reference=1, heading=None, unit_col="FOV", save=None):
+                     reference=1, heading=None, unit_col="FOV", state=None,
+                     trend_results=None, pair_results=None, save=None):
     """Show raw metric values only where an eligible FOV contains the rule."""
     rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
-    rows = metrics.loc[metrics["Clean_Rule"] == rule, [unit_col, metric]].copy()
+    columns = [unit_col, metric] + (["state"] if state is not None else [])
+    rows = metrics.loc[metrics["Clean_Rule"] == rule, columns].copy()
+    if state is not None:
+        rows = rows[rows["state"] == state]
     values_by_fov = rows.dropna(subset=[metric]).groupby(unit_col)[metric].mean()
     plot_rows, labels, medians = [], [], []
 
@@ -722,17 +742,34 @@ def plot_rule_metric(metrics, eligibility, metadata, spec, stages, metric="Lift"
         ax.axhline(reference, color=_ZERO, lw=1.1)
     ax.set_xticks(range(len(stages)), labels)
     ax.set_xlabel("")
-    ax.set_ylabel(f"{metric} where the rule is present")
-    ax.set_title(heading or f"{rule.replace(' -> ', ' → ')} — {metric}",
-                 fontsize=13.5, pad=30)
-    ax.text(
-        0.5, 1.02,
-        f"{organ} · {group_col.lower()} · dots are eligible FOVs with a significant rule · diamonds are medians",
-        transform=ax.transAxes, ha="center", va="bottom", fontsize=8.3, color="#706E68",
+    direction = {1: "attraction", -1: "avoidance"}.get(state)
+    label = f"{direction.title()} {metric}" if direction else metric
+    ax.set_ylabel(f"{label} in rule-bearing FOVs")
+    title = heading or f"{rule.replace(' -> ', ' → ')} — {label}"
+    tests = _rule_test_text(
+        spec, trend_results, pair_results,
+        f"{direction} {metric}" if direction else metric,
     )
+    threshold = eligibility.attrs.get("min_cells")
+    eligibility_text = (
+        f"eligibility ≥{threshold} cells/type" if threshold is not None
+        else "eligibility-controlled"
+    )
+    detail = (
+        f"Analysis: pairwise rules · Unit: FOV · Organ: {organ} · "
+        f"Score: {group_col.replace(' score', '').lower()} · Stages: {' / '.join(stages)} · "
+        f"Eligibility: {eligibility_text.replace('eligibility ', '')} · "
+        f"State: {direction or 'either'} · Metric: {metric}"
+        "\nDots: rule-bearing FOVs · Diamonds: stage medians"
+    )
+    if tests:
+        detail += f"\nTests: {tests}"
+    fig.suptitle(title, fontsize=13.5, y=0.99)
+    fig.text(0.5, 0.935, detail, ha="center", va="top", fontsize=8.3,
+             color="#706E68", linespacing=1.35)
     tidy_axes(ax, grid="y", hide=("top", "right"))
     ax.tick_params(length=0)
-    fig.subplots_adjust(top=0.79, bottom=0.19, left=0.12, right=0.98)
+    fig.subplots_adjust(top=0.72, bottom=0.19, left=0.12, right=0.98)
     _finish(fig, save)
 
 
@@ -769,7 +806,9 @@ def plot_cell_counts(cells, metadata, cell_type, organ, group_col, stages,
     ax.set_ylabel(f"{cell_type} cells per FOV")
     ax.set_title(heading, fontsize=14, pad=31)
     ax.text(0.5, 1.02,
-            f"FOV-level cell counts · eligibility threshold ≥{threshold} cells · dots are FOVs",
+            (f"Unit: FOV · Organ: {organ} · Score: {group_col.replace(' score', '').lower()} · "
+             f"Stages: {' / '.join(stages)} · Cell type: {cell_type} · "
+             f"Eligibility threshold: ≥{threshold} cells"),
             transform=ax.transAxes, ha="center", va="bottom", fontsize=8.6,
             color="#66645F")
     tidy_axes(ax, grid="y", hide=("top", "right"))
@@ -823,7 +862,9 @@ def plot_rule_with_cell_count(states, eligibility, cells, metadata, spec, cell_t
                bbox_to_anchor=(0.68, 0.885), fontsize=8.5)
     fig.suptitle(heading, fontsize=14, y=0.985)
     fig.text(0.5, 0.934,
-             f"{organ} · {group_col.lower()} · threshold ≥{threshold} cells/type",
+             (f"Analysis: pairwise rule states · Unit: FOV · Organ: {organ} · "
+              f"Score: {group_col.replace(' score', '').lower()} · "
+              f"Stages: {' / '.join(stages)} · Eligibility: ≥{threshold} cells/type"),
              ha="center", va="top", fontsize=8.5, color="#706E68")
     fig.subplots_adjust(top=0.72, wspace=0.27, left=0.08, right=0.98, bottom=0.15)
     _finish(fig, save)
@@ -846,12 +887,17 @@ def plot_time_coverage(metadata, day_col, group_col, groups, save=None):
     ax.set_yticks(range(len(organs)), organs)
     ax.set_xlabel("days after transplantation")
     ax.set_ylabel("")
-    fig.suptitle("Biopsy coverage across time", fontsize=13, y=0.98)
+    fig.suptitle("Biopsy coverage across time", fontsize=13, y=0.99)
+    fig.text(
+        0.5, 0.935,
+        f"Unit: biopsy · Time variable: {day_col.lower()} · Groups: {' / '.join(groups)} · Color: time group",
+        ha="center", va="top", fontsize=8.5, color="#706E68",
+    )
     ax.legend(title="post-transplant window", frameon=False, ncol=len(groups),
               loc="lower center", bbox_to_anchor=(0.5, 1.08))
     tidy_axes(ax, grid="x", hide=("top", "right", "left"))
     ax.tick_params(axis="y", length=0)
-    fig.subplots_adjust(top=0.72)
+    fig.subplots_adjust(top=0.67)
     _finish(fig, save)
 
 
@@ -902,8 +948,8 @@ def plot_temporal_screen(result, scope=None, fdr_threshold=0.05, name_top=8, sav
     ax.set_title(_titled("Temporal pair-rule screen", scope), fontsize=13, pad=30)
     ax.text(
         0, 1.015,
-        (f"Pairwise only · largest gap across <30, 30–100 and >100 days · "
-         f"biopsy-level · eligibility-controlled · {len(result)} tested rules"),
+        (f"Analysis: pairwise rules · Unit: biopsy · Groups: <30 / 30–100 / >100 days · "
+         f"Eligibility: cell-count controlled · Tested rules: {len(result)}"),
         transform=ax.transAxes, ha="left", va="bottom", fontsize=8.5,
         color="#706E68",
     )
@@ -947,7 +993,7 @@ def plot_time_profiles(values, metadata, rules, result, groups, group_col,
         ax.axhline(0, color=_ZERO, lw=1.2)
         ax.set_xticks(range(len(groups)), groups)
         ax.set_ylim(-118, 108)
-        ax.set_ylabel("net score among eligible FOVs (%)")
+        ax.set_ylabel("biopsy rule balance (pp)\nattraction FOVs − avoidance FOVs")
         evidence = f"temporal FDR {result.at[rule, 'fdr']:.3g}" if rule in result.index else "context rule"
         ax.set_title(f"{rule.replace(' -> ', ' → ')}\n{evidence}", fontsize=10, pad=8)
         tidy_axes(ax, grid="y", hide=("top", "right"))
@@ -959,9 +1005,10 @@ def plot_time_profiles(values, metadata, rules, result, groups, group_col,
     organ = parts[0] if parts and parts[0] else ""
     context = parts[1] if len(parts) > 1 else ""
     title = _titled("Biopsy-level temporal pair-rule profiles", organ)
-    subtitle = "Pairwise only · biopsy-level · eligible FOVs only"
+    subtitle = (f"Analysis: pairwise rules · Unit: biopsy · Groups: {' / '.join(groups)} · "
+                "FOVs: eligible only")
     if context:
-        subtitle = f"{context} · {subtitle}"
+        subtitle = f"Context: {context} · {subtitle}"
     fig.suptitle(title, fontsize=14, y=0.99)
     fig.text(0.5, 0.947, subtitle, ha="center", va="top", fontsize=8.5,
              color="#706E68")
@@ -1045,8 +1092,8 @@ def plot_pooled_time_contrasts(results, contrasts, organ, fdr_threshold=0.05,
     fig.suptitle(f"Pooled temporal contrasts — {organ}", fontsize=14, y=0.985)
     fig.text(
         0.5, 0.937,
-        (f"Pairwise only · biopsy-level · eligible FOVs only · "
-         f"joint FDR: 2 contrasts, {total_tests} tests"),
+        (f"Analysis: pairwise rules · Unit: biopsy · FOVs: eligible only · "
+         f"FDR correction: 2 contrasts / {total_tests} tests"),
         ha="center", va="top", fontsize=8.5, color="#706E68",
     )
     fig.subplots_adjust(left=0.09, right=0.985, top=0.84, hspace=0.64, wspace=0.07)
@@ -1103,7 +1150,9 @@ def plot_cell_share_trends(cells, metadata, cell_types, organ, group_col, stages
 
     for ax in axes.flat[len(cell_types):]:
         ax.set_visible(False)
-    subtitle = f"{organ} · {group_col.lower()} · each dot is one FOV · diamonds are means"
+    subtitle = (f"Unit: FOV · Organ: {organ} · "
+                f"Score: {group_col.replace(' score', '').lower()} · "
+                f"Stages: {' / '.join(stages)} · Diamonds: stage means")
     fig.suptitle(heading, fontsize=14, y=0.985)
     fig.text(0.5, 0.937, subtitle, ha="center", va="top", fontsize=8.5,
              color="#706E68")
@@ -1188,11 +1237,17 @@ def plot_rule_and_cell_changes(states, eligibility, cells, metadata, specs, stag
         ax.set_visible(False)
     threshold = eligibility.attrs.get("min_cells")
     threshold_text = f"eligibility ≥{threshold} cells/type" if threshold else "eligibility-controlled"
+    organs = " / ".join(dict.fromkeys(spec["organ"] for spec in specs))
+    scores = " / ".join(dict.fromkeys(
+        spec["score"].replace(" score", "").lower() for spec in specs
+    ))
     fig.suptitle(heading, fontsize=14, y=0.985)
     fig.text(
         0.5, 0.942,
-        ("Each line starts at 0 in Control · rule and cell shares use the same eligible FOVs · "
-         f"{threshold_text}"),
+        (f"Analysis: pairwise rule states and cell abundance · Unit: FOV · "
+         f"Organ: {organs} · Score: {scores} · Stages: {' / '.join(stages)} · Eligibility: "
+         f"{threshold_text.replace('eligibility ', '')} · Baseline: Control · "
+         "Rule and cell shares: same FOVs"),
         ha="center", va="top", fontsize=8.5, color="#706E68",
     )
     fig.subplots_adjust(top=0.79, hspace=0.58, wspace=0.26)
@@ -1254,8 +1309,10 @@ def plot_organ_rule_profiles(states, eligibility, metadata, rules, group_col, st
     fig.legend(handles=handles, ncol=len(organs), frameon=False, loc="upper center",
                bbox_to_anchor=(0.5, 0.89))
     threshold_text = f"eligibility ≥{threshold} cells/type" if threshold else "eligibility-controlled"
-    subtitle = (f"Pairwise FOV states · {group_col.lower()} · {threshold_text} · "
-                "FDR jointly corrected across stages and rules")
+    subtitle = (f"Analysis: pairwise rule states · Unit: FOV · Organs: {' / '.join(organs)} · "
+                f"Score: {group_col.replace(' score', '').lower()} · "
+                f"Stages: {' / '.join(stages)} · Eligibility: "
+                f"{threshold_text.replace('eligibility ', '')} · FDR correction: stages and rules")
     fig.suptitle(heading, fontsize=14, y=0.985)
     fig.text(0.5, 0.942, subtitle, ha="center", va="top", fontsize=8.5,
              color="#706E68")
@@ -1341,8 +1398,10 @@ def plot_organ_rule_context(states, eligibility, cells, metadata, rule, group_co
     threshold_text = f"eligibility ≥{threshold} cells/type" if threshold else "eligibility-controlled"
     fig.suptitle(heading, fontsize=14, y=0.99)
     fig.text(0.5, 0.950,
-             (f"Pairwise FOV states · {group_col.lower()} · {threshold_text} · "
-              "rule and cell abundance use the same eligible FOVs · labels show rule/eligible FOVs"),
+             (f"Analysis: pairwise rule states · Unit: FOV · Organs: {' / '.join(organs)} · "
+              f"Score: {group_col.replace(' score', '').lower()} · "
+              f"Stages: {' / '.join(stages)} · Eligibility: "
+              f"{threshold_text.replace('eligibility ', '')} · Rule and abundance: same FOVs"),
              ha="center", va="top", fontsize=8.5, color="#706E68")
     fig.subplots_adjust(top=0.82, left=0.09, right=0.98, bottom=0.08)
     _finish(fig, save)
@@ -1380,7 +1439,100 @@ def plot_organ_cell_shares(cells, metadata, cell_types, group_col, stages,
     fig.legend(handles=handles, ncol=len(organs), frameon=False, loc="upper center",
                bbox_to_anchor=(0.5, 0.89))
     fig.suptitle(heading, fontsize=14, y=0.985)
-    fig.text(0.5, 0.937, f"{group_col.lower()} · stage means from per-FOV cell percentages",
+    fig.text(0.5, 0.937,
+             (f"Unit: FOV · Organs: {' / '.join(organs)} · "
+              f"Score: {group_col.replace(' score', '').lower()} · "
+              f"Stages: {' / '.join(stages)} · Value: mean cell percentage"),
              ha="center", va="top", fontsize=8.5, color="#706E68")
     fig.subplots_adjust(top=0.76, hspace=0.50, wspace=0.25)
+    _finish(fig, save)
+
+
+def plot_pair_rule_fovs(examples, stages, cells, metadata, organ, score,
+                        metric="Lift", min_cells=20, selection=None, save=None):
+    """Full and pair-highlighted views of one representative FOV per stage."""
+    eligible_n = getattr(examples, "attrs", {}).get("eligible_n", {})
+    examples = pd.DataFrame(examples)
+    if examples.empty:
+        print("No representative FOVs to plot.")
+        return
+
+    colors = set_cell_colors(cells)
+    rule = examples["rule"].iat[0]
+    ant = list(examples["antecedent_cells"].iat[0])
+    con = list(examples["consequent_cells"].iat[0])
+    rows = examples.set_index("stage")
+    fig, axes = plt.subplots(
+        2, len(stages), figsize=(3.75 * len(stages), 8.3),
+        squeeze=False, facecolor="white",
+        gridspec_kw={"wspace": 0.18, "hspace": 0.40},
+    )
+
+    for column, stage in enumerate(stages):
+        if stage not in rows.index:
+            for ax in axes[:, column]:
+                ax.axis("off")
+            axes[0, column].set_title(stage, fontsize=10)
+            message = ("0 eligible FOVs" if eligible_n.get(stage) == 0
+                       else "No rule-bearing eligible FOV")
+            axes[0, column].text(
+                0.5, 0.5, message,
+                ha="center", va="center", color="#898781", fontsize=8.5,
+            )
+            continue
+
+        item = rows.loc[stage]
+        if isinstance(item, pd.DataFrame):
+            item = item.iloc[0]
+        fov = item["FOV"]
+        plot_fov(
+            fov, "", cells, metadata, ax=axes[0, column],
+            show_legend=False, cell_size=14,
+        )
+        biopsy = item.get("Biopsy", np.nan)
+        location = f"{stage} · {fov}\nFull FOV"
+        if pd.notna(biopsy):
+            location = f"{stage} · biopsy {biopsy}\n{fov} · full FOV"
+        axes[0, column].set_title(location, fontsize=9.5)
+
+        plot_fov(
+            fov, "", cells, metadata, target_ant_cells=ant,
+            target_cons_cells=con, ax=axes[1, column],
+            show_legend=False, cell_size=14,
+        )
+        state = {1: "Attraction", -1: "Avoidance"}[int(item["state"])]
+        details = f"{state} · {metric.lower()} {item['metric']:.3g}"
+        if pd.notna(item.get("fdr", np.nan)):
+            details += f" · FDR {item['fdr']:.3g}"
+        if pd.notna(item.get("biopsy_net", np.nan)):
+            details += f"\nbiopsy net {100 * item['biopsy_net']:+.0f}%"
+        axes[1, column].set_title(f"Highlighted pair\n{details}", fontsize=9.2)
+
+    cell_types = list(dict.fromkeys(ant + con))
+    handles = [
+        Line2D(
+            [0], [0], marker="o", linestyle="none",
+            markerfacecolor=colors.get(cell, "black"),
+            markeredgecolor="none", markersize=7, label=cell.replace("_", " "),
+        )
+        for cell in cell_types
+    ]
+    fig.legend(
+        handles=handles, title="Cell type", frameon=False,
+        ncol=len(handles), loc="lower center", bbox_to_anchor=(0.5, 0.006),
+        fontsize=8.5, title_fontsize=9,
+    )
+    fig.suptitle(
+        f"{organ} {rule.replace(' -> ', ' → ')} — representative FOVs",
+        fontsize=14, y=0.99,
+    )
+    selection_text = selection or "median-strength rule-bearing FOV in each stage"
+    fig.text(
+        0.5, 0.946,
+        (f"Unit: FOV · Organ: {organ} · Score: {score.replace(' score', '').lower()} · "
+         f"Stages: {' / '.join(stages)} · Eligibility: ≥{min_cells} cells/type · "
+         f"Selection: {selection_text}"),
+        ha="center", va="top", fontsize=8.5, color="#706E68",
+    )
+    fig.subplots_adjust(top=0.84, bottom=0.10, wspace=0.18, hspace=0.40)
     _finish(fig, save)

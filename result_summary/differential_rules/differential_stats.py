@@ -29,6 +29,52 @@ def state_tables(rules, cells, fovs, min_cells=20):
     return states, eligible, states.astype(float).where(eligible)
 
 
+def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
+                        groups, metric="Lift", state=None):
+    """Choose a typical rule occurrence in each group.
+
+    When ``state`` is omitted, use the group's dominant nonzero state. Otherwise,
+    choose only occurrences of the requested attraction (1) or avoidance (-1).
+    """
+    info = metadata.drop_duplicates("FOV").set_index("FOV")
+    allowed = eligible.columns[eligible.loc[rule]]
+    rows = rules[
+        (rules["Clean_Rule"] == rule) & rules["FOV"].isin(allowed)
+    ].copy()
+    rows["group"] = rows["FOV"].map(info[group_col])
+    rows = rows[rows["FOV"].map(info["Organ"]) == organ]
+
+    examples = []
+    eligible_n = {}
+    for group in groups:
+        group_fovs = info.index[(info["Organ"] == organ) & (info[group_col] == group)]
+        eligible_n[group] = int(eligible.loc[rule].reindex(group_fovs, fill_value=False).sum())
+        current = rows[rows["group"] == group]
+        if current.empty:
+            continue
+        chosen_state = state if state is not None else current["state"].value_counts().index[0]
+        candidates = current[current["state"] == chosen_state]
+        if candidates.empty:
+            continue
+        values = pd.to_numeric(candidates[metric], errors="coerce")
+        index = ((values - values.median()).abs().idxmin()
+                 if values.notna().any() else candidates.index[0])
+        item = candidates.loc[index]
+        examples.append({
+            "rule": rule,
+            "stage": group,
+            "FOV": item["FOV"],
+            "state": item["state"],
+            "metric": item[metric],
+            "fdr": item.get("Individual_FDR", np.nan),
+            "antecedent_cells": dh.base_items(item["Antecedents"]),
+            "consequent_cells": dh.base_items(item["Consequents"]),
+        })
+    result = pd.DataFrame(examples)
+    result.attrs["eligible_n"] = eligible_n
+    return result
+
+
 def units_for(metadata, organ, group_col, group, unit_col="FOV"):
     """Unique units from one organ and one group."""
     keep = (metadata["Organ"] == organ) & (metadata[group_col] == group)

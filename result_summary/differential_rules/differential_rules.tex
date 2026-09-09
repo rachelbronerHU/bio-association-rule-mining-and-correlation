@@ -35,6 +35,10 @@ using the same eligible FOVs.}
 FOV; the dashed line marks 20 cells. In the right stacked bars, each segment is the percentage
 of all stage FOVs classified as attraction, no rule, avoidance, or insufficient cells for #2.
 The printed net is attraction minus avoidance as a percentage of eligible FOVs.}
+\newcommand{\metricprevalencevalues}[2]{In the left plot, each dot is #1 Lift in one
+eligible rule-bearing FOV and each diamond is the stage median; the x-axis reports
+rule-bearing / eligible FOVs. In the right plot, the bars classify every FOV, while the
+printed tests compare the percentage of eligible FOVs containing #2.}
 
 \begin{document}
 
@@ -48,8 +52,11 @@ The printed net is attraction minus avoidance as a percentage of eligible FOVs.}
 
 \colorbox{soft}{\parbox{0.96\textwidth}{
 Each FOV-level pair is attraction ($+1$), avoidance ($-1$), or no significant rule ($0$).
-A rule is eligible only when both cell types have at least 20 cells. Net score is
+Eligibility is recalculated separately for every rule: an FOV is eligible for that rule only
+when both of its cell types have at least 20 cells. Net score is
 $100(N_{\rm attraction}-N_{\rm avoidance})/N_{\rm eligible}$.
+Lift is observed co-occurrence divided by its independence expectation: 1 is neutral,
+values above 1 support attraction, and values below 1 support avoidance.
 \hypertarget{test-guide}{\textbf{How to read the tests.}}
 ``Ordered FDR'' asks whether values move consistently from Control to Mild to Severe.
 C--M, M--S and C--S compare the named pair of stages. ``Organ FDR'' compares Colon with
@@ -60,8 +67,10 @@ windows; Control is shown only as context. Pooled temporal FDR jointly corrects 
 in two broader post-transplant comparisons.
 The discovery notebook screens every pair rule and draws a result when its best corrected
 test has FDR $\leq0.05$ and its largest stage gap is at least 20 percentage points; no rule
-name participates in selection. Rule--abundance plots use the same eligible FOVs for all
-three lines. These are spatial associations, not causal mechanisms.
+name participates in selection. The paper-alignment family screen is deliberately broader:
+it draws a detailed result when any corrected test has FDR $\leq0.10$ or the
+Control--Severe gap is at least 30 percentage points. Rule--abundance plots use the same
+eligible FOVs for all three lines. These are spatial associations, not causal mechanisms.
 }}
 
 % -----------------------------------------------------------------------------
@@ -81,6 +90,23 @@ cell loss.
   The x-axis reports FOVs with a significant rule / eligible FOVs. Eligibility requires at
   least 20 cells of both types. See the \hyperlink{test-guide}{test guide above}.}
   \label{fig:change-values}
+\end{figure}
+
+The stage-matched FOV examples make the same result spatially concrete: the upper row keeps
+the complete tissue context, while the lower row isolates Fibroblast and Muscle cells.
+These maps illustrate representative rule-bearing FOVs; the preceding aggregate plot is
+the evidence for the stage change.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.96\textwidth]{summary_downloads/tex_method_fibroblast_muscle_fovs.pdf}
+  \caption{Within each pathological stage, the displayed FOV is selected automatically:
+  first take the more frequent nonzero rule direction among eligible rule-bearing FOVs,
+  then choose the occurrence whose Lift is closest to that stage's median. The upper row
+  shows every cell; the lower row greys out cells outside the named pair. The state, Lift,
+  and mining FDR printed above the lower map belong to that individual FOV, not to the
+  between-stage test.}
+  \label{fig:pair-fov-values}
 \end{figure}
 
 The same Fibroblast $\rightarrow$ Muscle separation appears when the biopsies are regrouped
@@ -153,6 +179,17 @@ panel shows what remains measurable rather than confusing ineligibility with ``n
   \label{fig:count-state-values}
 \end{figure}
 
+The representative fields put the Paneth result back into tissue context: they show typical
+rule-bearing FOVs where Paneth cells remain measurable, rather than selecting the most
+extreme examples.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_paper_paneth_epithelial_fovs.pdf}
+  \caption{FOV selection and row meanings follow Figure~\ref{fig:pair-fov-values}; stages
+  without a rule-bearing eligible FOV are stated explicitly.}
+\end{figure}
+
 The reverse direction adds a spatial hypothesis within the small Paneth-rich remainder:
 Epithelial $\rightarrow$ Paneth rises with severity, but only 6 Severe FOVs are eligible, so
 the figure supports a selected surviving niche rather than the whole Severe group.
@@ -180,12 +217,26 @@ rule; this is a clear qualitative translation, not a Control-to-disease signific
   Endocrine $\rightarrow$ Epithelial.}
 \end{figure}
 
-The atlas also reports a ``prominent reduction in immunoglobulin A--secreting plasma cells.''
-Colon CD4T $\rightarrow$ Plasma falls from a clearly attractive Control context toward
-neutrality in disease, while the abundance lines show how much of that shift accompanies
-the changing cell populations.
+The tissue maps make the limitation visible as well as the signal: Control has no eligible
+Endocrine field, while the displayed disease examples are typical among the measurable
+rule-bearing FOVs.
 
-\evidence{Moderate}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_paper_endocrine_epithelial_fovs.pdf}
+  \caption{Selection follows Figure~\ref{fig:pair-fov-values}; ``0 eligible FOVs'' means
+  that fewer than 20 cells of at least one required type were available in every FOV of
+  that stage.}
+\end{figure}
+
+The atlas reports that ``CD4 T cells, plasma cells, and macrophages were spatially organized
+from the crypts to the tip of the villus.'' We therefore screened all six directions among
+these three cell types in both organs and both severity systems. Colon CD4T $\rightarrow$
+Plasma is the strongest translation: its net score falls from $+56\%$ in Control to $0\%$
+in clinically Severe disease (C--S FDR 0.029), with the same loss under pathological staging
+(best FDR 0.016).
+
+\evidence{Strong data signal; indirect alignment with the paper's zonation result}
 
 \begin{figure}[H]
   \centering
@@ -193,35 +244,110 @@ the changing cell populations.
   \caption{Values follow Figure~\ref{fig:change-values}; stages use clinical score in Colon.}
 \end{figure}
 
-CD8T $\rightarrow$ Plasma independently shows the same loss of an attractive Control
-context, making the plasma result broader than one T-cell antecedent; the Mild estimate is
-nevertheless based on very few eligible FOVs.
+Representative fields show the CD4T--Plasma context behind that aggregate change. They are
+chosen automatically near the median Lift of the dominant rule state and are illustrations,
+not additional statistical tests.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_paper_colon_cd4_plasma_fovs.pdf}
+  \caption{Selection and row meanings follow Figure~\ref{fig:pair-fov-values}; stages use
+  clinical score in Colon.}
+\end{figure}
+
+The reverse Plasma $\rightarrow$ CD4T direction also weakens, from $+48\%$ in Control to
+$+17\%$ in clinically Severe disease. Its best FDR is 0.174, so it supports bidirectional
+loss of the Control organization visually but is not independently significant.
 
 \evidence{Moderate-to-weak}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_colon_cd8_plasma.pdf}
-  \caption{Values follow Figure~\ref{fig:change-values}; stages use clinical score in Colon.}
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_colon_plasma_cd4.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; this reverse direction is tested
+  separately using clinical stages in Colon.}
 \end{figure}
 
-The atlas found CD8 enrichment only in a subset of patients. Duodenal CD8T $\rightarrow$
-Goblet changes strongly in the pathological grouping, so it is a relevant immune--epithelial
-signal, but this FOV-level plot cannot identify or validate the paper's patient subset.
+Macrophage $\rightarrow$ CD4T provides a second component of the same Colon pattern: the
+pathological net score falls from $+48\%$ to $+12\%$ (best FDR 0.073), with a compatible but
+less regular clinical result. This is suggestive rather than conventionally significant.
 
 \evidence{Moderate}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_duodenum_cd8_goblet.pdf}
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_colon_macrophage_cd4.pdf}
   \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
-  Duodenum, and these are FOV averages rather than patient-cluster values.}
+  Colon.}
 \end{figure}
 
-The current pairwise analysis does not recover the paper's patient-specific
-macrophage/neutrophil immune states, and no post-transplant time rule passes FDR 0.05. Those
-paper results are therefore kept outside the alignment claim rather than represented by a
-weak substitute.
+The representative fields show the macrophage--CD4T pair within complete Colon tissue and
+then in isolation, making the aggregate loss of attraction spatially inspectable.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_paper_colon_macrophage_cd4_fovs.pdf}
+  \caption{Selection and row meanings follow Figure~\ref{fig:pair-fov-values}; these maps do
+  not establish the paper's patient-level macrophage subgroup.}
+\end{figure}
+
+No Duodenal direction in the CD4T--Plasma--Macrophage family reached FDR 0.10 or a
+30-percentage-point Control--Severe change. This does not reproduce the paper's exact
+crypt--villus zonation, but it prevents a weak Duodenal substitute from being presented as
+alignment.
+
+The atlas also reports ``marked intrapatient heterogeneity in the prevalence of CD8 T cells
+and neutrophils in the vicinity of individual crypts and villi.'' In Duodenum,
+CD8T $\rightarrow$ Goblet becomes much more avoidant, from $-21\%$ in Control to $-75\%$
+in pathologically Severe disease (C--S FDR 0.013). This is a strong rule change, although
+Goblet is only a proxy for the paper's crypt-level epithelial context.
+
+\evidence{Strong data signal; indirect paper alignment}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_duodenum_cd8_goblet.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
+  Duodenum, and these are FOV-level rather than crypt- or patient-level values.}
+\end{figure}
+
+The corresponding fields reveal what the summary represents spatially while preserving the
+surrounding tissue; they do not identify the paper's CD8-enriched patient subset.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_paper_duodenum_cd8_goblet_fovs.pdf}
+  \caption{Selection and row meanings follow Figure~\ref{fig:pair-fov-values}; stages use
+  pathological score in Duodenum.}
+\end{figure}
+
+The reverse Goblet $\rightarrow$ CD8T rule changes independently from $-46\%$ to $-100\%$;
+its best corrected FDR is 0.056. The similar direction under clinical staging supports the
+pattern, but the corrected evidence remains borderline.
+
+\evidence{Moderate; borderline corrected evidence}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_paper_duodenum_goblet_cd8.pdf}
+  \caption{Values follow Figure~\ref{fig:change-values}; the reverse direction is calculated
+  independently using pathological stages in Duodenum.}
+\end{figure}
+
+Representative reverse-rule fields make that directional calculation inspectable rather
+than implying that the two arrows are interchangeable.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_paper_duodenum_goblet_cd8_fovs.pdf}
+  \caption{Selection and row meanings follow Figure~\ref{fig:pair-fov-values}.}
+\end{figure}
+
+The systematic screen found no meaningful severity change for CD8T $\leftrightarrow$
+Epithelial in either organ, and Colon CD8T $\leftrightarrow$ Goblet was nearly stable from
+Control to Severe. Those negative results remain in the notebook audit table but are not
+shown here as uninformative figures. Pair rules also do not recover the paper's patient-level
+macrophage/neutrophil clusters; that requires a separate patient-state analysis.
 
 % -----------------------------------------------------------------------------
 \section{New biologically interpretable findings}
@@ -252,6 +378,17 @@ suggests altered immune access to the epithelial compartment rather than composi
   \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_duodenum_cd4_goblet_path.pdf}
   \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
   Duodenum.}
+\end{figure}
+
+Representative FOVs show the tissue context behind that CD4T $\rightarrow$ Goblet summary,
+with the full field directly above the highlighted cell pair in each pathological stage;
+they are illustrations of the automatically detected trend, not separately selected proof.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.96\textwidth]{summary_downloads/tex_new_duodenum_cd4_goblet_fovs.pdf}
+  \caption{FOV selection and row meanings follow Figure~\ref{fig:pair-fov-values}; the state,
+  Lift and rule-level FDR printed above each highlighted map belong to that individual FOV.}
 \end{figure}
 
 The clinical grouping independently preserves the same CD4T $\rightarrow$ Goblet direction,
@@ -372,17 +509,175 @@ FOVs contain enough of both cell types.
   Duodenum and only jointly eligible FOVs contribute.}
 \end{figure}
 
-Goblet $\rightarrow$ Mesenchymal\_VIM has a large ordered change and therefore deserves
-follow-up as an epithelial--mesenchymal hypothesis, but its endpoint estimates use only
-three and four eligible FOVs and no individual stage contrast passes FDR 0.05.
+\subsection*{Metric strength compared with rule prevalence}
 
-\evidence{Exploratory}
+Prevalence and Lift expose different changes: prevalence asks how often a rule is found
+among eligible FOVs, whereas Lift measures its strength only where it is found. The screens
+below first rank every rule by its largest observed stage gap; rule names are not chosen in
+advance. For avoidance, a smaller Lift means stronger spatial separation.
+
+Colon SMV $\rightarrow$ Endothelial is the clearest attractive-strength result: pathological
+median Lift falls from about 3.4 in Control to 2.2 in Severe disease (ordered Lift FDR 0.015),
+while attractive prevalence changes much less. The method therefore detects weakening of a
+persisting spatial relationship, not merely disappearance of the rule.
+
+\evidence{Strong}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.92\textwidth]{summary_downloads/tex_new_goblet_mesenchymal_vim.pdf}
-  \caption{Values follow Figure~\ref{fig:change-values}; stages use pathological score in
-  Duodenum, ordered-trend FDR is 0.027, and eligible FOV counts are shown.}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_colon_smv_endothelial_path_metric.pdf}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_colon_smv_endothelial_path_prevalence.pdf}
+  \caption{\metricprevalencevalues{attraction}{an attractive rule} Stages use pathological
+  score in Colon. Lift FDR and attraction-prevalence FDR are separate corrected tests; see
+  the \hyperlink{test-guide}{test guide above}.}
+  \label{fig:metric-prevalence-values}
+\end{figure}
+
+The same rule is again the largest attractive-Lift gap when Colon biopsies are regrouped by
+clinical score. Its corrected evidence is weaker (best Lift FDR 0.065), but the independent
+grouping preserves the loss of strength.
+
+\evidence{Moderate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_colon_smv_endothelial_clinical_metric.pdf}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_colon_smv_endothelial_clinical_prevalence.pdf}
+  \caption{Values follow Figure~\ref{fig:metric-prevalence-values}; stages now use clinical
+  score in Colon.}
+\end{figure}
+
+Representative pathological fields make the attractive SMV--Endothelial relation directly
+inspectable without selecting visually extreme FOVs.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_metric_colon_smv_endothelial_path_fovs.pdf}
+  \caption{Within each stage, only attractive occurrences are considered and the FOV whose
+  Lift is closest to that stage's median is shown. Row meanings follow
+  Figure~\ref{fig:pair-fov-values}.}
+  \label{fig:state-specific-fovs}
+\end{figure}
+
+Colon Plasma $\rightarrow$ Goblet shows the converse pattern for a negative rule: avoidance
+becomes much stronger, with median Lift falling from about 0.73 to 0.22 (Control--Severe Lift
+FDR 0.008), even as avoidance prevalence changes only modestly. Thus a prevalence-only
+analysis would miss the strongest part of this result.
+
+\evidence{Strong}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_colon_plasma_goblet_metric.pdf}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_colon_plasma_goblet_prevalence.pdf}
+  \caption{Values follow Figure~\ref{fig:metric-prevalence-values}, now for avoidance under
+  pathological staging in Colon; lower Lift means stronger avoidance.}
+\end{figure}
+
+The corresponding avoidance-only representative fields show the spatial separation behind
+those aggregate Lift values while retaining the full tissue context.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_metric_colon_plasma_goblet_fovs.pdf}
+  \caption{State-specific selection follows Figure~\ref{fig:state-specific-fovs}; only
+  avoidance occurrences are eligible for display.}
+\end{figure}
+
+Duodenal Muscle $\rightarrow$ CD4T changes in both dimensions: avoidance prevalence rises
+from 22\% in Control to 62\% in Mild and 58\% in Severe, while median Lift falls from about
+0.73 to 0.53--0.58. The largest corrected Lift comparison is borderline (FDR 0.095), so this
+is a coherent but exploratory immune--muscle lead.
+
+\evidence{Moderate; borderline corrected evidence}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_duodenum_muscle_cd4_metric.pdf}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_metric_duodenum_muscle_cd4_prevalence.pdf}
+  \caption{Values follow Figure~\ref{fig:metric-prevalence-values}; stages use pathological
+  score in Duodenum and lower Lift means stronger avoidance.}
+\end{figure}
+
+Representative avoidance fields show that the numerical change corresponds to visible
+Muscle--CD4T spatial examples, but they do not establish a cell-interaction mechanism.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_metric_duodenum_muscle_cd4_fovs.pdf}
+  \caption{State-specific selection follows Figure~\ref{fig:state-specific-fovs}.}
+\end{figure}
+
+Duodenal Goblet $\rightarrow$ Mesenchymal\_VIM is selected by avoidance prevalence rather
+than Lift: prevalence rises from 0/3 eligible Control FOVs to 19/46 Mild and 3/4 Severe FOVs
+(ordered prevalence FDR 0.014), but avoidance Lift does not strengthen in parallel. This is
+an interesting epithelial--mesenchymal lead whose tiny endpoint denominators remain visible.
+
+\evidence{Exploratory; strong trend test but sparse endpoints}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_negative_duodenum_goblet_mesenchymal_metric.pdf}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_negative_duodenum_goblet_mesenchymal_prevalence.pdf}
+  \caption{Values follow Figure~\ref{fig:metric-prevalence-values}; selection was based on
+  the largest avoidance-prevalence gap, not on the named cell pair or its Lift.}
+\end{figure}
+
+The state-specific fields show why this result must remain qualified: Control has no
+avoidance occurrence to display and the Severe estimate rests on three avoidance FOVs.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_negative_duodenum_goblet_mesenchymal_fovs.pdf}
+  \caption{State-specific selection follows Figure~\ref{fig:state-specific-fovs}; a missing
+  stage means no eligible FOV contained the requested avoidance rule.}
+\end{figure}
+
+The largest Colon pathological avoidance-prevalence gap is Goblet $\rightarrow$ CD3T:
+avoidance is found in 8/12 Control and 5/5 Mild eligible FOVs but 0/6 Severe FOVs
+(Mild--Severe FDR 0.044). Its size is striking, yet the small denominators and non-monotonic
+trajectory make it a follow-up lead rather than a stable severity rule.
+
+\evidence{Exploratory; corrected pairwise signal with small groups}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_negative_colon_goblet_cd3t_metric.pdf}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_negative_colon_goblet_cd3t_prevalence.pdf}
+  \caption{Values follow Figure~\ref{fig:metric-prevalence-values}; the Severe metric panel
+  is empty because no eligible Severe FOV contains this avoidance rule.}
+\end{figure}
+
+The FOV sequence makes the same limitation concrete: avoidance examples exist in Control
+and Mild, but no representative Severe avoidance field can be selected.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_negative_colon_goblet_cd3t_fovs.pdf}
+  \caption{State-specific selection follows Figure~\ref{fig:state-specific-fovs}.}
+\end{figure}
+
+Under clinical staging, Colon Treg $\rightarrow$ Goblet has the largest avoidance-prevalence
+gap (1/7, 4/4 and 0/9 eligible FOVs), but the pattern is non-monotonic and driven by only four
+Mild FOVs. It is retained because it is an immune--epithelial lead, not because it is robust.
+
+\evidence{Weak but interesting; Mild--Severe FDR 0.044}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_negative_colon_treg_goblet_metric.pdf}
+  \includegraphics[width=0.49\textwidth]{summary_downloads/tex_negative_colon_treg_goblet_prevalence.pdf}
+  \caption{Values follow Figure~\ref{fig:metric-prevalence-values}; selection was by the
+  largest clinical avoidance-prevalence gap in Colon.}
+\end{figure}
+
+Representative fields exist only for Control and Mild, visibly separating the observed
+examples from the absent Severe avoidance state.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_negative_colon_treg_goblet_fovs.pdf}
+  \caption{State-specific selection follows Figure~\ref{fig:state-specific-fovs}.}
 \end{figure}
 
 \subsection*{Exploratory changes after transplantation}
@@ -404,6 +699,21 @@ shifts from a mildly avoidant Control context toward markedly stronger avoidance
   \label{fig:time-values}
 \end{figure}
 
+The corresponding tissue maps show typical rule-bearing biopsies across the same windows;
+they make the CD8T--Goblet context visible, but remain illustrative and do not change the
+non-significant temporal FDR of 0.335.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_new_time_colon_cd8_goblet_fovs.pdf}
+  \caption{For each displayed group, selection first finds the rule-bearing biopsy whose
+  biopsy net score is closest to the mean across all eligible biopsies in that group. Inside
+  it, the more frequent nonzero rule direction is retained and the occurrence nearest its
+  median Lift is shown. The upper row contains every cell and the lower row highlights the
+  named pair. Control is contextual and is not included in the temporal test.}
+  \label{fig:time-fov-values}
+\end{figure}
+
 Colon SMV $\rightarrow$ Endothelial loses much of its attractive net score after 100 days;
 the trajectory is large and vascularly relevant, but remains exploratory because temporal
 FDR is 0.362.
@@ -415,6 +725,16 @@ FDR is 0.362.
   \includegraphics[width=0.82\textwidth]{summary_downloads/tex_new_time_colon_smv_endothelial.pdf}
   \caption{Values follow Figure~\ref{fig:time-values}; this is a separately tested directional
   Colon rule.}
+\end{figure}
+
+The representative biopsy/FOV sequence shows the vascular cell pair in its tissue setting;
+it is useful spatial context, but it does not make the temporal FDR of 0.362 significant.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_new_time_colon_smv_endothelial_fovs.pdf}
+  \caption{Selection and row meanings follow Figure~\ref{fig:time-fov-values}; the individual
+  FOV's state, Lift and mining FDR are printed above each highlighted map.}
 \end{figure}
 
 Colon SMV $\rightarrow$ Goblet becomes more avoidant again after an early relaxation,
@@ -430,6 +750,16 @@ follow-up lead rather than confirmed evidence.
   eligibility threshold are used.}
 \end{figure}
 
+These automatically selected maps show where the SMV--Goblet examples occur within typical
+rule-bearing biopsies; they illustrate the proposed late change but do not overcome temporal
+FDR 0.362.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_new_time_colon_smv_goblet_fovs.pdf}
+  \caption{Selection and row meanings follow Figure~\ref{fig:time-fov-values}.}
+\end{figure}
+
 In Duodenum, Plasma\_CD38 $\rightarrow$ Fibroblast is the closest pooled temporal lead:
 the $<30$ versus $\geq30$-day comparison has a 34-percentage-point gap and joint FDR 0.086,
 which is suggestive but does not pass 0.05.
@@ -443,6 +773,17 @@ which is suggestive but does not pass 0.05.
   two named groups in biopsy-level net score, in percentage points; the y-axis is joint FDR.
   The lower panel contains the Plasma\_CD38 $\rightarrow$ Fibroblast result. FDR is corrected
   jointly across both pooled contrasts and every tested Duodenal pair rule.}
+\end{figure}
+
+The stage-resolved FOV maps provide a concrete view of the Plasma\_CD38--Fibroblast fields
+behind this pooled lead; they remain illustrative because joint FDR 0.086 does not pass 0.05.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\textwidth]{summary_downloads/tex_new_time_duodenum_plasma_cd38_fibroblast_fovs.pdf}
+  \caption{Selection and row meanings follow Figure~\ref{fig:time-fov-values}; the maps retain
+  the original four display groups even though the statistical lead pools 30--100 and
+  $>100$ days into the $\geq30$-day side of the comparison.}
 \end{figure}
 
 \end{document}

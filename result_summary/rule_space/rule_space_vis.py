@@ -141,14 +141,60 @@ def plot_patient_spread(spread, save=None):
     _finish(fig, save)
 
 
+def plot_group_spread(spread, label, scope=None, subtitle=None, save=None):
+    """How tightly each group's own FOVs sit together, one bar per group.
+
+    A bar left of 1.0 means those FOVs are more alike than FOVs in general here. The
+    number on each bar is how many FOVs it rests on.
+    """
+    if spread.empty:
+        print("No data to plot.")
+        return
+
+    values = spread["spread"].to_numpy(dtype=float)
+    names = [str(name) for name in spread.index]
+    y = np.arange(len(values))
+
+    fig, ax = plt.subplots(figsize=(7.4, 0.55 * len(values) + 2.2))
+    ax.barh(y, values, height=0.6, color="#4477aa", alpha=0.9,
+            edgecolor="white", linewidth=0.8, zorder=3)
+    ax.axvline(1.0, color="0.45", ls="--", lw=1.1, zorder=4)
+
+    for position, value, count in zip(y, values, spread["n_FOV"]):
+        ax.annotate(f"{value:.2f}  ({int(count)} FOVs)", xy=(value, position),
+                    xytext=(5, 0), textcoords="offset points",
+                    va="center", fontsize=9, color="0.3")
+
+    ax.set_yticks(y, names)
+    ax.invert_yaxis()                          # tightest group at the top
+    ax.set_xlim(0, max(1.05, values.max() * 1.28))
+    ax.set_xlabel(f"how far apart one {label.lower()} group's FOVs are, "
+                  "next to any two FOVs", fontsize=10)
+    ax.set_title(_titled(f"Do the FOVs of one {label.lower()} sit together?", scope),
+                 fontsize=11)
+    if subtitle:
+        ax.annotate(subtitle, xy=(0, 1), xytext=(0, 22), xycoords="axes fraction",
+                    textcoords="offset points", fontsize=8, color="0.35")
+    ax.annotate("same as any two FOVs", xy=(1.0, len(values) - 0.4), xytext=(5, 0),
+                textcoords="offset points", fontsize=8, color="0.45")
+    ax.grid(axis="x", color="0.92", lw=0.8)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    plt.tight_layout()
+    _finish(fig, save)
+
+
 def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
-                     label_fovs=None, box_fovs=None, x="PC1", y="PC2", fov_col="FOV",
+                     label_fovs=None, label_colors=None, box_fovs=None,
+                     x="PC1", y="PC2", fov_col="FOV",
                      max_legend=12, save=None, scope=None, ax=None):
     """One dot per FOV, colored by `color_by`. The static version for the write-up.
 
     `label_fovs` : the FOVs to name on the plot — either a list, or the
         {FOV: description} dict that `get_representative_fovs_for_pc` returns.
         Names are pushed apart with leader lines so they never overlap.
+    `label_colors` : {FOV: color} for those names and their rings. Pass the same
+        mapping the maps use and one corner reads as one colour across both figures.
     `max_legend` : with more colors than this (e.g. one per patient) the legend
         would be unreadable, so it is replaced by a count in the title.
 
@@ -165,7 +211,7 @@ def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
 
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=(9, 7))
+        fig, ax = plt.subplots(figsize=(7.5, 5.8))
     else:
         fig = ax.figure
 
@@ -211,13 +257,15 @@ def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
             if row.empty:
                 continue
             row = row.iloc[0]
+            tone = (label_colors or {}).get(fov, "black")
             ax.scatter([row[x]], [row[y]], s=110, facecolors="none",
-                       edgecolor="black", linewidth=1.3, zorder=5)
+                       edgecolor=tone, linewidth=1.3, zorder=5)
             # Set off the dot from the start: adjustText is not always installed, and
             # a name printed on top of its own ring is the harder one to read.
             texts.append(ax.annotate(str(fov), (row[x], row[y]), xytext=(13, 7),
                                      textcoords="offset points", fontsize=8, zorder=6,
-                                     ha="left", va="center"))
+                                     ha="left", va="center", color=tone,
+                                     fontweight="bold" if label_colors else "normal"))
         if texts:
             try:
                 from adjustText import adjust_text
@@ -250,6 +298,43 @@ def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
     if own:
         plt.tight_layout()
         _finish(fig, save)
+
+
+def plot_pca_panel(rows, color_by, title=None, subtitle=None, save=None):
+    """Several PCAs in one figure, so they can be read against each other.
+
+    `rows` : lists of (coords, variance, label) - one list per row of the panel. A
+        short row leaves its remaining slots blank. The label is what that tile was
+        built from, and is the only thing that differs between them.
+    `subtitle` : the settings, carried once for the whole panel.
+    """
+    ncols = max(len(row) for row in rows)
+    fig, axes = plt.subplots(len(rows), ncols, squeeze=False,
+                             figsize=(6 * ncols, 5 * len(rows)))
+    for axes_row, tiles in zip(axes, rows):
+        for ax, (coords, variance, label) in zip(axes_row, tiles):
+            plot_pca_scatter(coords, variance, color_by=color_by, scope=label, ax=ax)
+        for ax in axes_row[len(tiles):]:
+            ax.axis("off")
+
+    for ax in axes.flat[1:]:            # the same colours everywhere - one legend is enough
+        if ax.get_legend():
+            ax.get_legend().remove()
+
+    # Offsets in inches, not figure fractions: a panel three rows tall is three times
+    # the height, and a fraction would put the title three times further from the top.
+    height = fig.get_size_inches()[1]
+    lines = 0 if not subtitle else subtitle.count("\n") + 1
+    title_y = 1 - 0.20 / height
+    subtitle_y = 1 - 0.46 / height
+    strip = 1 - (0.52 + 0.20 * lines) / height
+
+    fig.tight_layout(rect=(0, 0, 1, strip))
+    fig.suptitle(title, fontsize=15, y=title_y, va="top")
+    if subtitle:
+        fig.text(0.5, subtitle_y, subtitle, ha="center", va="top",
+                 fontsize=9.5, color="0.35", linespacing=1.6)
+    _finish(fig, save)
 
 
 def plot_pca_loadings(weights, feature_names, component_idx=0, subtitle=None,
@@ -426,3 +511,226 @@ def plot_composition_heatmap(z, difference, labels, cells, scope, save=None):
     fig.suptitle(f"Every cell type, every FOV   {scope}", fontsize=13)
     save_figure(fig, save)
     plt.show()
+
+
+# ---------------------------------------------------------------------------
+# 6. The write-up's summary figures: one per question that spans every scope
+# ---------------------------------------------------------------------------
+
+# Organ hues, the same ones the organ-coloured scatters use everywhere else in the
+# summary, so blue always means colon. Checked as a pair for colour blindness. The weak
+# all-FOV scope is drawn in ink instead: it is context for the other two, not a third
+# category of its own.
+ORGAN_HUES = {"Colon": "#1f77b4", "Duodenum": "#ff7f0e"}
+CONTEXT_INK = "#52514e"
+
+# Who is ahead: two hues with a grey middle for "too close to call".
+AHEAD = "#1B9AAA"       # the rules are ahead
+BEHIND = "#A11D5B"      # the cell counts are ahead
+LEVEL = "#b8b7b1"       # the two are within 0.02, which is not a result
+_QUIET_GRID = "#e8e7e1"
+
+
+def _bare(ax, grid_axis="both"):
+    """Recessive furniture, so the marks are the only thing with weight."""
+    ax.grid(axis=grid_axis, color=_QUIET_GRID, lw=0.8)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(colors=CONTEXT_INK, labelsize=9)
+
+
+def plot_threshold_sweep(table, organs, contrasts, save=None):
+    """Separation against how common a rule must be, one line per scope.
+
+    table     : thresholds (index, as shares) x scope names (columns)
+    organs    : {scope: organ} for the hue; a scope missing from it is drawn as context
+    contrasts : {scope: label} naming the stage contrast, which picks the line style
+
+    Colour carries the organ and the dash carries the contrast, so five lines need two
+    hues rather than five. Every line is labelled at its own peak, which is the thing
+    the figure exists to show.
+    """
+    if table.empty:
+        print("No data to plot.")
+        return
+
+    x = table.index.to_numpy(dtype=float) * 100
+    styles = {label: style for label, style in
+              zip(dict.fromkeys(contrasts.values()), ["-", "--", ":"])}
+
+    fig, ax = plt.subplots(figsize=(9.5, 5.6))
+    ax.axhline(0, color="#8d8c85", lw=1.0, zorder=1)
+
+    for scope in table.columns:
+        y = table[scope].to_numpy(dtype=float)
+        organ = organs.get(scope)
+        color = ORGAN_HUES.get(organ, CONTEXT_INK)
+        ax.plot(x, y, styles.get(contrasts.get(scope), "-"), color=color,
+                lw=2.0, marker="o", markersize=6, markerfacecolor="white",
+                markeredgewidth=1.6, zorder=3)
+
+        # Name each line at its best threshold: that peak is the whole point. A peak at
+        # either end is labelled inwards, so the text stays on the page.
+        best = int(np.nanargmax(y))
+        side = "left" if best == 0 else ("right" if best == len(x) - 1 else "center")
+        nudge = {"left": 8, "right": -8, "center": 0}[side]
+        ax.annotate(f"{scope}   {y[best]:+.2f}", xy=(x[best], y[best]),
+                    xytext=(nudge, 11), textcoords="offset points", ha=side,
+                    fontsize=8.5, color=color, fontweight="bold", zorder=6)
+        ax.scatter([x[best]], [y[best]], s=100, facecolors="none", edgecolor=color,
+                   linewidth=2.0, zorder=5)
+
+    ax.set_xticks(x, [f"{v:g}%" for v in x])
+    ax.set_xlabel("a rule must fire in more than this share of the FOVs",
+                  fontsize=10, color=CONTEXT_INK)
+    ax.set_ylabel("separation", fontsize=10, color=CONTEXT_INK)
+    ax.set_title("Rare rules tell the organs apart, common rules tell the stages apart",
+                 fontsize=12.5, color="#252525")
+
+    handles = [plt.Line2D([], [], color=ORGAN_HUES[organ], lw=2.2, label=organ)
+               for organ in ORGAN_HUES]
+    handles += [plt.Line2D([], [], color=CONTEXT_INK, lw=1.8, ls=style, label=label)
+                for label, style in styles.items()]
+    # Below the plot: the peak labels own the space inside it.
+    ax.legend(handles=handles, fontsize=8.5, frameon=False, ncol=5,
+              loc="lower center", bbox_to_anchor=(0.5, 0.005),
+              bbox_transform=fig.transFigure)
+    _bare(ax, grid_axis="y")
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    _finish(fig, save)
+
+
+def plot_rules_against_counts(table, save=None):
+    """Each scope's rule PCA beside a PCA of cell composition, one row per scope.
+
+    table : scope (index) x ['rules', 'counts']
+
+    A filled dot is the rules and a hollow dot the cell counts, so which is which never
+    rests on colour. The bar between them is coloured by who is ahead, and greyed where
+    the two are within 0.02 of each other.
+    """
+    if table.empty:
+        print("No data to plot.")
+        return
+
+    rows = table.iloc[::-1]                      # first row of the table ends up on top
+    y = np.arange(len(rows))
+    rules = rows["rules"].to_numpy(dtype=float)
+    counts = rows["counts"].to_numpy(dtype=float)
+
+    fig, ax = plt.subplots(figsize=(9.5, 0.56 * len(rows) + 2.2))
+    ax.axvline(0, color="#8d8c85", lw=1.0, zorder=1)
+
+    for i, (mine, theirs) in enumerate(zip(rules, counts)):
+        gap = mine - theirs
+        tone = LEVEL if abs(gap) < 0.02 else (AHEAD if gap > 0 else BEHIND)
+        ax.plot([mine, theirs], [i, i], color=tone, lw=3.6,
+                solid_capstyle="round", zorder=2)
+        ax.scatter([theirs], [i], s=80, facecolors="white", edgecolor=CONTEXT_INK,
+                   linewidth=1.7, zorder=4)
+        ax.scatter([mine], [i], s=80, color=CONTEXT_INK, zorder=5)
+        ax.annotate(f"{mine:+.2f}  vs  {theirs:+.2f}", xy=(max(mine, theirs), i),
+                    xytext=(11, 0), textcoords="offset points", va="center",
+                    fontsize=8, color=CONTEXT_INK)
+
+    ax.set_yticks(y, rows.index, fontsize=9.5)
+    low, high = min(rules.min(), counts.min()), max(rules.max(), counts.max())
+    ax.set_xlim(low - 0.04, high + 0.12)      # room for the value beside the longest row
+    ax.set_xlabel("separation", fontsize=10, color=CONTEXT_INK)
+    ax.set_title("The rules against counting the cells, over the same FOVs",
+                 fontsize=12.5, color="#252525")
+
+    dot = dict(marker="o", color="none", markeredgecolor=CONTEXT_INK, markersize=9)
+    ax.legend(handles=[plt.Line2D([], [], markerfacecolor=CONTEXT_INK, label="rules", **dot),
+                       plt.Line2D([], [], markerfacecolor="white", label="cell counts", **dot),
+                       plt.Line2D([], [], color=AHEAD, lw=3.6, label="rules ahead"),
+                       plt.Line2D([], [], color=BEHIND, lw=3.6, label="counts ahead"),
+                       plt.Line2D([], [], color=LEVEL, lw=3.6, label="level")],
+              fontsize=8.5, frameon=False, ncol=5, loc="lower center",
+              bbox_to_anchor=(0.5, -0.02), bbox_transform=fig.transFigure)
+    _bare(ax, grid_axis="x")
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    _finish(fig, save)
+
+
+def plot_sign_slope(table, organs, save=None):
+    """What keeping the avoidance rules does to each scope, one slope per scope.
+
+    table  : scope (index) x ['attraction', 'both']
+    organs : {scope: organ} for the hue
+
+    Two positions and a line between them, so the direction of the change is the shape
+    of the mark rather than something to read off an axis.
+    """
+    if table.empty:
+        print("No data to plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(7.8, 5.8))
+    ax.axhline(0, color="#8d8c85", lw=1.0, zorder=1)
+
+    for scope in table.index:
+        start = float(table.at[scope, "attraction"])
+        end = float(table.at[scope, "both"])
+        color = ORGAN_HUES.get(organs.get(scope), CONTEXT_INK)
+        ax.plot([0, 1], [start, end], color=color, lw=2.0, marker="o", markersize=7,
+                markerfacecolor="white", markeredgewidth=1.6, zorder=3)
+        ax.annotate(f"{scope}  {end:+.2f}", xy=(1, end), xytext=(11, 0),
+                    textcoords="offset points", va="center", fontsize=8.5,
+                    color=color, fontweight="bold")
+        ax.annotate(f"{start:+.2f}", xy=(0, start), xytext=(-11, 0),
+                    textcoords="offset points", va="center", ha="right",
+                    fontsize=8, color=CONTEXT_INK)
+
+    ax.set_xlim(-0.45, 1.75)
+    ax.set_xticks([0, 1], ["attraction rules\nonly", "attraction and\navoidance"],
+                  fontsize=9.5)
+    ax.set_ylabel("separation", fontsize=10, color=CONTEXT_INK)
+    ax.set_title("Avoidance rules pay in the duodenum and cost a little in the colon",
+                 fontsize=11.5, color="#252525")
+    ax.legend(handles=[plt.Line2D([], [], color=ORGAN_HUES[organ], lw=2.2, label=organ)
+                       for organ in ORGAN_HUES],
+              fontsize=8.5, frameon=False, loc="upper left")
+    _bare(ax, grid_axis="y")
+    ax.spines["bottom"].set_visible(False)
+    ax.tick_params(bottom=False)
+    fig.tight_layout()
+    _finish(fig, save)
+
+
+def plot_variance_bars(table, save=None):
+    """How much of each scope its first two components carry, and what it was built on.
+
+    table : scope (index) x ['PC1', 'PC2', 'FOVs', 'rules']
+
+    One hue in two steps, because the two components measure the same thing. The counts
+    ride along as text so the bar stays the only mark.
+    """
+    if table.empty:
+        print("No data to plot.")
+        return
+
+    rows = table.iloc[::-1]
+    y = np.arange(len(rows))
+    pc1 = rows["PC1"].to_numpy(dtype=float)
+    pc2 = rows["PC2"].to_numpy(dtype=float)
+
+    fig, ax = plt.subplots(figsize=(9.5, 0.52 * len(rows) + 2.0))
+    ax.barh(y, pc1, height=0.6, color="#2878D0", zorder=3, label="PC1")
+    # A hair of surface between the segments, so the split stays visible.
+    ax.barh(y, pc2, height=0.6, left=pc1 + 0.22, color="#A8C8EC", zorder=3, label="PC2")
+    for i, (first, second, fovs, rules) in enumerate(
+            zip(pc1, pc2, rows["FOVs"], rows["rules"])):
+        ax.annotate(f"{first + second:.1f}%      {int(fovs)} FOVs, {int(rules)} rules",
+                    xy=(first + second + 1.1, i), va="center", fontsize=8.5,
+                    color=CONTEXT_INK)
+
+    ax.set_yticks(y, rows.index, fontsize=9.5)
+    ax.set_xlim(0, (pc1 + pc2).max() * 2.15)
+    ax.set_xlabel("share of all the variation the first two components carry (%)",
+                  fontsize=10, color=CONTEXT_INK)
+    ax.set_title("How thin each picture is", fontsize=12.5, color="#252525")
+    ax.legend(fontsize=8.5, frameon=False, ncol=2, loc="lower right")
+    _bare(ax, grid_axis="x")
+    fig.tight_layout()
+    _finish(fig, save)

@@ -18,13 +18,12 @@ A notebook then reads:
 Nothing here draws: the PCA figures live in rule_space_vis, the shared ones
 in vis_helper.
 """
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
+from sklearn.metrics import silhouette_samples
 from sklearn.preprocessing import StandardScaler
 
 import data_helper as dh
@@ -53,6 +52,86 @@ SCORE_COL         = 'Pathological score'
 TOP_LOADINGS      = 8           # how many rules to name at each end of a component
 N_COLORED         = 2           # how many top cell types to colour a PCA by
 
+# The floor the mining used: a rule was only kept where a cell type reached this many
+# cells and this share of the FOV. Set it to match the run these rules came from - only
+# `presence_matrices` reads it, to ask which rules could have been found at all.
+MIN_PATCHES       = 15          # cells of a type an FOV needs
+MIN_SUPPORT       = 0.01        # and that share of the FOV's cells
+
+# The biopsy metadata worth colouring a PCA by, for `run(..., colors=...)`.
+METADATA_COLORS   = tuple(dh.METADATA_COLS)
+
+# Comparing one set of settings against another: turn this on and every PCA plot is
+# written, under a name carrying the settings, into its own folder. Nothing is
+# overwritten between runs, so a notebook can be re-run per setting and the results
+# lined up afterwards. Everything that is not a PCA - the scree, the loadings, the
+# tissue maps, the spread bars - is left unwritten, so a sweep never touches the
+# write-up's folder. Off, only the figures a call asks for are written, to
+# `summary_downloads`, under their plain names - which is what the write-up reads.
+SAVE_ALL          = False
+SAVE_ALL_DIR      = 'param_runs'
+
+_DEFAULT_FIGURE_DIR = vh.FIGURE_DIR
+
+
+def _number(value):
+    """A number as a piece of a filename: no dot, which would read as a file type."""
+    return f"{value:g}".replace('.', 'p').replace('-', 'm')
+
+
+def _param_tag(min_fov=None):
+    """The settings that change what a figure shows, as one filename-safe string."""
+    parts = [str(METRIC).lower(),
+             f"items{RULE_MAX_ITEMS}",
+             'pos' if POSITIVE_ONLY else 'posneg',
+             'noself' if NO_SELF else 'withself',
+             f"fov{_number(MIN_FOV_THRESHOLD if min_fov is None else min_fov)}",
+             f"patch{_number(MIN_PATCHES)}",
+             f"sup{_number(MIN_SUPPORT)}"]
+    if not WITH_SCALE:
+        parts.append('raw')
+    if RULES_TO_EXCLUDE:
+        parts.append('no-' + '-'.join(sorted(RULES_TO_EXCLUDE)))
+    return "_".join(parts)
+
+
+def _slug(text):
+    """A column name as a piece of a filename."""
+    return str(text).replace(' ', '_').lower()
+
+
+def figure_name(name, save=True, pca=False, colored_by=None, min_fov=None):
+    """The name a figure is written under, or None when it is not written.
+
+    Every figure in this module goes through here, so the two modes are decided in one
+    place. It also points the shared saver at the right folder, since that folder is
+    part of the same decision.
+
+    `pca` marks the figures a sweep is about - the ones showing where the FOVs fall.
+    Under SAVE_ALL only those are written, so a sweep leaves `summary_downloads` alone.
+
+    A swept name splits the work in two: the tag carries the settings that built the
+    matrix, and the name carries what the figure shows. So the sign of the rules is
+    dropped from the front of a prefix - the tag already states it, and a prefix saying
+    'posneg' would go stale the moment POSITIVE_ONLY is swept - while `colored_by` is
+    added for the figures whose colouring is not already in their name.
+    """
+    if not name:
+        return None
+    if SAVE_ALL:
+        if not pca:
+            return None
+        vh.FIGURE_DIR = SAVE_ALL_DIR
+        for sign in ('posneg_', 'pos_'):
+            if name.startswith(sign):
+                name = name[len(sign):]
+                break
+        if colored_by:
+            name = f"{name}_{_slug(colored_by)}"
+        return f"{name}__{_param_tag(min_fov)}"
+    vh.FIGURE_DIR = _DEFAULT_FIGURE_DIR
+    return name if save else None
+
 
 @dataclass
 class Data:
@@ -62,7 +141,6 @@ class Data:
     cells: pd.DataFrame               # one row per cell
     labels: pd.DataFrame              # one row per FOV: everything we can colour by
     fractions: pd.DataFrame           # FOV x cell type, each row summing to 1
-    support: tuple = (10, 0.01)       # the mining's (absolute, relative) floor
 
 
 @dataclass
@@ -76,6 +154,7 @@ class Scope:
     variance: np.ndarray              # % explained, per component
     model: PCA = field(repr=False)
     built_from: str = 'rules'         # or 'cell counts', or 'rules without X'
+    min_fov: float = MIN_FOV_THRESHOLD  # the share this one was built with
 
     @property
     def label(self):
@@ -100,23 +179,7 @@ def load(result_csv_path=None, load_max_items=4):
     vh.set_cell_colors(cells)
     return Data(results=results, fovs=fovs, cells=cells,
                 labels=_fov_labels(cells, fovs),
-                fractions=_fov_fractions(cells),
-                support=_support_floor(result_csv_path))
-
-
-def _support_floor(result_csv_path):
-    """How many patches a rule needed, taken from the run that produced these rules.
-
-    A run records its settings under 'settings' or under 'CONFIG', naming the same two
-    floors differently.
-    """
-    cfg = Path(result_csv_path).parent / 'run_config.json'
-    raw = json.loads(cfg.read_text()) if cfg.exists() else {}
-    c = raw.get('settings') or raw.get('CONFIG') or {}
-    # Approximate twice over: the floor backs joint patches but is checked per cell type,
-    # and under WEIGHTED it counts weight, not patches.
-    return (c.get('min_patches', c.get('MIN_ABS_SUPPORT', 10)),
-            c.get('min_support', c.get('MIN_SUPPORT', 0.01)))
+                fractions=dh.fov_fractions(cells))
 
 
 def _fov_labels(cells, fovs):
@@ -136,12 +199,6 @@ def _fov_labels(cells, fovs):
                               left_on='FOV', right_index=True, how='left')
     labels['Region'] = labels.get('Region', 'Unknown').fillna('Unknown')
     return labels
-
-
-def _fov_fractions(cells):
-    """FOV x cell type, each row summing to 1: what each FOV is made of."""
-    comp = cells.groupby(['fov', 'cell type']).size().unstack(fill_value=0)
-    return comp.div(comp.sum(axis=1), axis=0)
 
 
 # ---------------------------------------------------------------------------
@@ -180,11 +237,11 @@ def _filter(data, stages, organs, exclude=(), fovs=None):
     return rules
 
 
-def _matrix(rules):
+def _matrix(rules, min_fov):
     """FOVs x rules, each cell that rule's strength in that FOV."""
     n_fovs = rules['FOV'].nunique()
     counts = rules.groupby('Clean_Rule')['FOV'].nunique()
-    kept = counts[counts > n_fovs * MIN_FOV_THRESHOLD].index
+    kept = counts[counts > n_fovs * min_fov].index
     rules = rules[rules['Clean_Rule'].isin(kept)]
 
     mat = (rules.drop_duplicates(['FOV', 'Clean_Rule'])
@@ -208,18 +265,30 @@ def _matrix(rules):
 
 
 def _settings(scope, color_by=None):
-    """The small grey line printed under every figure."""
-    parts = [f"metric: {METRIC}",
-             f"positive only: {'yes' if POSITIVE_ONLY else 'no'}",
-             f"no self-rules: {'yes' if NO_SELF else 'no'}",
-             f"max cell types: {RULE_MAX_ITEMS}",
-             f"rule seen in >{MIN_FOV_THRESHOLD:.0%} of FOVs",
-             scope.label]
-    return " | ".join(([f"color: {color_by}"] if color_by else []) + parts)
+    """The two small grey lines printed under a figure.
+
+    Top line: what the figure shows. Second line: the settings that built it, so a plot
+    on its own says which run it came from.
+    """
+    params = " | ".join([f"metric: {METRIC}",
+                         f"positive only: {'yes' if POSITIVE_ONLY else 'no'}",
+                         f"self-rules: {'no' if NO_SELF else 'yes'}",
+                         f"max cell types: {RULE_MAX_ITEMS}",
+                         f"rule in >{scope.min_fov:.0%} of FOVs",
+                         scope.label])
+    if not color_by:
+        return params
+
+    per_group = separation_by_group(scope, color_by)
+    if per_group is None:
+        return f"color: {color_by}\n{params}"
+    detail = ", ".join(f"{name} {value:+.2f}" for name, value in per_group.items())
+    return (f"color: {color_by}  |  separation {per_group.mean():+.2f}  ({detail})"
+            f"\n{params}")
 
 
 def run(data, stages=None, organs=None, prefix=None, colors=(), save=False,
-        exclude=(), fovs=None, diagnostics=True):
+        exclude=(), fovs=None, diagnostics=True, min_fov=None):
     """Filter, build the matrix, run the PCA, and draw how much each component carries.
 
     `colors` names extra colourings to draw as scatters (organ, a metadata column...).
@@ -228,13 +297,19 @@ def run(data, stages=None, organs=None, prefix=None, colors=(), save=False,
     `fovs` keeps those FOVs only, rebuilding the rules and the matrix from them - a
     new PCA, not the old one re-drawn. `diagnostics` draws the scree and the loadings bars - turn it off when you only
     want the PCA back to lay out yourself.
+
+    `min_fov` is how often a rule must fire to be kept, for this run only; it defaults
+    to MIN_FOV_THRESHOLD. The scope remembers it, so a figure states the share it was
+    actually built with rather than whatever the setting holds when it is drawn.
     """
-    mat = _matrix(_filter(data, stages, organs, exclude, fovs))
-    return _fit(mat, data, stages, organs, prefix, colors, save, diagnostics=diagnostics)
+    min_fov = MIN_FOV_THRESHOLD if min_fov is None else min_fov
+    mat = _matrix(_filter(data, stages, organs, exclude, fovs), min_fov)
+    return _fit(mat, data, stages, organs, prefix, colors, save,
+                diagnostics=diagnostics, min_fov=min_fov)
 
 
 def _fit(mat, data, stages, organs, prefix, colors, save, built_from='rules',
-         diagnostics=True):
+         diagnostics=True, min_fov=None):
     """PCA on a ready matrix, then the scree, the colourings and the loadings."""
     n = min(10, *mat.shape)
     model = PCA(n_components=n).fit(mat)
@@ -248,15 +323,17 @@ def _fit(mat, data, stages, organs, prefix, colors, save, built_from='rules',
 
     scope = Scope(prefix=prefix, stages=stages, organs=organs, matrix=mat,
                   coords=coords, variance=model.explained_variance_ratio_ * 100,
-                  model=model, built_from=built_from)
+                  model=model, built_from=built_from,
+                  min_fov=MIN_FOV_THRESHOLD if min_fov is None else min_fov)
     print(f"{scope.label}: {mat.shape[0]} FOVs x {mat.shape[1]} columns  |  "
           f"PC1 {scope.variance[0]:.1f}%  PC2 {scope.variance[1]:.1f}%")
 
-    name = (lambda what: f"{prefix}_{what}") if (save and prefix) else (lambda what: None)
+    name = ((lambda what, pca=False: figure_name(f"{prefix}_{what}", save, pca))
+            if prefix else (lambda what, pca=False: None))
     for col in colors:
         rsv.plot_pca_scatter(coords, scope.variance, color_by=col, scope=scope.label,
                             subtitle=_settings(scope, col),
-                            save=name(f"pca_{col.replace(' ', '_').lower()}"))
+                            save=name(f"pca_{col.replace(' ', '_').lower()}", pca=True))
     if diagnostics:
         rsv.plot_pca_scree(scope.variance, subtitle=_settings(scope),
                           scope=scope.label, save=name('scree'))
@@ -271,13 +348,82 @@ def _fit(mat, data, stages, organs, prefix, colors, save, built_from='rules',
 # 3. Reading one PCA
 # ---------------------------------------------------------------------------
 
+def separation_by_group(scope, label=None, components=('PC1', 'PC2')):
+    """How well each group on its own is picked out in this PCA.
+
+    Every FOV is compared with the FOVs of its own group and with those of the nearest
+    other group. 0 means that group is fully mixed into the others, 1 means it sits
+    apart with clear space around it, and below 0 means its FOVs are typically nearer
+    another group than their own.
+
+    Groups are worth reading one by one: one tight group among scattered ones scores
+    high while the scattered ones score low, and that is a different picture from two
+    groups genuinely sitting apart.
+
+    None when there is nothing to measure: a label this scope does not carry, or one
+    that leaves fewer than two groups here.
+    """
+    coords = scope.coords
+    if label is None:
+        label = SCORE_COL
+    if label not in coords.columns:
+        return None
+    groups = coords[label].fillna('Unknown').astype(str)
+    if not 2 <= groups.nunique() <= len(coords) - 1:
+        return None
+    per_fov = silhouette_samples(coords[list(components)].to_numpy(dtype=float), groups)
+    return pd.Series(per_fov, index=groups.to_numpy()).groupby(level=0).mean()
+
+
+def separation(scope, label=None, components=('PC1', 'PC2')):
+    """How far apart the groups of `label` sit in this PCA, as one number.
+
+    Each group is averaged on its own first, and the groups are then averaged evenly.
+    Averaging over the FOVs instead would let the biggest group decide the answer: with
+    103 Mild FOVs against 36 Severe, a dense Mild blob scores high on its own and carries
+    the total, even where the two groups are not apart at all.
+
+    It is here to compare one PCA with another - the rules against the cell counts,
+    say - which two pictures side by side cannot do reliably.
+    """
+    per_group = separation_by_group(scope, label, components)
+    return np.nan if per_group is None else float(per_group.mean())
+
+
+def panel(rows, color_by=None, title=None, save=None, what='panel', subtitle=None):
+    """Several PCAs in one figure. Each list is one row; a short row leaves blanks.
+
+    Every tile is titled by what it was built from and by how far apart the groups
+    sit in it, which is the whole point of holding them side by side.
+
+    `what` names the figure when SAVE_ALL is on and no `save` name was given. Two
+    unnamed panels over the same scope would otherwise land on one file, so give the
+    second one its own `what`.
+    """
+    color_by = color_by or SCORE_COL
+    tiles = [[(scope.coords, scope.variance, _tile_label(scope, color_by))
+              for scope in row] for row in rows]
+    name = figure_name(save or f"{rows[0][0].prefix}_{what}", save is not None,
+                       pca=True, colored_by=color_by)
+    rsv.plot_pca_panel(tiles, color_by, title or rows[0][0].label,
+                       subtitle=subtitle or _settings(rows[0][0]), save=name)
+
+
+def _tile_label(scope, color_by):
+    """What one tile of a panel was built from, and how far apart its groups sit."""
+    score = separation(scope, color_by)
+    if not np.isfinite(score):
+        return scope.built_from
+    return f"{scope.built_from} | separation {score:+.2f}"
+
+
 def loadings(scope, save=False):
     """The rules pulling hardest on PC1 and on PC2, one figure each."""
     for i in (0, 1):
         rsv.plot_pca_loadings(scope.model.components_[i], scope.matrix.columns,
                               component_idx=i, subtitle=_settings(scope),
                               top_n=TOP_LOADINGS, scope=scope.label,
-                              save=f"{scope.prefix}_loadings_pc{i + 1}" if save else None)
+                              save=figure_name(f"{scope.prefix}_loadings_pc{i + 1}", save, min_fov=scope.min_fov))
 
 
 def spread_along(scope, component='PC1', num=5):
@@ -378,7 +524,7 @@ def fov_panel(data, scope, component='PC1', num=5, save=False):
     for fov, desc in picked.items():
         print(f"  {fov:26s} {desc}")
     vh.plot_fov_panel(picked, data.cells, data.fovs, num_cols=len(picked),
-                      save=f"{scope.prefix}_fovs_{component.lower()}" if save else None)
+                      save=figure_name(f"{scope.prefix}_fovs_{component.lower()}", save, min_fov=scope.min_fov))
     return picked
 
 
@@ -453,13 +599,19 @@ def archetype_panel(data, scope, num=8, per_corner=1, gap=0.2, save=False):
     for fov, desc in titles.items():
         print(f"  {fov:26s} {desc}")
 
+    # The maps colour each corner's title from this same mapping, so a corner keeps one
+    # colour across both figures. The palette avoids the stage colours on purpose.
+    by_corner = vh.corner_colors(list(corners.values()))
     rsv.plot_pca_scatter(scope.coords, scope.variance, color_by=SCORE_COL,
                         label_fovs=titles, scope=scope.label,
+                        label_colors={fov: by_corner[way]
+                                      for fov, way in corners.items()},
                         subtitle=_settings(scope, SCORE_COL),
-                        save=f"{scope.prefix}_archetypes_pca" if save else None)
+                        save=figure_name(f"{scope.prefix}_archetypes_pca", save,
+                                         pca=True, colored_by=SCORE_COL, min_fov=scope.min_fov))
     vh.plot_fov_panel(titles, data.cells, data.fovs, num_cols=per_corner,
                       title_groups=corners,
-                      save=f"{scope.prefix}_archetypes" if save else None)
+                      save=figure_name(f"{scope.prefix}_archetypes", save, min_fov=scope.min_fov))
     return picked
 
 
@@ -475,12 +627,45 @@ def pair(data, scope, color_by=None, save=False):
     rsv.plot_pca_scatter(scope.coords, scope.variance, color_by=color_by,
                         label_fovs=spread_along(scope), box_fovs=two,
                         scope=scope.label, subtitle=_settings(scope, color_by),
-                        save=f"{scope.prefix}_pca_{color_by.replace(' ', '_').lower()}"
-                             if save else None)
+                        save=figure_name(
+                            f"{scope.prefix}_pca_{color_by.replace(' ', '_').lower()}",
+                            save, pca=True))
     vh.plot_fov_panel({f: str(data.fovs.set_index('FOV').loc[f, SCORE_COL]) for f in two},
                       data.cells, data.fovs, num_cols=2,
-                      save=f"{scope.prefix}_pair_fovs" if save else None)
+                      save=figure_name(f"{scope.prefix}_pair_fovs", save, min_fov=scope.min_fov))
     return two
+
+
+def group_spread(scope, label=None, min_fovs=2, save=False):
+    """How tightly each group's own FOVs sit together, next to any two FOVs.
+
+    Below 1 means that group's FOVs are more alike than FOVs in general here. The
+    atlas describes the healthy gut as stereotypical across individuals and disease
+    as varied, so Control is the group expected to sit tightest.
+
+    The same measure as `patient_spread`, one level up: that one asks whether a
+    patient's FOVs sit together, this one whether a stage's do.
+    """
+    from scipy.spatial.distance import pdist
+
+    label = label or SCORE_COL
+    coords = scope.coords
+    baseline = pdist(coords[['PC1', 'PC2']].to_numpy(dtype=float)).mean()
+    rows = []
+    for name, group in coords.groupby(label):
+        points = group[['PC1', 'PC2']].to_numpy(dtype=float)
+        if len(points) < min_fovs:
+            continue
+        rows.append({label: name, 'n_FOV': len(points),
+                     'spread': pdist(points).mean() / baseline})
+    table = pd.DataFrame(rows).set_index(label).sort_values('spread')
+    tightest = table.index[0] if len(table) else None
+    print(f"  {scope.label}: tightest is {tightest} at {table['spread'].iloc[0]:.2f}"
+          if tightest is not None else "  nothing to measure")
+    rsv.plot_group_spread(table, label, scope=scope.label,
+                          subtitle=_settings(scope),
+                          save=figure_name(f"{scope.prefix}_group_spread", save, min_fov=scope.min_fov))
+    return table
 
 
 def patient_spread(scope, min_fovs=2, save=False):
@@ -505,7 +690,7 @@ def patient_spread(scope, min_fovs=2, save=False):
     print(f"  {len(table)} patients with {min_fovs}+ FOVs | "
           f"{(table['spread'] < 1).sum()} sit closer together than average | "
           f"median {table['spread'].median():.2f}")
-    rsv.plot_patient_spread(table, save=f"{scope.prefix}_patient_spread" if save else None)
+    rsv.plot_patient_spread(table, save=figure_name(f"{scope.prefix}_patient_spread", save, min_fov=scope.min_fov))
     return table
 
 
@@ -554,7 +739,7 @@ def abundance(data, scope, top_n=8, save=False):
     rsv.plot_abundance_correlation_bars(
         rho, n_fovs=len(scope.coords), top_n=top_n, scope=scope.label,
         subtitle=_settings(scope),
-        save=f"{scope.prefix}_abundance_correlation" if save else None)
+        save=figure_name(f"{scope.prefix}_abundance_correlation", save, min_fov=scope.min_fov))
 
     # The same PCA coloured by the cell types that came top, one figure each.
     top = list(rho.abs().max(axis=1).sort_values(ascending=False).index)[:N_COLORED]
@@ -562,7 +747,8 @@ def abundance(data, scope, top_n=8, save=False):
     for i, cell in enumerate(top, start=1):
         rsv.plot_pca_scatter(df, scope.variance, color_by=cell, scope=scope.label,
                             subtitle=_settings(scope, f'share of {cell} cells'),
-                            save=f"{scope.prefix}_abundance_top{i}" if save else None)
+                            save=figure_name(f"{scope.prefix}_abundance_top{i}", save,
+                                             pca=True, min_fov=scope.min_fov))
     return rho, padj
 
 
@@ -588,8 +774,9 @@ def scatter(scope, color_by=None, save=False):
     color_by = color_by or SCORE_COL
     rsv.plot_pca_scatter(scope.coords, scope.variance, color_by=color_by, scope=scope.label,
                         subtitle=_settings(scope, color_by),
-                        save=f"{scope.prefix}_pca_{color_by.replace(' ', '_').lower()}"
-                             if save else None)
+                        save=figure_name(
+                            f"{scope.prefix}_pca_{color_by.replace(' ', '_').lower()}",
+                            save, pca=True))
 
 
 def composition_pca(data, scope, exclude=()):
@@ -609,7 +796,7 @@ def composition_pca(data, scope, exclude=()):
     what = f"cell counts without {', '.join(exclude)}" if exclude else 'cell counts'
     return _fit(mat, data, scope.stages, scope.organs,
                 f"{scope.prefix}_composition{tag}", (), save=False,
-                built_from=what, diagnostics=False)
+                built_from=what, diagnostics=False, min_fov=scope.min_fov)
 
 
 def leave_one_out(data, scope, cells=None):
@@ -665,8 +852,7 @@ def presence_matrices(data, scope):
 
     counts = (data.cells.groupby(['fov', 'cell type']).size().unstack(fill_value=0)
               .reindex(scope.matrix.index).fillna(0))
-    min_abs, min_rel = data.support
-    enough = counts.ge(np.maximum(min_abs, min_rel * counts.sum(axis=1)), axis=0)
+    enough = counts.ge(np.maximum(MIN_PATCHES, MIN_SUPPORT * counts.sum(axis=1)), axis=0)
 
     named = (rules.drop_duplicates('Clean_Rule').set_index('Clean_Rule')
              .apply(lambda r: set(base_items(r['Antecedents']))
@@ -690,4 +876,4 @@ def _binary_pca(mat, data, scope, tag, what):
     scaled = pd.DataFrame(StandardScaler().fit_transform(mat),
                           index=mat.index, columns=mat.columns)
     return _fit(scaled, data, scope.stages, scope.organs, f"{scope.prefix}_{tag}", (),
-                save=False, built_from=what, diagnostics=False)
+                save=False, built_from=what, diagnostics=False, min_fov=scope.min_fov)

@@ -23,4 +23,9 @@ references/
 
 *.egg-info/
 
-ADVISOR_REQUEST.md
+RESULT_INVESTIGATION_GUIDE.md
+# LaTeX build files
+*.aux
+*.out
+*.toc
+*.synctex.gz

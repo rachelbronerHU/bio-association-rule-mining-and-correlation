@@ -6,6 +6,7 @@ import os
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import PowerNorm, Normalize, to_rgb
+from skimage.color import rgb2lab, deltaE_ciede2000
 from matplotlib.patches import Patch
 from matplotlib.ticker import MultipleLocator
 import numpy as np
@@ -652,6 +653,94 @@ _CELL_COLOR_OVERRIDES = {
     "Epithelial": "#7A9E3F",
 }
 
+# Spares used only when a rule's own cell types are too close to tell apart.
+_COLOR_RESERVE = (
+    "#D55E00", "#0072B2", "#009E73", "#CC79A7", "#E69F00",
+    "#56B4E9", "#332288", "#882255", "#117733", "#DDCC77",
+)
+MIN_CELL_DELTA_E = 20.0
+
+
+def _lab(color):
+    return rgb2lab(np.array(to_rgb(color), dtype=float).reshape(1, 1, 3))
+
+
+def _delta_e(one, other):
+    return float(deltaE_ciede2000(_lab(one), _lab(other))[0, 0])
+
+
+def _too_close(colors, floor):
+    """The first pair of names whose colors are within `floor`, or None."""
+    names = list(colors)
+    worst = None
+    for i, first in enumerate(names):
+        for second in names[i + 1:]:
+            distance = _delta_e(colors[first], colors[second])
+            if distance < floor and (worst is None or distance < worst[0]):
+                worst = (distance, first, second)
+    return worst
+
+
+def _crowded(name, colors):
+    """How close this name sits to the rest: smaller means more crowded."""
+    return min(
+        (_delta_e(colors[name], colors[other])
+         for other in colors if other != name),
+        default=float("inf"),
+    )
+
+
+def _which_to_move(first, second, colors):
+    """Prefer moving the type without a chosen color, then the more crowded one."""
+    pinned = (first in _CELL_COLOR_OVERRIDES, second in _CELL_COLOR_OVERRIDES)
+    if pinned[0] != pinned[1]:
+        return second if pinned[0] else first
+    return first if _crowded(first, colors) <= _crowded(second, colors) else second
+
+
+def _replacement(colors, avoid, floor):
+    """The reserve color furthest from both the rule's colors and the palette."""
+    others = [color for name, color in colors.items() if name != avoid]
+    palette = [color for name, color in _CELL_COLORS.items() if name != avoid]
+    best, best_score = None, -1.0
+    for candidate in _COLOR_RESERVE:
+        within = min((_delta_e(candidate, color) for color in others),
+                     default=float("inf"))
+        if within < floor:
+            continue
+        score = within + 0.25 * min(
+            (_delta_e(candidate, color) for color in palette),
+            default=float("inf"),
+        )
+        if score > best_score:
+            best, best_score = candidate, score
+    return best
+
+
+def resolve_cell_colors(cell_types, floor=MIN_CELL_DELTA_E):
+    """The palette with a rule's own cell types pulled apart when two look alike.
+
+    The base palette holds fewer distinct colors than there are cell types, so
+    two of a rule's types can arrive identical. Pass the result to every panel of
+    one figure and to its legend, so the whole figure agrees.
+    """
+    wanted = [name for name in dict.fromkeys(cell_types) if name in _CELL_COLORS]
+    if len(wanted) < 2:
+        return dict(_CELL_COLORS)
+
+    chosen = {name: _CELL_COLORS[name] for name in wanted}
+    for _ in range(len(wanted)):
+        clash = _too_close(chosen, floor)
+        if clash is None:
+            break
+        _, first, second = clash
+        move = _which_to_move(first, second, chosen)
+        spare = _replacement(chosen, move, floor)
+        if spare is None:
+            break
+        chosen[move] = spare
+    return {**_CELL_COLORS, **chosen}
+
 
 def save_figure(fig, name, dpi=200, figure_dir=None):
     """Write a figure next to the LaTeX summary, and return the path.
@@ -764,13 +853,16 @@ def _add_scale_bar_50um(ax, x_max, y_max):
 
 def plot_fov(fov_id, description, df_cells, df_fovs,
              target_ant_cells=None, target_cons_cells=None, ax=None, save=None,
-             show_legend=True, cell_size=None):
+             show_legend=True, cell_size=None, colors=None):
     """A map of one FOV: every cell drawn where it sits, colored by its type.
 
     Give `target_ant_cells` / `target_cons_cells` to grey out everything except
     one rule's two cell types, which is how a rule is shown in a real image.
     Call `set_cell_colors(df_cells)` once first so the colors match everywhere.
+    `colors` overrides that shared map for this one panel, which is how a figure
+    pulls apart two rule cell types that would otherwise look the same.
     """
+    colors = _CELL_COLORS if colors is None else colors
     df_fov = df_cells[df_cells["fov"] == fov_id].copy()
     if df_fov.empty:
         print(f"No cells found for FOV {fov_id}")
@@ -796,7 +888,7 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
                        alpha=0.2, linewidths=0, label="Other")
         for ct, g in df_fov[~other].groupby("cell type"):
             ax.scatter(g["x_um"], g["y_um"], s=cell_size,
-                       c=[_CELL_COLORS.get(ct, (0, 0, 0))], label=ct,
+                       c=[colors.get(ct, (0, 0, 0))], label=ct,
                        alpha=1.0, linewidths=0)
         legend_types = targets
     else:
@@ -805,12 +897,12 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
         title = f"FOV: {fov_id}" + (f"\n{description}" if description else "")
         for ct, g in df_fov.groupby("cell type"):
             ax.scatter(g["x_um"], g["y_um"], s=cell_size,
-                       c=[_CELL_COLORS.get(ct, (1, 1, 1))], label=ct,
+                       c=[colors.get(ct, (1, 1, 1))], label=ct,
                        alpha=0.9, linewidths=0)
         legend_types = sorted(df_fov["cell type"].dropna().astype(str).unique())
 
     handles = [plt.Line2D([0], [0], marker="o", color="w", markeredgecolor="none",
-                          markerfacecolor=_CELL_COLORS.get(ct, "black"),
+                          markerfacecolor=colors.get(ct, "black"),
                           markersize=8, label=ct) for ct in legend_types]
 
     x_max, y_max = df_fov["x_um"].max(), df_fov["y_um"].max()

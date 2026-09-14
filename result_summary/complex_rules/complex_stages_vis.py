@@ -14,7 +14,7 @@ from matplotlib.transforms import blended_transform_factory, offset_copy
 
 from vis_helper import (
     figure_titles, tidy_axes, spread_labels,
-    plot_fov, set_cell_colors, INK,
+    plot_fov, set_cell_colors, resolve_cell_colors, INK,
 )
 from complex_vis import (
     _finish, clear_exports, CLASS_COLORS, text_on,
@@ -28,7 +28,7 @@ STATE_COLORS = {
     "informative": CLASS_COLORS["stronger_effect"],   # adds + new
     "adds":        CLASS_COLORS["stronger_effect"],
     "new":         CLASS_COLORS["new"],
-    "covered":     "#d8d4c8",                         # redundant + pairs_only
+    "covered":     "#bfae8e",                         # redundant + pairs_only
     "redundant":   CLASS_COLORS["consequent_driven"],
     "pairs_only":  CLASS_COLORS["redundant_by_simpler"],
     "nothing":     "#f4f3ef",
@@ -75,12 +75,18 @@ def plot_stage_rule_fovs(examples, stages, df_cells, df_fovs, organ=None,
     if examples.empty:
         print("No stage FOV examples to plot.")
         return []
-    cell_colors = set_cell_colors(df_cells)
+    set_cell_colors(df_cells)
 
     figures = []
     for rule, rows in examples.groupby("rule", sort=False):
         rows = rows.set_index("stage")
         has_parent = "simpler_rule" in rows and rows["simpler_rule"].notna().any()
+        shown = list(_rule_parts(rule)[0]) + list(_rule_parts(rule)[1])
+        if has_parent:
+            for name in rows["simpler_rule"].dropna().unique():
+                ant, con = _rule_parts(name)
+                shown += ant + con
+        cell_colors = resolve_cell_colors(shown)
         nrows = 3 if has_parent else 2
         fig, axes = plt.subplots(
             nrows, len(stages), figsize=(3.75 * len(stages), 3.8 * nrows),
@@ -111,28 +117,37 @@ def plot_stage_rule_fovs(examples, stages, df_cells, df_fovs, organ=None,
 
             plot_fov(
                 fov, "", df_cells, df_fovs, ax=axes[0, column],
-                show_legend=False, cell_size=cell_size,
+                show_legend=False, cell_size=cell_size, colors=cell_colors,
             )
             axes[0, column].set_title(f"{stage} · {fov}\nFull FOV", fontsize=9.5)
 
-            plot_fov(
-                fov, "", df_cells, df_fovs, target_ant_cells=ant,
-                target_cons_cells=con, ax=axes[1, column],
-                show_legend=False, cell_size=cell_size,
-            )
-            metrics = _rule_metric_text(item.get("complex_metrics", {}))
-            axes[1, column].set_title(
-                "Higher-order rule" + (f"\n{metrics}" if metrics else ""),
-                fontsize=9.2,
-            )
+            if item.get("rule_present", True):
+                plot_fov(
+                    fov, "", df_cells, df_fovs, target_ant_cells=ant,
+                    target_cons_cells=con, ax=axes[1, column],
+                    show_legend=False, cell_size=cell_size, colors=cell_colors,
+                )
+                metrics = _rule_metric_text(item.get("complex_metrics", {}))
+                axes[1, column].set_title(
+                    "Higher-order rule" + (f"\n{metrics}" if metrics else ""),
+                    fontsize=9.2,
+                )
+            else:
+                axes[1, column].axis("off")
+                axes[1, column].set_title("Higher-order rule", fontsize=9.2)
+                axes[1, column].text(
+                    0.5, 0.55, "not found in any\nFOV of this stage",
+                    ha="center", va="center", color="#898781", fontsize=9,
+                )
 
-            if has_parent:
+            if has_parent and pd.notna(item.get("simpler_rule")):
                 parent_ant, parent_con = _rule_parts(item["simpler_rule"])
                 legend_types.extend(parent_ant + parent_con)
                 plot_fov(
                     fov, "", df_cells, df_fovs,
                     target_ant_cells=parent_ant, target_cons_cells=parent_con,
                     ax=axes[2, column], show_legend=False, cell_size=cell_size,
+                    colors=cell_colors,
                 )
                 parent_metrics = _rule_metric_text(
                     item.get("simpler_metrics", {}),
@@ -154,17 +169,18 @@ def plot_stage_rule_fovs(examples, stages, df_cells, df_fovs, organ=None,
             for cell in legend_types
         ]
         if handles:
+            # No legend title, for the reason given in complex_vis.plot_rule_fov_pairs.
             fig.legend(
-                handles=handles, title="Cell type", frameon=False,
+                handles=handles, frameon=False,
                 ncol=len(handles), loc="lower center",
-                bbox_to_anchor=(0.5, 0.005), fontsize=8, title_fontsize=9,
+                bbox_to_anchor=(0.5, 0.004), fontsize=8,
             )
         figure_titles(
             fig, str(rule).replace(" -> ", " → "), organ=organ,
             subtitle=subtitle, params=params,
         )
         fig.subplots_adjust(
-            bottom=0.12 if nrows == 2 else 0.07,
+            bottom=0.15 if nrows == 2 else 0.10,
             wspace=0.18, hspace=0.46,
         )
         _finish(fig, save)
@@ -461,16 +477,68 @@ def plot_prevalence_overview(prevalence, stages, organ=None, params=None, save=N
     _finish(fig, save)
 
 
+def plot_opposite_directions(rows, stages, organ=None, params=None, top_n=10, save=None):
+    """Complex against simpler movement, for rules that move opposite ways.
+
+    One row per rule: a line from its control share to its severe share, drawn twice
+    (complex and simpler). Crossing lines are the point of the figure.
+    """
+    if rows is None or len(rows) == 0:
+        print("No opposite-direction rules to plot.")
+        return
+    rows = rows.head(top_n).iloc[::-1].reset_index(drop=True)
+    height = max(2.6, 0.46 * len(rows) + 1.5)
+    fig, ax = plt.subplots(figsize=(9.6, height))
+    y = np.arange(len(rows), dtype=float)
+
+    colors = {"complex": CLASS_COLORS["stronger_effect"], "simpler": "#9a8d70"}
+    labels = {"complex": "higher-order rule", "simpler": "strongest simpler rule"}
+    for key in ("complex", "simpler"):
+        start = rows[f"{key}_first"].to_numpy(float)
+        end = rows[f"{key}_last"].to_numpy(float)
+        for index in range(len(rows)):
+            ax.annotate(
+                "", xy=(end[index], y[index]), xytext=(start[index], y[index]),
+                arrowprops=dict(arrowstyle="-|>", color=colors[key], lw=1.7,
+                                shrinkA=0, shrinkB=0, alpha=0.9),
+            )
+        ax.scatter(start, y, s=34, facecolor="white", edgecolor=colors[key],
+                   linewidth=1.5, zorder=3)
+        ax.scatter(end, y, s=40, color=colors[key], zorder=3, label=labels[key])
+
+    ax.set_yticks(y, [_plain_rule(name) for name in rows["name"]], fontsize=8.6)
+    ax.set_xlabel(f"share of FOVs carrying the rule    "
+                  f"(open circle = {stages[0]}, filled = {stages[-1]})", fontsize=9.5)
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ax.set_xlim(-0.03, 1.05)
+    tidy_axes(ax, grid="x", hide=("top", "right", "left"))
+    ax.tick_params(length=0)
+    ax.legend(frameon=False, fontsize=8.4, loc="lower right")
+    figure_titles(
+        fig, "Complex and simpler rules moving opposite ways", organ=organ,
+        subtitle=f"{stages[0]} to {stages[-1]}, rules where the two directions disagree",
+        params=params,
+    )
+    fig.subplots_adjust(left=0.33, bottom=0.17 if len(rows) > 4 else 0.28)
+    _finish(fig, save)
+
+
 def plot_prevalence_and_strength(prevalence, strengths, stages, metric="Lift",
-                                 organ=None, params=None, new_only=False, save=None):
-    """For one rule, compare stage prevalence and patient-level strength."""
+                                 organ=None, params=None, new_only=False, save=None,
+                                 abundance=None, cell_colors=None):
+    """For one rule, compare stage prevalence, strength, and cell abundance."""
     if prevalence.empty:
         print("No rule values to plot.")
         return
     rule = str(prevalence["name"].iloc[0])
-    fig, (prevalence_ax, strength_ax) = plt.subplots(
-        1, 2, figsize=(10.7, 4.55), gridspec_kw={"wspace": 0.30}
+    show_abundance = abundance is not None and not abundance.empty
+    n_panels = 3 if show_abundance else 2
+    fig, panels = plt.subplots(
+        1, n_panels, figsize=(5.35 * n_panels, 4.55),
+        gridspec_kw={"wspace": 0.30},
     )
+    prevalence_ax, strength_ax = panels[0], panels[1]
+    abundance_ax = panels[2] if show_abundance else None
     x = np.arange(len(stages), dtype=float)
     colors = {"complex": CLASS_COLORS["stronger_effect"], "simpler": "#9a8d70"}
     labels = {"complex": "higher-order rule", "simpler": "strongest simpler rule"}
@@ -534,17 +602,51 @@ def plot_prevalence_and_strength(prevalence, strengths, stages, metric="Lift",
     strength_ax.set_title("Strength in rule-bearing FOVs", fontsize=10.7)
     reference = 0 if metric == "Leverage" else 1
     strength_ax.axhline(reference, color="#bab8b1", lw=1)
-    for ax in (prevalence_ax, strength_ax):
+
+    if show_abundance:
+        _draw_abundance(abundance_ax, abundance, stages, x, cell_colors)
+
+    for ax in (prevalence_ax, strength_ax, abundance_ax):
+        if ax is None:
+            continue
         tidy_axes(ax, grid="y", hide=("top", "right"))
         ax.tick_params(length=0)
         ax.legend(frameon=False, fontsize=8.2, loc="best")
+    subtitle = f"Prevalence and {metric} across disease stages"
+    if show_abundance:
+        subtitle += ", against how common the cells are"
     figure_titles(
         fig, rule.replace(" -> ", " → "), organ=organ,
-        subtitle=f"Prevalence and {metric} across disease stages",
-        params=params,
+        subtitle=subtitle, params=params,
     )
     fig.subplots_adjust(bottom=0.19, wspace=0.30)
     _finish(fig, save)
+
+
+def _draw_abundance(ax, abundance, stages, x, cell_colors):
+    """One line per rule cell type: its share of the cells in every FOV."""
+    cell_types = list(dict.fromkeys(abundance["cell type"]))
+    colors = cell_colors or resolve_cell_colors(cell_types)
+    spread = np.linspace(-0.12, 0.12, len(cell_types)) if len(cell_types) > 1 else [0.0]
+    for cell_type, offset in zip(cell_types, spread):
+        rows = abundance[abundance["cell type"] == cell_type]
+        medians = []
+        for position, stage in enumerate(stages):
+            values = rows.loc[rows["stage"] == stage, "share"].to_numpy(float)
+            jitter = (np.linspace(-0.05, 0.05, len(values))
+                      if len(values) > 1 else np.zeros(len(values)))
+            ax.scatter(position + offset + jitter, values, s=13,
+                       color=colors.get(cell_type, "#7f7f7f"), alpha=0.35,
+                       edgecolor="none", zorder=2)
+            medians.append(np.median(values) if len(values) else np.nan)
+        ax.plot(x + offset, medians, color=colors.get(cell_type, "#7f7f7f"),
+                lw=1.5, marker="o", ms=5, label=cell_type, zorder=3)
+    ax.set_xticks(x, [f"{stage}\nFOV n={int((abundance['stage'] == stage).sum() / max(len(cell_types), 1))}"
+                      for stage in stages])
+    ax.set_ylabel("share of the FOV's cells")
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ax.set_ylim(bottom=0)
+    ax.set_title("How common the rule's cells are", fontsize=10.7)
 
 
 # What each figure measures, in the words the reader sees: the title over it, the label

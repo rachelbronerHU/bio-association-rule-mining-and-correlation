@@ -1,6 +1,6 @@
 \documentclass[10pt,a4paper]{article}
 
-\usepackage[top=1.7cm,bottom=1.8cm,left=1.8cm,right=1.8cm]{geometry}
+\usepackage[top=1.8cm,bottom=1.9cm,left=1.9cm,right=1.9cm]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{graphicx}
@@ -15,19 +15,20 @@
 \definecolor{ink}{HTML}{252525}
 \definecolor{muted}{HTML}{66645F}
 \definecolor{accent}{HTML}{2878D0}
+\definecolor{biocol}{HTML}{1F6F5C}
+\definecolor{quoteink}{HTML}{5A4B7C}
 \definecolor{soft}{HTML}{F3F5F7}
 
 \hypersetup{colorlinks=true,urlcolor=accent,linkcolor=accent}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0.55em}
+\setlength{\parskip}{0.45em}
 \setlength{\emergencystretch}{1em}
 \captionsetup{font=footnotesize,labelfont=bf,skip=5pt}
 \titleformat{\section}{\Large\bfseries\color{ink}}{\thesection}{0.7em}{}
 \titleformat{\subsection}{\large\bfseries\color{ink}}{\thesubsection}{0.6em}{}
+\newcommand{\tightlist}{\setlength{\itemsep}{1.5pt}\setlength{\parskip}{0pt}\setlength{\leftmargini}{1.3em}}
 
-\newcommand{\paperquote}[1]{\textcolor{muted}{\textit{The atlas reports ``#1.''}}}
-\newcommand{\evidence}[1]{\textcolor{muted}{\textit{Evidence strength: #1.}}\par}
-\newcommand{\reportfigure}[4][0.94\textwidth]{%
+\newcommand{\fig}[4][0.94\textwidth]{%
   \begin{figure}[H]
     \centering
     \includegraphics[width=#1]{summary_downloads/#2}
@@ -36,489 +37,993 @@
   \end{figure}
 }
 
+% One green line. Keep to a single short sentence.
+\newcommand{\bio}[1]{\vspace{-0.3em}\par{\color{biocol}\textbf{Biology:} \color{biocol}#1}\par\vspace{0.15em}}
+\newcommand{\note}[2]{\vspace{-0.3em}\par\textbf{#1} #2\par\vspace{0.15em}}
+
+\newenvironment{atlasquote}
+  {\par\vspace{0.1em}\begin{list}{}{\leftmargin=1.3em\rightmargin=1.3em\topsep=0pt\parsep=0.25em}%
+   \item[]\small\itshape\color{quoteink}}
+  {\end{list}\vspace{0.1em}}
+\newcommand{\atlas}[1]{\begin{atlasquote}\upshape\textbf{The atlas reports:}\itshape\ ``#1''\end{atlasquote}}
+
 \begin{document}
 
 \begin{center}
-  {\LARGE\bfseries Higher-order association rules in gastrointestinal aGVHD}\\[0.35em]
-  {\large Proof of added information, atlas alignment, and new biological hypotheses}
+  {\LARGE\bfseries Rules with three cell types}\\[0.35em]
+  {\large What they add, what they confirm, and what they show that is new}\\[0.25em]
+  {\color{muted}Gastrointestinal acute GVHD $\cdot$ colon and duodenum $\cdot$ staged by clinical score}
 \end{center}
-\vspace{0.25cm}
+\vspace{0.2cm}
 \hrule
-\vspace{0.45cm}
-
-\colorbox{soft}{\parbox{0.96\textwidth}{
-\textbf{How to read this report.} A higher-order rule contains more than two cell types.
-A rule is \emph{new} in one FOV when it passes rule-level FDR $\leq0.05$ but none of its
-constituent pair rules was mined in that FOV. New attractions require Lift $\geq1.3$;
-new avoidances require inverse Lift, $1/\mathrm{Lift}$, $\geq1.3$. Stage analyses require
-at least 20 cells of every rule cell type and at least five rule-bearing FOVs in one stage.
-For a new rule, the pair comparison is a lower bound based on the pair-mining threshold,
-not a measured pair-to-complex ratio. Individual FOVs have rule-level statistical support;
-stage prevalence and patient-median Lift are descriptive and are not patient-level
-significance tests. Spatial association does not establish causality.
-}}
+\vspace{0.3cm}
 
 % =============================================================================
-\section{Proof that higher-order mining adds information}
+\section*{How to read this report}
 % =============================================================================
 
-The first test is global: after restricting to rules with FDR $\leq0.05$, does the method
-mostly repeat shorter rules, or does it isolate a visible, structured remainder? Most long
-rules are correctly labeled redundant, but the nonredundant fraction is substantial and
-depends on rule shape. For attractions, 5--21\% are clearly stronger than a mined parent and
-6--12\% have no mined parent. For avoidances, clearly stronger rules reach 27\% for
-one-to-many rules. This separation is the method proof: the algorithm does not claim that
-every longer rule is useful; it distinguishes inherited pair effects from joint contexts.
+Stated once here, so no caption repeats it.
 
-\evidence{Strong as an internal method check; these are rule counts, not biological effect sizes}
+\textbf{What a rule is.}
+\begin{itemize}\tightlist
+\item A \emph{pair rule} links two cell types: where A is, B tends to be.
+\item This report uses only \emph{three-cell rules}, in two shapes: \textbf{A + B $\rightarrow$ C} and
+\textbf{A $\rightarrow$ B + C}.
+\item Each rule is measured inside one field of view (FOV) of one biopsy.
+\item \emph{Attractions} pull cells together. \emph{Avoidances} push them apart.
+\item A rule is \textbf{new} when no pair inside it was found in that same field.
+\end{itemize}
 
-\reportfigure{complex_attracts_verdicts.png}{Verdicts among statistically supported
-attractive rules. Percentages are within rule shape; totals at right show that the result is
-not driven by a small rule family.}{fig:attract-verdicts}
+\textbf{Which trends count as a finding.} Only the \textbf{control-to-severe} gap. A rule that jumps in
+mild disease and returns to its control level by severe is not treated as a result here, however large
+the jump. Those rules stay in the notebooks; the few mentioned in this report are flagged as such.
 
-\reportfigure{complex_avoids_verdicts.png}{The same classification for statistically
-supported avoidance rules. The result confirms that both spatial directions contain
-nonredundant higher-order information, while most longer rules are still rejected as
-shorter-rule restatements.}{fig:avoid-verdicts}
+\textbf{The five numbers} above every tissue panel. A neighbourhood is the cells within a fixed radius of
+one cell; $L$ and $R$ are the rule's two sides; probabilities are shares of the field's neighbourhoods.
 
-\subsection{Two direct ways a complex rule can beat its simpler rule}
-
-The strongest direct example is Endothelial, Epithelial $\rightarrow$ Goblet, SMV in a
-Colon FOV. Its Lift is 23.3 versus 4.45 for the strongest simpler rule, a measured
-$5.2\times$ gain. The second example is different: adding Epithelial to Endothelial,
-Macrophage $\rightarrow$ CD8T raises Lift only from 1.34 to 1.45, but changes the FDR from
-0.743 to 0.00189. Thus higher-order mining can add either a much larger effect or a joint
-context in which an otherwise unsupported relationship becomes statistically detectable.
-
-\evidence{Strong at the displayed FOV level; examples are selected automatically by the notebook}
-
-\reportfigure{complex_attracts_stronger_fov.png}{A measured stronger-effect example. The
-complete FOV, higher-order rule and strongest mined simpler rule use one color map and print
-Lift, support, conviction and FDR where available.}{fig:direct-stronger}
-
-\reportfigure{complex_attracts_significance_fov.png}{A measured significance-gain example.
-The additional Epithelial context converts the strongest parent from unsupported to
-rule-level FDR $<0.05$ while preserving a modest Lift gain.}{fig:direct-significance}
-
-\subsection{New rules recur when no pair rule is available}
-
-New rules provide the strictest proof of added representational capacity: no constituent
-pair was mined in the same FOV. The strongest recurring attractive families include
-epithelial--plasma, stromal--vascular and neural--epithelial contexts. Avoidances also recur,
-although their lower-bound gains are generally smaller.
-
-\begin{table}[H]
-\centering
-\footnotesize
-\begin{tabular}{>{\raggedright\arraybackslash}p{7.0cm}rrr}
+\begin{center}\small
+\begin{tabular}{llp{7.6cm}}
 \toprule
-New higher-order attraction & FOVs & median Lift & gain floor \\
-\midrule
-Epithelial, Macrophage $\rightarrow$ Plasma & 24 & 1.45 & $\geq1.21\times$ \\
-Epithelial, SMV $\rightarrow$ Plasma & 22 & 1.43 & $\geq1.19\times$ \\
-Epithelial, Fibroblast $\rightarrow$ Plasma & 18 & 1.43 & $\geq1.19\times$ \\
-Epithelial, SMV $\rightarrow$ Endothelial & 13 & 2.76 & $\geq2.30\times$ \\
-Epithelial, Neuron $\rightarrow$ Paneth & 12 & 2.24 & $\geq1.86\times$ \\
+\emph{supp} & $P(L \wedge R)$ & share of neighbourhoods holding the whole pattern \\
+\emph{conf} & $P(L \wedge R)\,/\,P(L)$ & how often $R$ appears when $L$ does \\
+\emph{lift} & $P(L \wedge R)\,/\,(P(L)\,P(R))$ & 1 = chance; 2 = twice chance; below 1 = keeping apart \\
+\emph{lev}  & $P(L \wedge R) - P(L)\,P(R)$ & plain excess over chance; negative = keeping apart \\
+\emph{conv} & $(1-P(R))\,/\,(1-\mathit{conf})$ & how strongly chance would break the rule \\
 \bottomrule
 \end{tabular}
-\caption{Representative recurrent new attractions, ordered primarily by rule-bearing FOVs.
-The gain floor compares the complex Lift with the largest value allowed for an unmined pair.}
-\label{tab:new-attracts}
-\end{table}
+\end{center}
+
+\begin{itemize}\tightlist
+\item \emph{FDR} is the rule's permutation p-value after Benjamini--Hochberg. Only FDR $\leq0.05$ is kept.
+\item Lift hits exactly 0 at total separation. So avoidance strength is \emph{inverse lift}, and leverage
+is quoted whenever lift reaches 0.
+\end{itemize}
+
+\textbf{The six verdicts.} Each longer rule is compared with the best pair inside it, same field:
+\begin{itemize}\tightlist
+\item \emph{a shorter rule said it}, \emph{consequents do it alone} --- redundant.
+\item \emph{shorter rules too weak}, \emph{backing pair too weak} --- cannot be judged.
+\item \emph{clearly stronger} --- its lift beats that pair by a set margin.
+\item \emph{nothing shorter mined} --- no pair found in that field at all. This is a \textbf{new} rule.
+\end{itemize}
+
+\textbf{Two denominators.} ``All FOVs'' counts every field. ``Eligible FOVs'' counts only fields holding
+$\geq20$ cells of every type the rule names --- so a rule cannot look lost merely because its cells are.
+
+\textbf{Staging.} Everything is staged by \textbf{clinical score} unless stated.
+Section~\ref{sec:staging} runs it again under the pathological score; where they disagree is itself a
+result.
+
+\textbf{The seven figure types, and how every number in them is produced.}
+
+\textbf{1. Verdict bars.} Per rule shape: count rules carrying each verdict, divide by rules of that
+shape. Number inside a block = that percentage. Count at right = rules of that shape.
+
+\textbf{2. Gain ranking.} For one rule, over every field where it holds at FDR $\leq0.05$:
+\begin{itemize}\tightlist
+\item \emph{strength} = median lift (for avoidance, median of $1/\mathrm{lift}$).
+\item \emph{parent} = median strength of the strongest pair that is both inside the rule and itself mined
+in that same field.
+\item \emph{gain} = strength $\div$ parent.
+\item No pair mined anywhere? Parent becomes the mining threshold (lift 1.2 attract, inverse lift 1.25
+avoid), so gain is a floor, written ``$\geq$''.
+\item Open circle = parent, filled = strength, ``FOVs'' = distinct fields. Rules in $\geq5$ fields, top 15.
+\end{itemize}
+
+\textbf{3. Prevalence heatmap.} Numerator = fields of that stage where the rule holds at FDR $\leq0.05$;
+denominator = fields of that stage in the chosen denominator. Both printed. Ranked by (largest stage
+share $-$ smallest), keeping rules with $\geq5$ rule-bearing fields in one stage; top 12.
+
+\textbf{4. Prevalence, strength and abundance} --- three panels:
+\begin{itemize}\tightlist
+\item \textbf{Left:} the heatmap fraction, for the rule and its strongest pair.
+\item \textbf{Middle:} fields carrying the rule only. Faint dot = one patient's median lift over their own
+such fields. Diamond = median of those. Patient counts read ``rule $|$ pair''.
+\item \textbf{Right:} every field of the stage --- each rule cell type's share of that field's cells, one
+faint dot per field, line through stage medians.
+\end{itemize}
+The right panel is the control for the left. A rule can only be said to have lost an \emph{arrangement}
+if its cells are still there to be arranged.
+
+\textbf{5. Availability bars.} Every field in exactly one state. Grey: some rule cell type has $<20$
+cells. Otherwise teal (rule holds), beige (only a pair holds), pale (neither).
+
+\textbf{6. Tissue panels.} Cells at measured positions. Panel 1 = all cells by type; panel 2 = only the
+rule's types, rest grey; panel 3 = same for its best pair. Where a stage has no field with the rule but
+one with a pair, that field is shown and the rule row is marked ``not found''. When two of a rule's own
+cell types would look alike, one is recoloured for that figure only.
+
+\textbf{7. Single-field proofs.} One field: everything, then the rule, then its best pair.
+
+\textbf{What is and is not claimed.}
+\begin{itemize}\tightlist
+\item Each field result is a real statistical test.
+\item Stage percentages and patient medians are descriptive, not patient-level tests.
+\item Cells near each other does not prove one causes the other.
+\item Purple = verbatim atlas quotes. Green \textbf{Biology} = our interpretation.
+\end{itemize}
+
+% =============================================================================
+\vspace{0.5em}
+\section{Does a longer rule ever say something new?}
+% =============================================================================
+
+A three-cell rule might be a pair rule in disguise. So each is compared with the best pair inside it, and
+gets one of three answers: it repeats a shorter rule, it beats one, or it has no shorter rule at all.
+
+Nothing in this section depends on staging.
+
+\subsection{Most long rules are redundant --- and the method says so}
+
+Before any statistical filter, most long rules are already labelled as restatements of something shorter.
+That is the honest baseline: the method is not claiming every longer rule is useful.
+
+\fig{verdicts_attracts_all.png}{All mined attraction rules, before any statistical
+filter.}{fig:v-att-all}
+
+Keeping only rules that survive the statistical test clears the unjudgeable band away, and what remains
+splits very unevenly between the two ways of being informative.
+
+\fig{verdicts_attracts_supported.png}{Attraction rules at FDR $\leq0.05$.}{fig:v-att-sig}
+
+\note{What this means for the rest of the report.}{Longer rules earn their place by finding what pairs
+missed --- 29\% with no shorter rule, against 6\% that beat a measured pair.}
+
+Avoidance splits the opposite way, which is worth seeing because it says the two rule types are
+informative for different reasons.
+
+\fig{verdicts_avoids_all.png}{All mined avoidance rules.}{fig:v-avo-all}
+
+\fig{verdicts_avoids_supported.png}{Avoidance rules at FDR $\leq0.05$: 40\% clearly stronger, 5\%
+new.}{fig:v-avo-sig}
+
+\bio{Attraction rules find contexts nothing shorter saw; avoidance rules sharpen separations the pair
+already hinted at --- what you expect if avoidance mostly reports tissue compartments.}
+
+The same split computed inside each stage, and then inside each organ, comes out nearly identical --- so
+none of Part 1 depends on how patients are staged or which gut region is looked at.
+
+\fig{verdicts_attracts_by_stage_clin.png}{Attraction verdicts, clinical stages.}{fig:v-att-stage}
+
+\fig{verdicts_attracts_by_stage_path.png}{The same split under pathological stages.}{fig:v-att-stage-path}
+
+\fig{verdicts_avoids_by_stage_clin.png}{Avoidance verdicts, clinical stages.}{fig:v-avo-stage}
+
+\fig{verdicts_avoids_by_stage_path.png}{Avoidance verdicts, pathological stages.}{fig:v-avo-stage-path}
+
+\fig{verdicts_attracts_colon.png}{Attraction verdicts, colon only.}{fig:v-att-colon}
+
+\fig{verdicts_attracts_duodenum.png}{Attraction verdicts, duodenum only.}{fig:v-att-duo}
+
+\fig{verdicts_avoids_colon.png}{Avoidance verdicts, colon only.}{fig:v-avo-colon}
+
+\fig{verdicts_avoids_duodenum.png}{Avoidance verdicts, duodenum only.}{fig:v-avo-duo}
+
+\subsection{When a longer rule beats a real pair, the gain is small}
+
+Here are the biggest \emph{measured} gains in the whole screen --- and the interesting thing is how
+modest they are. Not one reaches 1.6$\times$.
+
+\fig{gain_attracts_measured.png}{Attraction rules with a measured pair to beat, top 15 by gain, in
+$\geq5$ fields.}{fig:gain-dumbbell}
+
+\bio{Adding a third cell type to an existing pair buys 30--50\% more lift at best --- the honest ceiling
+on ``longer rules are stronger''.}
+
+Letting in rules that have no pair to compare against changes the ranking completely: they take over the
+entire list, and their gains are several times larger.
+
+\fig{gain_attracts_with_new.png}{The same ranking, including rules with no mined pair. Their gains are
+floors, written ``$\geq$''.}{fig:gain-dumbbell-new}
+
+\subsection{Two fields that show the two ways of winning}
+
+This is a strength win in a single field: Epithelial and Muscle together predict Paneth cells at lift
+3.77, where Epithelial alone manages only 1.89.
+
+\fig[0.92\textwidth]{attracts_fov_stronger.png}{A strength win in one duodenal
+field.}{fig:proof-strength}
+
+\bio{Epithelium is everywhere in this field and cannot locate Paneth cells; adding Muscle names the
+crypt-base compartment, which is where they belong.}
+
+This is the other kind of win, and the more useful one. Adding Epithelial barely moves lift at all, but
+it takes the rule from statistically meaningless to solid.
+
+\fig[0.92\textwidth]{attracts_fov_significance.png}{A significance win: lift 1.29 $\rightarrow$ 1.25, but
+FDR 0.844 $\rightarrow$ 0.0049.}{fig:proof-significance}
+
+\bio{Plasma near CD4 T cells is not a finding --- both are scattered through the lamina propria --- but
+the same pair \emph{on the epithelium} is a specific place.}
+
+\subsection{Rules that pair mining never found}
+
+These are the rules with no pair equivalent, ranked by how far they beat the mining threshold. What
+stands out is the cell types at the top.
+
+\fig{gain_new_attracts.png}{New attraction rules, ranked by gain floor.}{fig:new-attract-ranking}
+
+\bio{Four of the top six name Paneth or Endocrine cells and two also name Muscle --- the atlas's
+crypt-base finding, stated as a rule (Section~\ref{sec:paneth}).}
+
+Ranking the same rules by reproducibility instead of by gain gives a completely different list, and one
+family dominates it.
 
 \begin{table}[H]
-\centering
-\footnotesize
-\begin{tabular}{>{\raggedright\arraybackslash}p{7.0cm}rrr}
+\centering\footnotesize
+\begin{tabular}{>{\raggedright\arraybackslash}p{6.4cm}rr}
 \toprule
-New higher-order avoidance & FOVs & median inverse Lift & gain floor \\
+Most reproducible new attraction & FOVs & median lift \\
 \midrule
-Muscle $\rightarrow$ Fibroblast, Macrophage & 17 & 1.40 & $\geq1.12\times$ \\
-Fibroblast, Neuron $\rightarrow$ Goblet & 13 & 1.45 & $\geq1.16\times$ \\
-Endothelial, Fibroblast $\rightarrow$ Goblet & 12 & 1.66 & $\geq1.33\times$ \\
-Muscle, SMV $\rightarrow$ Fibroblast & 12 & 1.43 & $\geq1.15\times$ \\
-Muscle, SMV $\rightarrow$ Macrophage & 11 & 1.44 & $\geq1.15\times$ \\
+Epithelial, Fibroblast $\rightarrow$ Plasma & 34 & 1.30 \\
+Epithelial, Macrophage $\rightarrow$ Plasma & 33 & 1.37 \\
+Epithelial, SMV $\rightarrow$ Plasma        & 28 & 1.38 \\
+Fibroblast, Goblet $\rightarrow$ Plasma     & 20 & 1.33 \\
+Endocrine, Fibroblast $\rightarrow$ Epithelial & 18 & 1.49 \\
+Endocrine, Macrophage $\rightarrow$ Epithelial & 16 & 1.73 \\
+Macrophage, Muscle $\rightarrow$ Neuron     & 16 & 1.61 \\
+Fibroblast, Muscle $\rightarrow$ Neuron     & 15 & 1.88 \\
 \bottomrule
 \end{tabular}
-\caption{Representative recurrent new avoidances. Inverse Lift puts attraction and
-avoidance strength on the same ``larger is stronger'' scale.}
-\label{tab:new-avoids}
+\caption{New attraction rules ranked by fields carrying them rather than by gain. Counted over all new
+occurrences before any strength filter, and over all fields --- so independent of the stage column.}
+\label{tab:recurrent-new}
 \end{table}
 
-\reportfigure{complex_new_gain_ranking.png}{The largest lower-bound gains among recurring
-new attractions. Every rule passes FDR 0.05, Lift 1.3 and the five-FOV recurrence filter.}
-{fig:new-attract-ranking}
+\bio{The top four rows are one finding written four ways --- epithelium, a stromal or myeloid partner,
+and plasma cells --- unseen by pair mining in all 34 fields.}
 
-\reportfigure{complex_new_avoid_gain_ranking.png}{The corresponding ranking for new
-avoidances, using inverse Lift. The recurrent set is real but less strongly separated from
-the pair-mining boundary than the leading attractions.}{fig:new-avoid-ranking}
+Those four rules in tissue. There is no pair panel in any of them, because no pair was ever mined.
 
-\subsection{The stage result is not explained only by cell availability}
+\fig[0.68\textwidth]{attracts_newfov_epithelial_fibroblast_plasma.png}{Epithelial and Fibroblast jointly
+predict Plasma.}{fig:new-fov-1}
 
-A non-new Colon rule provides a controlled comparison because its strongest simpler rule
-is measurable. Goblet, Macrophage $\rightarrow$ Epithelial, Plasma falls from 48\% of
-Control FOVs to 2\% of Mild and 9\% of Severe FOVs when all FOVs form the denominator.
-After requiring 20 cells of every rule type, the complex prevalences are 48\%, 8\% and 21\%,
-while the strongest simpler rule remains much more common at 92\%, 58\% and 79\%.
-Eligibility changes the denominator but does not erase the loss of full joint organization.
+\fig[0.68\textwidth]{attracts_newfov_epithelial_macrophage_plasma.png}{Epithelial and Macrophage jointly
+predict Plasma.}{fig:new-fov-2}
 
-\evidence{Descriptive availability control; not a patient-level stage test}
+\fig[0.68\textwidth]{attracts_newfov_epithelial_smv_plasma.png}{Epithelial and smooth muscle jointly
+predict Plasma.}{fig:new-fov-3}
 
-Figure~\ref{fig:availability-states} displays the missing control directly. Every stage FOV
-is partitioned into too few cells to test, eligible but empty, covered by a simpler rule, or
-carrying the informative complex rule. Thus the reader can see cell availability and spatial
-organization in the same denominator rather than infer one from two separate percentages.
+\fig[0.68\textwidth]{attracts_newfov_fibroblast_goblet_plasma.png}{Fibroblast and Goblet jointly predict
+Plasma.}{fig:new-fov-4}
 
-\reportfigure{complex_nonnew_goblet_macrophage_epithelial_plasma_availability.png}
-{Every Colon FOV is counted exactly once. Grey is insufficient cell availability; the other
-segments are eligible FOVs split by what spatial rule was found. The informative-rule segment
-shrinks in disease even after the unavailable FOVs are made explicit.}{fig:availability-states}
+\subsection{What the strength threshold costs}
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.92\textwidth]{summary_downloads/complex_nonnew_all_goblet_macrophage_epithelial_plasma_strength.png}
-  \vspace{0.35em}
+A new rule is kept only if its median lift reaches 1.3. Of \textbf{447} new attraction rules recurring in
+$\geq5$ fields, \textbf{315} are discarded by it. For avoidance: 11 of 95.
 
-  \includegraphics[width=0.92\textwidth]{summary_downloads/complex_nonnew_eligible_goblet_macrophage_epithelial_plasma_strength.png}
-  \caption{The same Colon rule before (upper) and after (lower) cell-eligibility filtering.
-  Both prevalence lines compare the complex and strongest simpler rule; the right panels
-  compare their patient-level Lift in rule-bearing FOVs.}
-  \label{fig:availability-check}
-\end{figure}
+\bio{Lift and reproducibility run opposite here, so a lift threshold preferentially cuts the rules that
+repeat most --- lowering it is the change most likely to add real findings.}
 
-The aggregate comparison establishes the stage pattern; Figure~\ref{fig:availability-fovs}
-then makes the selected tissue examples inspectable rather than asking the reader to trust
-the summary alone.
+\subsection{The same evidence for avoidance rules}
 
-\reportfigure{complex_nonnew_eligible_goblet_macrophage_epithelial_plasma_fovs.png}
-{Eligible Control, Mild and Severe examples for the availability check. Each column shows
-the full FOV, the complex rule and its strongest simpler rule.}{fig:availability-fovs}
+When two cell types never touch, lift is exactly 0 and any ratio explodes, so avoidance is never ranked
+by measured gain here. The zero is real, though, and this is what it looks like in tissue.
 
-\subsection{Complex and simpler rules can move in opposite directions}
+\fig[0.92\textwidth]{avoids_fov_stronger.png}{A control colon field where Muscle and the two other types
+never share a neighbourhood.}{fig:perfect-avoid}
 
-The method should also expose cases in which the longer organization changes differently
-from its parts. Figure~\ref{fig:opposite-movement} provides a filtered example:
-Epithelial, Neuron $\rightarrow$ Goblet, Macrophage becomes more prevalent from Control to
-Severe while the constituent simpler-rule coverage decreases slightly. In rule-bearing FOVs,
-the complex Lift decreases from 2.86 to 2.43 while the simpler-rule Lift increases from 1.91
-to 2.21. The two panels therefore show genuine opposite movement in both summaries, not a
-duplicated Lift axis.
+\bio{Complete avoidance is usually a tissue boundary, not an interaction --- the method found the muscle
+layer without being told it exists.}
 
-\evidence{Descriptive reversal passing the five-FOV recurrence filter; patient counts are printed in the figure}
+Avoidance produces a significance win of its own, the same way attraction did.
 
-\reportfigure{complex_opposite_epithelial_neuron_goblet_macrophage_strength.png}
-{An explicit simple-versus-complex reversal. The left panel compares prevalence across the
-same eligible stage FOVs; the right compares patient-median Lift only where each rule is
-observed.}{fig:opposite-movement}
+\fig[0.92\textwidth]{avoids_fov_significance.png}{An avoidance rule whose FDR collapses once the third
+cell type is added.}{fig:avoid-significance}
 
-The same screen found no new-only rule with opposite complex-versus-simpler prevalence
-movement between any two stages after the five-FOV filter. This is expected to be harder:
-for a new occurrence, no constituent pair is mined in that same FOV, so the only possible
-comparison is with pair-rule prevalence elsewhere in the stage. No weaker example is shown.
+The new avoidance rules ranked by gain floor. One cell type appears far more often than chance would
+suggest.
+
+\fig{gain_new_avoids.png}{New avoidance rules on the inverse-lift scale. Fibroblast is in ten of fifteen
+rows; five of those separate fibroblasts from goblet cells.}{fig:new-avoid-ranking}
+
+\bio{A fibroblast-centred family of barriers is not an obvious guess --- and it is exactly what the atlas
+predicts (Section~\ref{sec:barriers}).}
+
+Four of them in tissue, again with no pair panel.
+
+\fig[0.68\textwidth]{avoids_newfov_muscle_fibroblast_macrophage.png}{Muscle against Fibroblast and
+Macrophage.}{fig:new-avoid-fov-1}
+
+\fig[0.68\textwidth]{avoids_newfov_muscle_smv_fibroblast.png}{Muscle and smooth muscle against
+Fibroblast.}{fig:new-avoid-fov-2}
+
+\fig[0.68\textwidth]{avoids_newfov_fibroblast_neuron_goblet.png}{Fibroblast and Neuron against
+Goblet.}{fig:new-avoid-fov-3}
+
+\fig[0.68\textwidth]{avoids_newfov_endothelial_fibroblast_goblet.png}{Endothelial and Fibroblast against
+Goblet.}{fig:new-avoid-fov-4}
+
+\subsection{The same result in each organ}
+
+Colon and duodenum have different cell mixes, so running the whole analysis inside each separately is a
+real check. The shape of the answer does not change in either.
+
+\fig{gain_attracts_colon_measured.png}{Colon attractions with a measured pair, top 15 by
+gain.}{fig:gain-colon-measured}
+
+\fig{gain_attracts_colon_with_new.png}{Colon attractions including rules with no mined
+pair.}{fig:gain-colon-new}
+
+\fig[0.92\textwidth]{attracts_colon_fov_stronger.png}{Colon strength win.}{fig:proof-strength-colon}
+
+\fig[0.92\textwidth]{attracts_colon_fov_significance.png}{Colon significance win.}{fig:proof-sig-colon}
+
+\fig{gain_attracts_duodenum_measured.png}{Duodenal attractions with a measured
+pair.}{fig:gain-duo-measured}
+
+\fig{gain_attracts_duodenum_with_new.png}{Duodenal attractions including rules with no mined pair;
+Section~\ref{sec:paneth} reads this same figure for its biology.}{fig:gain-duo-new}
+
+\fig[0.92\textwidth]{attracts_duodenum_fov_stronger.png}{Duodenal strength win.}{fig:proof-strength-duo}
+
+\fig[0.92\textwidth]{attracts_duodenum_fov_significance.png}{Duodenal significance
+win.}{fig:proof-sig-duo}
+
+\fig[0.92\textwidth]{avoids_colon_fov_stronger.png}{Colon avoidance strength win.}{fig:avoid-colon-strong}
+
+\fig[0.92\textwidth]{avoids_colon_fov_significance.png}{Colon avoidance significance
+win.}{fig:avoid-colon-sig}
+
+\fig[0.92\textwidth]{avoids_duodenum_fov_stronger.png}{Duodenal avoidance strength win: Muscle and Neuron
+against CD4 T cells, at lift exactly 0.}{fig:avoid-duo-strong}
+
+\fig[0.92\textwidth]{avoids_duodenum_fov_significance.png}{Duodenal avoidance significance
+win.}{fig:avoid-duo-sig}
+
+\vspace{0.3em}
+\colorbox{soft}{\parbox{0.965\textwidth}{\textbf{Part 1 in one line.} Most three-cell rules are redundant
+and the method says so. Of the rest, most informative attractions have no pair equivalent, measured gains
+stay under 1.6$\times$, and this survives splitting by stage, organ and cell availability.}}
 
 % =============================================================================
 \clearpage
-\section{Higher-order results aligned with the spatial-atlas paper}
+\section{What the atlas reported, seen again in longer rules}
 % =============================================================================
 
-\subsection{Loss of organized plasma-cell contexts}
+Checked against the \href{https://doi.org/10.1126/scitranslmed.adu6032}{spatial atlas of gastrointestinal
+acute GVHD} (Azulay \emph{et al.}, 2025), staged by clinical score. Every rule shown here changes between
+control and severe.
 
-The \href{https://doi.org/10.1126/scitranslmed.adu6032}{spatial atlas} reports that
-``CD4 T cells, plasma cells, and macrophages were spatially organized from the crypts to the
-tip of the villus'' and that homeostatic immune organization is disrupted with a prominent
-reduction in IgA-secreting plasma cells. The complex-rule screen independently recovers a
-family of Colon plasma contexts. Figure~\ref{fig:new-colon-overview} tests whether this is
-one selected rule or a coordinated family; Figure~\ref{fig:plasma-availability} then tests
-whether the leading rule disappears merely because its cell types become unavailable.
+\subsection{The organised plasma-cell neighbourhood disappears}
+\label{sec:zonation}
 
-\evidence{Strong descriptive family-level alignment; stage contrasts are not permutation-tested here}
+\atlas{We uncovered zonation of immune cells in the gut, in which CD4 T cells, plasma cells, and
+macrophages were spatially organized from the crypts to the tip of the villus \ldots{} This recurrent
+organization between individuals raises questions regarding the mechanisms that drive it, as well as its
+functional implications in healthy gut homeostasis.}
 
-\reportfigure{complex_new_colon_attracts_overview.png}{All recurring new Colon attractions
-that pass the current filters. Five of six rows end in Plasma and show a coordinated loss
-from Control. Exact eligible denominators are printed in every cell.}{fig:new-colon-overview}
+\atlas{Homeostatic immune organization was disrupted, with a prominent reduction in immunoglobulin
+A--secreting plasma cells.}
 
-\reportfigure{complex_epithelial_macrophage_plasma_availability.png}
-{Cell availability and spatial organization for the leading Colon plasma rule. Each stage
-bar uses all FOVs: grey marks too few cells, while the plum segment marks eligible FOVs with
-the new complex rule. The loss of the plum segment is visible separately from changing cell
-availability.}{fig:plasma-availability}
+\note{Why a longer rule is the right test.}{The atlas measured zonation one cell type at a time, as a
+distance from the crypt base. That says each type has a preferred height --- not that the types are still
+next to each other. A three-cell rule asks exactly that.}
 
-Together, the figures show five related new rules ending in Plasma, with 20--24\% prevalence
-in eligible Control FOVs but at most 8\% in Mild and 6\% in Severe. Epithelial, Macrophage
-$\rightarrow$ Plasma is also the most recurrent new rule overall (24 FOVs; median Lift 1.45).
-It refines rather than repeats the atlas result because no constituent pair was mined in
-those rule-bearing FOVs. Figure~\ref{fig:epi-macro-plasma} shows the automatically selected
-Colon examples behind that summary.
+These are the colon attraction rules that change most between stages. What is striking is that they are
+not twelve different findings --- they are one neighbourhood, and it reaches zero.
 
-\reportfigure{complex_epithelial_macrophage_plasma_colon_fovs.png}{Stage-specific Colon FOV
-examples for Epithelial, Macrophage $\rightarrow$ Plasma. Because the rule is new, each
-available column shows the full FOV and the highlighted higher-order rule without inventing
-a simpler comparator.}
-{fig:epi-macro-plasma}
+\fig{all_clin_attracts_colon_overview.png}{Colon attraction rules with the largest stage
+change.}{fig:overview-att-colon-all}
 
-\subsection{Stromal--vascular remodeling is specifically higher-order}
+\bio{Four rows are the same neighbourhood written four ways, and all four reach \emph{zero} severe fields
+--- not reduced, absent.}
 
-The atlas describes increased fibrosis and broad stromal disruption. In eligible Colon
-FOVs, the screen identifies Endothelial, Epithelial $\rightarrow$ Goblet, SMV as the clearest
-Severe-enriched non-new attraction. The next three figures expose the complete argument:
-its position in the filtered screen, the availability-versus-organization partition, and the
-direct complex-versus-simpler prevalence and Lift comparison.
+The leading rule on its own. The left panel is the finding; the right panel is the reason to be careful
+about what it means.
 
-\evidence{Strong descriptive separation from the simpler rule; Severe includes five complex-rule patients}
+\fig[0.92\textwidth]{all_clin_attracts_colon_rule_plasma_treg_cd4t.png}{Plasma and Treg predicting CD4 T
+cells: 6/25 control, 0/54 severe.}{fig:plasma-treg-cd4t}
 
-\reportfigure{complex_eligible_colon_attracts_overview.png}{Top eligible non-new Colon
-attractions. The stromal--vascular rule is the clearest Severe-enriched pattern; the same
-overview also shows the Control-enriched plasma contexts.}{fig:eligible-colon-overview}
+\bio{Plasma falls from 8\% of a field's cells to under 1\% and the other two fall with it --- so this
+neighbourhood is lost \emph{with} its cells, not by cells that stayed and stopped being arranged.}
 
-\reportfigure{complex_endothelial_epithelial_goblet_smv_availability.png}
-{All Colon FOVs partitioned by whether the four required cell types are sufficiently
-available and, if so, whether the FOV contains neither rule, only simpler coverage, or the
-informative complex rule. The Severe enrichment is visible in the final segment and cannot
-be read as cell availability alone.}{fig:endo-epi-availability}
+The tissue behind it. Severe and mild have no field carrying the rule at all, so those columns fall back
+to a field carrying its strongest pair.
 
-\reportfigure{complex_eligible_endothelial_epithelial_goblet_smv_strength.png}{Prevalence and
-Lift for Endothelial, Epithelial $\rightarrow$ Goblet, SMV and its strongest simpler rule.
-The complex rule reaches 6/10 eligible Severe FOVs; patient counts are printed below the
-Lift panel.}{fig:endo-epi-strength}
+\fig[0.72\textwidth]{all_clin_attracts_colon_fovs_plasma_treg_cd4t.png}{One field per stage.}{fig:plasma-treg-cd4t-fovs}
 
-Figures~\ref{fig:endo-epi-availability}--\ref{fig:endo-epi-strength} show the numerical
-separation: complex prevalence rises from 13\% and 11\% to 60\%, while simpler-rule coverage
-changes in the opposite direction from 93\% to 90\%. The complex Lift also exceeds the
-simpler Lift in the Control and Severe medians. The selected maps below show what the added
-four-cell context looks like in tissue.
+Restricting to fields that still hold 20 of each cell type sharpens the same point, and adds one worth
+noticing: where the arrangement survives, it survives more strongly.
 
-\reportfigure{complex_eligible_endothelial_epithelial_goblet_smv_fovs.png}{Automatically
-selected examples show how the four-cell organization occupies tissue beyond the nearly
-ubiquitous Endothelial $\rightarrow$ SMV parent.}{fig:endo-epi-fovs}
+\fig[0.92\textwidth]{elig_clin_attracts_colon_rule_plasma_cd4t_epithelial.png}{Plasma predicting CD4 T
+cells and Epithelium, eligible fields: 5/25 control, 2/24 severe. Mild has 3 eligible fields and carries
+no claim.}{fig:plasma-cd4t-epi-elig}
 
-A separate parentless rule, Epithelial, SMV $\rightarrow$ Endothelial, supports the same
-remodeling theme without depending on the non-new Colon result. Figure~\ref{fig:epi-smv-occurrences}
-is a reproducibility check, not a disease-trend test. It shows every occurrence so that the
-reader can see whether the result is a single-field accident: 13 FOVs from 13 patients carry
-the rule, with median Lift 2.76 and a gain floor of $2.30\times$.
+\bio{Prevalence falls 20\% $\rightarrow$ 8\% while lift \emph{rises} 1.55 $\rightarrow$ 2.03: fewer places
+keep the arrangement, and those that do keep it harder.}
 
-\reportfigure[0.82\textwidth]{complex_epithelial_smv_endothelial_occurrences.png}{Every FOV
-in which Epithelial, SMV $\rightarrow$ Endothelial is classified as new, grouped by organ
-and Pathological-score stage. This panel tests recurrence across independent patients; it
-does not estimate a disease-stage trend. Diamonds are medians and the dashed line is the
-predeclared Lift threshold.}
-{fig:epi-smv-occurrences}
+\fig[0.94\textwidth]{elig_clin_attracts_colon_avail_plasma_cd4t_epithelial.png}{Availability for that
+rule.}{fig:plasma-cd4t-epi-avail}
 
-The recurrence plot establishes that this is not a single chosen field; the next panel
-makes one automatically selected occurrence spatially inspectable.
+\fig[0.72\textwidth]{elig_clin_attracts_colon_fovs_plasma_cd4t_epithelial.png}{One eligible field per
+stage for that rule.}{fig:plasma-cd4t-epi-fovs}
 
-\reportfigure[0.72\textwidth]{complex_epithelial_smv_endothelial_fov.png}{A representative
-new Epithelial, SMV $\rightarrow$ Endothelial occurrence. No constituent pair was mined in
-this FOV.}{fig:epi-smv-endothelial}
+The duodenum is where the atlas measured zonation most carefully, so it is the stricter test. Several
+rows here peak in mild and return --- those are not counted as findings; the rows that matter are the
+ones ending at zero.
 
-\subsection{A higher-order extension of Duodenal CD8 heterogeneity}
+\fig{all_clin_attracts_duodenum_overview.png}{Duodenal attraction rules with the largest stage change.
+Rows such as \emph{Plasma $\rightarrow$ CD4T, Epithelial} (3\%, 15\%, 2\%) are mild peaks and are not
+claimed.}{fig:overview-att-duo-all}
 
-The atlas reports ``marked intrapatient heterogeneity in the prevalence of CD8 T cells and
-neutrophils in the vicinity of individual crypts and villi.'' The pair-rule analysis found
-increasing Duodenal CD8T--Goblet avoidance. Complex mining adds a macrophage-conditioned
-version: Goblet $\rightarrow$ CD8T, Macrophage. The overview first places it in the complete
-eligible avoidance screen; the availability and strength figures then display the exact
-denominators, pair coverage and Lift trajectory needed to judge the claim.
+One row that does clear the control-to-severe bar, and the cell types in it are the atlas's own zonated
+trio.
 
-\evidence{Moderate paper alignment; good FOV denominators but only two Severe patients}
+\fig[0.92\textwidth]{all_clin_attracts_duodenum_rule_plasma_epithelial_macrophage.png}{Plasma predicting
+Epithelial and Macrophage: 3/31 control, 0/41 severe.}{fig:plasma-epi-macro}
 
-\reportfigure{complex_eligible_duodenum_avoids_overview.png}{The eligible Duodenal avoidance
-screen. Multiple CD8T-containing and muscle-containing higher-order rules become more
-prevalent in Severe disease. Rows with one or two eligible Severe FOVs are visible and are
-not used as primary claims.}{fig:eligible-duodenum-avoid-overview}
+\bio{The atlas's crypt-to-tip trio --- plasma cells, macrophages and epithelium --- has no severe field
+left in which it still sits together.}
 
-\reportfigure{complex_goblet_cd8t_macrophage_availability.png}
-{Every Duodenal FOV is assigned to one availability/organization state for Goblet
-$\rightarrow$ CD8T, Macrophage. This shows the changing supply of measurable FOVs separately
-from the fraction carrying the informative higher-order avoidance.}{fig:goblet-cd8-availability}
+\fig[0.72\textwidth]{all_clin_attracts_duodenum_fovs_plasma_epithelial_macrophage.png}{One field per
+stage for that rule.}{fig:plasma-epi-macro-fovs}
 
-\reportfigure{complex_eligible_goblet_avoids_cd8t_macrophage_strength.png}{Prevalence and
-Lift of Goblet $\rightarrow$ CD8T, Macrophage against its strongest simpler rule. For
-avoidance, lower Lift means stronger separation.}{fig:goblet-cd8-macro-strength}
+A second duodenal rule with the same control-to-severe collapse, this time vascular.
 
-The figures show complex prevalence rising from 9/28 eligible Control FOVs to 26/50 Mild
-and 7/8 Severe FOVs, while simpler-rule coverage is already 89--100\%. Median complex Lift
-falls from about 0.42 to 0.29, so the avoidance strengthens numerically. Only two Severe
-patients contribute to that Lift estimate, so it remains descriptive. The following maps
-show the actual joint spatial pattern used for the summary.
+\fig[0.92\textwidth]{all_clin_attracts_duodenum_rule_smv_cd4t_endothelial.png}{Smooth muscle predicting
+CD4 T cells and Endothelial: 5/31 control, 0/41 severe.}{fig:smv-cd4t-endo}
 
-\reportfigure{complex_eligible_goblet_avoids_cd8t_macrophage_fovs.png}{Control, Mild and
-Severe examples of the macrophage-conditioned CD8T avoidance. These maps make the joint
-context inspectable but do not identify the atlas's patient-level CD8 subgroup.}
-{fig:goblet-cd8-macro-fovs}
+\fig[0.72\textwidth]{all_clin_attracts_duodenum_fovs_smv_cd4t_endothelial.png}{One field per stage for
+that rule.}{fig:smv-cd4t-endo-fovs}
+
+\subsection{Goblet cells stop excluding immune cells}
+\label{sec:goblet}
+
+\atlas{In a subset of colon samples, we observed a loss of mucin expression in the epithelium, indicating
+potential damage to goblet cells or impaired mucin production.}
+
+\atlas{The lamina propria was enriched with plasma cells, macrophages, and CD4 T cells, whereas CD8 T and
+double-negative T cells \ldots{} were the predominant populations inside the epithelium \ldots{}
+Intraepithelial cells were primarily found in the duodenum and were very scarce in the colon.}
+
+\note{Why a longer rule is the right test.}{Together those say the healthy colon keeps immune cells out of
+the goblet-rich epithelium. That is a spatial exclusion, and an avoidance rule measures exclusion
+directly. The atlas measured mucin loss as a stain intensity; the rule measures its consequence.}
+
+The twelve colon avoidance rules that change most. Every single one begins with Goblet --- and the screen
+was never told to look at goblet cells.
+
+\fig{all_clin_avoids_colon_overview.png}{Colon avoidance rules with the largest stage change; all twelve
+fall from control to severe.}{fig:overview-avo-colon-all}
+
+\bio{Goblet exclusion emerged on its own from a ranking by stage change --- the mucin loss the atlas
+stains for, seen as the separation it maintains.}
+
+The clearest single rule, with its cell-abundance control alongside. This is the case Section~\ref{sec:zonation}
+could not make.
+
+\fig[0.92\textwidth]{all_clin_avoids_colon_rule_goblet_cd8t_plasma.png}{Goblet against CD8 T cells and
+Plasma: 92\% of control fields, 15\% of severe, while the best pair stays at 81--100\%
+throughout.}{fig:goblet-cd8-plasma}
+
+\bio{Goblet cells are still at three quarters of their control share in mild disease, yet the exclusion
+collapses from 92\% of fields to 6\% --- the cells are there and have stopped being kept apart.}
+
+What that looks like in tissue: ordered bands in control, a fragmented compartment with immune cells
+scattered through it in disease.
+
+\fig[0.72\textwidth]{all_clin_avoids_colon_fovs_goblet_cd8t_plasma.png}{One field per
+stage.}{fig:goblet-cd8-plasma-fovs}
+
+The same rule with a different T cell behaves identically, which says this is about the goblet
+compartment rather than about one immune cell type.
+
+\fig[0.92\textwidth]{all_clin_avoids_colon_rule_goblet_cd4t_plasma.png}{Goblet against CD4 T cells and
+Plasma: 88\% control, 15\% severe.}{fig:goblet-cd4-plasma}
+
+\fig[0.72\textwidth]{all_clin_avoids_colon_fovs_goblet_cd4t_plasma.png}{One field per stage for that
+rule.}{fig:goblet-cd4-plasma-fovs}
+
+The duodenum tells the same story with its own cell mix.
+
+\fig{all_clin_avoids_duodenum_overview.png}{Duodenal avoidance rules with the largest stage
+change.}{fig:overview-avo-duo-all}
+
+\fig[0.92\textwidth]{all_clin_avoids_duodenum_rule_goblet_cd4t_macrophage.png}{Goblet against CD4 T cells
+and Macrophage.}{fig:goblet-cd4-macro-duo}
+
+\fig[0.72\textwidth]{all_clin_avoids_duodenum_fovs_goblet_cd4t_macrophage.png}{One field per stage for
+that rule.}{fig:goblet-cd4-macro-duo-fovs}
+
+\subsection{CD8 T cells: patchy, and increasingly walled off}
+
+\atlas{We also observed marked intrapatient heterogeneity in the prevalence of CD8 T cells and neutrophils
+in the vicinity of individual crypts and villi. The variance in a single patient sometimes spanned the
+entire variance observed in the cohort.}
+
+\atlas{Figure 6C shows an example from one patient who had a dense concentration of CD8 T cells next to
+two of the crypts. These crypts were also the most deteriorated \ldots{} Other crypts in the immediate
+vicinity were intact, with little infiltration of T cells.}
+
+\note{Why a longer rule is the right test.}{Patchiness means a CD8-rich region sits beside a CD8-free one
+inside one field --- a boundary, which is what an avoidance rule detects. The prediction runs opposite to
+the colon: CD8 avoidance rules should become \emph{more} findable as disease advances.}
+
+The prediction is testable and this is the test. Every row rises from control to severe, which is the
+opposite of what the colon did.
+
+\fig{elig_clin_avoids_duodenum_overview.png}{Duodenal avoidance rules on eligible fields; all twelve rise
+into severe.}{fig:overview-avo-duo-elig}
+
+\bio{The two organs disagree in the direction the atlas's own account predicts --- diffuse barrier failure
+in the colon, patchy foci in the duodenum.}
+
+The strongest single rule of that family, rising nine-fold from control to severe.
+
+\fig[0.94\textwidth]{elig_clin_avoids_duodenum_avail_muscle_cd8t_smv.png}{Availability for Muscle against
+CD8 T cells and smooth muscle.}{fig:muscle-cd8-smv-avail}
+
+\fig[0.92\textwidth]{elig_clin_avoids_duodenum_rule_muscle_cd8t_smv.png}{That rule on eligible fields:
+1/16 control, 12/22 severe.}{fig:muscle-cd8-smv}
+
+\fig[0.72\textwidth]{elig_clin_avoids_duodenum_fovs_muscle_cd8t_smv.png}{One eligible field per stage for
+that rule.}{fig:muscle-cd8-smv-fovs}
+
+The goblet version of the same story, staged pathologically, because its abundance panel makes the
+mechanism visible directly.
+
+\fig[0.92\textwidth]{elig_path_avoids_duodenum_rule_goblet_cd8t_macrophage.png}{Goblet against CD8 T cells
+and Macrophage: 9/28 control, 7/8 severe.}{fig:goblet-cd8-macro-path}
+
+\bio{CD8 T cells rise from 3\% to 8\% of a field's cells while the goblet share stays flat --- more immune
+cells \emph{and} a sharper separation is exactly what a patchy infiltrate looks like.}
+
+A second rule of the family, ending at half of all severe fields.
+
+\fig[0.92\textwidth]{elig_clin_avoids_duodenum_rule_muscle_endothelial_plasma_cd38.png}{Muscle against
+Endothelial and CD38-positive plasma cells: 0/11 control, 8/16 severe.}{fig:muscle-endo-cd38}
+
+\fig[0.72\textwidth]{elig_clin_avoids_duodenum_fovs_muscle_endothelial_plasma_cd38.png}{One eligible field
+per stage for that rule.}{fig:muscle-endo-cd38-fovs}
+
+\subsection{Fibrosis and stromal barriers --- a question the atlas leaves open}
+\label{sec:barriers}
+
+\atlas{In the duodenum, [the decrease in epithelial cells] was also accompanied by an increase in
+fibroblasts and extracellular matrix (ECM) and correlated with high-stage disease.}
+
+\atlas{The localized nature of these immune microenvironments and the proximity of destructed and healthy
+crypts cannot be explained solely by the classic view of donor T cell activation by host APCs. It
+implicates the existence of local processes, \emph{barriers}, and feedback loops that drive this
+compartmentalization. Our analysis suggests that one factor that contributes to this compartmentalization
+could be fibroblasts that secrete ECM proteins, which limit the motility of immune cells in the tissue.}
+
+\note{Why a longer rule is the right test.}{This is the one place the atlas states an open hypothesis:
+stromal barriers compartmentalise immune cells. The atlas can show fibroblasts increase and damage is
+patchy, but has no barrier measurement. An avoidance rule \emph{is} one.}
+
+\bio{Figure~\ref{fig:new-avoid-ranking} answers it unprompted --- Fibroblast in ten of the fifteen
+strongest new avoidance rules, from a screen ranked only by strength and recurrence.}
+
+Under clinical staging the colon yields a new-avoidance family of its own. Read the second row: the first
+is flat from control to severe and is shown only for completeness.
+
+\fig{new_clin_avoids_colon_overview.png}{All recurring new colon avoidances. \emph{Fibroblast, Neuron
+$\rightarrow$ Goblet} is 14\% control and 17\% severe --- flat, and not claimed. \emph{CD4T, Fibroblast
+$\rightarrow$ Goblet} rises 4\% $\rightarrow$ 14\%.}{fig:overview-new-avo-colon}
+
+The rule that does clear the bar, with five severe patients behind it.
+
+\fig[0.80\textwidth]{new_clin_avoids_colon_rule_cd4t_fibroblast_goblet.png}{CD4 T cells and Fibroblast
+against Goblet: 1/25 control, 5/37 severe.}{fig:cd4t-fibro-goblet}
+
+\bio{Fibroblasts excluding goblet cells more sharply as disease advances is the barrier the atlas
+proposes, measured directly rather than inferred.}
+
+\fig[0.94\textwidth]{new_clin_avoids_colon_avail_cd4t_fibroblast_goblet.png}{Availability for that
+rule.}{fig:cd4t-fibro-goblet-avail}
+
+\fig[0.72\textwidth]{new_clin_avoids_colon_fovs_cd4t_fibroblast_goblet.png}{One field per stage for that
+rule.}{fig:cd4t-fibro-goblet-fovs}
+
+The attraction side of the same remodelling, and the cleanest control-to-severe rise in the colon: a
+vascular context that does not exist in healthy tissue at all.
+
+\fig{elig_clin_attracts_colon_overview.png}{Colon attraction rules on eligible
+fields.}{fig:overview-att-colon-elig}
+
+\fig[0.92\textwidth]{elig_clin_attracts_colon_rule_endothelial_epithelial_smv.png}{Endothelial and
+Epithelial predicting smooth muscle: 0/15 control, 5/18 severe.}{fig:endo-epi-smv}
+
+\bio{A vessel-and-epithelium context absent from every control field and present in a third of severe ones
+--- stromal remodelling closing in on what is left of the crypts.}
+
+\fig[0.94\textwidth]{elig_clin_attracts_colon_avail_endothelial_epithelial_smv.png}{Availability for that
+rule.}{fig:endo-epi-smv-avail}
+
+\fig[0.72\textwidth]{elig_clin_attracts_colon_fovs_endothelial_epithelial_smv.png}{One eligible field per
+stage for that rule.}{fig:endo-epi-smv-fovs}
+
+\subsection{A clean anatomical control: Brunner's glands}
+\label{sec:brunner}
+
+\note{Why this matters.}{Every avoidance result above assumes these rules track real tissue structure.
+Brunner's glands test that: duodenum-only, in the submucosa below the muscularis mucosae, while plasma
+cells sit above it in the lamina propria. Nothing in the pipeline was told this.}
+
+The stage trend here is meaningless --- the denominators are 6, 15 and 1 field. The point is that the rule
+exists at all.
+
+\fig[0.92\textwidth]{elig_path_avoids_duodenum_rule_brunnergland_plasma_smv.png}{Brunner's gland cells
+against Plasma and smooth muscle.}{fig:brunner}
+
+\bio{The method recovered a textbook anatomical partition from cell positions alone --- the best available
+evidence that these avoidance rules track structure rather than noise.}
+
+\fig[0.72\textwidth]{elig_path_avoids_duodenum_fovs_brunnergland_plasma_smv.png}{One field per stage for
+that rule.}{fig:brunner-fovs}
+
+\subsection{Paneth cells give way to endocrine cells at the crypt base}
+\label{sec:paneth}
+
+\atlas{Patients with aGVHD exhibited increased fibrosis, alterations in crypt morphology, loss of Paneth
+cells, and accumulation of endocrine cells in the crypts.}
+
+\atlas{This reduction in Paneth cells was accompanied by an increase in endocrine cells, specifically near
+the muscularis mucosa, where Paneth cells and ISCs normally reside.}
+
+\note{Why a longer rule is the right test.}{The second quote names three things at once --- endocrine
+cells, Paneth cells and the muscularis. That is a joint arrangement; no pair rule can express it. The atlas
+measured it as a distance to a hand-drawn muscle mask.}
+
+The duodenal gain ranking again, read for its cell types rather than as a method check. The atlas's
+crypt-base trio is the top of the list.
+
+\fig{gain_attracts_duodenum_with_new.png}{Duodenal attractions including rules with no mined
+pair.}{fig:gain-duo-new-bio}
+
+\bio{Muscle with Epithelial predicts Paneth (the normal crypt base) and Epithelial with Paneth predicts
+Endocrine (the replacement the atlas describes) --- and pair mining found neither.}
 
 % =============================================================================
 \clearpage
-\section{New biologically interpretable findings}
+\section{What the longer rules show that is new}
 % =============================================================================
 
-The complete Duodenal new-attraction screen organizes the selected hypotheses into three
-recurring themes: an epithelial--neural Paneth context, several epithelial--plasma contexts,
-and smooth-muscle/mesenchymal contexts ending in Endothelial. The overview is shown before
-the individual rules so that the examples can be judged against the full filtered result
-rather than as isolated selections.
+All from rules with no pair mined in the same field, staged by clinical score, and all changing between
+control and severe.
 
-\reportfigure{complex_new_duodenum_attracts_overview.png}{All recurring new Duodenal
-attractions that pass rule-level FDR, Lift, cell-eligibility and recurrence filters. Exact
-eligible denominators expose which apparent stage differences can and cannot be trusted.}
-{fig:new-duodenum-attract-overview}
+\subsection{The healthy plasma-cell niche has no pair equivalent}
+\label{sec:plasma-niche}
 
-\subsection{A surviving epithelial--neural Paneth niche}
+\note{Why this would make sense.}{The atlas gives plasma cells a causal role: \emph{``host plasma cells,
+important for maintaining the immune barrier in the gut, are rapidly reduced after the conditioning regimen
+but slowest to reconstitute \ldots{} This shift from homeostasis may increase epithelial vulnerability and
+serve as another driver of the disease.''} Gut IgA plasma cells are maintained next to the epithelium ---
+so the thing to watch is the arrangement, not the count.}
 
-Epithelial, Neuron $\rightarrow$ Paneth is new in 12 FOVs, with median Lift 2.24 and a gain
-floor of $1.86\times$. This extends the atlas observation of Paneth-cell loss: among FOVs
-that retain enough Paneth cells to measure, Paneth proximity is associated with a joint
-epithelial--neural context that no simpler mined rule captures. Neuronal signaling can
-regulate crypt growth, and receptors for that signaling occur in the crypt stem-cell
-compartment (\href{https://pubmed.ncbi.nlm.nih.gov/28054012/}{Muise et al., 2017}), making
-the niche plausible without establishing direct Neuron--Paneth signaling.
+All the recurring new colon attractions. Five of six end in Plasma, and all five fall from control to
+severe.
 
-\evidence{Moderate for the recurring higher-order niche; exploratory mechanism}
+\fig{new_clin_attracts_colon_overview.png}{Recurring new colon attractions.}{fig:overview-new-att-colon}
 
-\reportfigure[0.80\textwidth]{complex_epithelial_neuron_paneth_strength.png}{The rule occurs
-in 3/11 eligible Control and 8/58 Mild FOVs, representing two and seven patients. No Severe
-rule-bearing FOV passes the filters, so the line is not a validated severity trend.}
-{fig:neuron-paneth-strength}
+The most recurrent of them, first as an availability split and then as prevalence.
 
-The prevalence panel establishes recurrence but not morphology. The next figure shows the
-automatically selected Control and Mild fields, with all non-rule cell types greyed in the
-highlighted row.
+\fig[0.94\textwidth]{new_clin_attracts_colon_avail_epithelial_macrophage_plasma.png}{Availability for
+Epithelial and Macrophage predicting Plasma.}{fig:epi-macro-plasma-avail}
 
-\reportfigure{complex_epithelial_neuron_paneth_fovs.png}{Representative Control and Mild
-FOVs for the new Paneth rule. The empty Severe column makes the absence of a qualifying
-example explicit.}{fig:neuron-paneth-fovs}
+\fig[0.80\textwidth]{new_clin_attracts_colon_rule_epithelial_macrophage_plasma.png}{That rule on eligible
+fields: 6/25 control, 1/26 severe. The 4-field mild column carries no
+claim.}{fig:epi-macro-plasma}
 
-\subsection{A recurrent neuro--stromal context in Colon}
+\bio{Not that plasma cells are lost --- the atlas shows that --- but that this
+epithelium--macrophage--plasma arrangement was invisible to pair mining in all 33 of its fields.}
 
-Fibroblast, Muscle $\rightarrow$ Neuron is a new rule in eight Colon FOVs. It reaches 5/15
-eligible Mild FOVs and is also observed in Control and Severe; median Lift is 2.23, 2.67 and
-1.50 respectively. The result is biologically coherent with the close organization of
-enteric nerves and the muscular--stromal compartment, but the patient counts are one, four
-and two. The robust conclusion is recurrence of a three-cell context, not a stage trend.
+\fig[0.72\textwidth]{new_clin_attracts_colon_fovs_epithelial_macrophage_plasma.png}{One field per stage
+for that rule.}{fig:epi-macro-plasma-fovs}
 
-\evidence{Moderate recurrence; exploratory stage interpretation}
+A second rule from the same family, ending at zero severe fields.
 
-\reportfigure[0.82\textwidth]{complex_fibroblast_muscle_neuron_strength.png}{Prevalence and
-Lift for the new Colon neuro--stromal rule. Exact FOV and patient counts prevent the Mild
-peak from being overinterpreted.}{fig:fibro-muscle-neuron-strength}
+\fig[0.80\textwidth]{new_clin_attracts_colon_rule_goblet_macrophage_plasma.png}{Goblet and Macrophage
+predicting Plasma: 5/25 control, 0/22 severe.}{fig:goblet-macro-plasma}
 
-To verify that the numerical recurrence corresponds to coherent tissue structure, the next
-panel displays the selected rule-bearing FOV from every stage in which one is available.
+\fig[0.94\textwidth]{new_clin_attracts_colon_avail_goblet_macrophage_plasma.png}{Availability for that
+rule.}{fig:goblet-macro-plasma-avail}
 
-\reportfigure{complex_fibroblast_muscle_neuron_fovs.png}{Representative rule-bearing FOVs
-from all three stages. The highlighted maps reveal a spatially coherent muscular boundary
-in the selected Control and Mild examples.}{fig:fibro-muscle-neuron-fovs}
+\fig[0.72\textwidth]{new_clin_attracts_colon_fovs_goblet_macrophage_plasma.png}{One field per stage for
+that rule.}{fig:goblet-macro-plasma-fovs}
 
-\subsection{Disease-associated niches among surviving plasma and endothelial cells}
+\subsection{Paneth cells survive next to nerve --- a strength finding, not a prevalence one}
 
-Epithelial, SMV $\rightarrow$ Plasma\_CD38 is absent from 26 eligible Control FOVs but
-present in 7/70 Mild and 3/22 Severe FOVs, with Lift above 1.3. This does not contradict the
-atlas's overall plasma-cell loss: it suggests that when CD38-positive plasma cells remain,
-some occupy a disease-associated epithelial--SMV context. Five Mild and two Severe patients
-carry the rule, so it is a follow-up hypothesis rather than a validated disease trajectory.
+\note{Why this would make sense.}{Paneth cells form part of the niche for Lgr5 stem cells
+(\href{https://doi.org/10.1038/nature09637}{Sato et al., 2011}), and enteric glia and neurons regulate
+epithelial homeostasis and repair (\href{https://doi.org/10.1038/s41586-021-04006-z}{Progatzky et al.,
+2021}). The atlas reports Paneth loss in only \emph{a subset} of patients and asks why. If nerve proximity
+marks a protected niche, the survivors should be the nerve-adjacent ones.}
 
-\evidence{Moderate recurrence with sound eligible denominators; limited patient replication}
+All the recurring new duodenal attractions. Most rows here are mild peaks and are not claimed.
 
-\reportfigure[0.82\textwidth]{complex_epithelial_smv_plasma_cd38_strength.png}{The new
-Plasma\_CD38 context is not observed in eligible Control FOVs and has median Lift 1.50 in
-Mild and 1.67 in Severe rule-bearing patients.}{fig:plasma-cd38-strength}
+\fig{new_clin_attracts_duodenum_overview.png}{Recurring new duodenal attractions. \emph{Mesenchymal\_VIM,
+SMV $\rightarrow$ Endothelial} (0\%, 19\%, 0\%) is mild-only and is not
+claimed.}{fig:overview-new-att-duo}
 
-The next maps show the Mild and Severe occurrences used to ground that stage-level summary;
-the missing Control example is part of the result, not a plotting omission.
+This rule needs stating carefully. Its prevalence barely moves from control to severe --- so by this
+report's own rule it is not a prevalence finding. What does move is its strength.
 
-\reportfigure{complex_epithelial_smv_plasma_cd38_fovs.png}{Representative Mild and Severe
-occurrences. No Control FOV carries the rule despite 26 eligible FOVs.}
-{fig:plasma-cd38-fovs}
+\fig[0.80\textwidth]{new_clin_attracts_duodenum_rule_epithelial_neuron_paneth.png}{Epithelial and Neuron
+predicting Paneth: 27\% control and 23\% severe --- flat --- but median lift rises 2.92 $\rightarrow$
+4.08.}{fig:epi-neuron-paneth}
 
-Mesenchymal\_VIM, SMV $\rightarrow$ Endothelial is detected in five Mild Duodenal FOVs,
-each from a different patient, with median Lift 2.31. The atlas's fibrosis and stromal
-disruption make the relationship biologically plausible, but only one Control FOV is
-eligible. It is therefore evidence for a recurrent Mild context, not evidence for a
-Control-to-Mild increase.
+\bio{All three cell types hold flat in abundance across every stage, so where the rule does hold in severe
+disease it holds twice as strongly as in health --- surviving Paneth cells sit where nerve is.}
 
-\evidence{Exploratory; five-patient recurrence but an inadequate Control denominator}
+\note{The follow-up.}{In a biopsy with partial Paneth loss, are the intact crypts the nerve-adjacent ones?}
 
-\reportfigure[0.82\textwidth]{complex_mesenchymal_smv_endothelial_strength.png}{The Mild-only
-pattern and its eligibility limitation. Control prevalence is 0/1, so the apparent rise
-must not be interpreted as a stage comparison.}{fig:mesenchymal-endo-strength}
+\fig[0.94\textwidth]{new_clin_attracts_duodenum_avail_epithelial_neuron_paneth.png}{Availability for that
+rule --- most fields are grey, which is the atlas's Paneth loss seen from the denominator
+side.}{fig:epi-neuron-paneth-avail}
 
-Because the Control denominator prevents a stage claim, the following panel is presented
-only as spatial confirmation of the recurrent Mild configuration.
+\fig[0.72\textwidth]{new_clin_attracts_duodenum_fovs_epithelial_neuron_paneth.png}{One field per stage for
+that rule.}{fig:epi-neuron-paneth-fovs}
 
-\reportfigure[0.80\textwidth]{complex_mesenchymal_smv_endothelial_fovs.png}{A representative
-Mild FOV containing the new mesenchymal--smooth-muscle--endothelial context.}
-{fig:mesenchymal-endo-fovs}
+\subsection{A muscle-centred family of new avoidances}
+\label{sec:muscle-family}
 
-\subsection{Negative rules: higher-order spatial avoidance}
+\note{Why this would make sense.}{Muscularis macrophages are a known, distinct population that signals to
+enteric neurons and differs from lamina propria macrophages
+(\href{https://doi.org/10.1016/j.cell.2014.08.002}{M\"uller et al., 2014}). A rule separating macrophages
+from muscle has two readings --- a compartment boundary, or which macrophage population is present.}
 
-Avoidance is analyzed as a complete result family, using the same FDR, cell-eligibility,
-strength and recurrence filters as attraction. No new Colon avoidance reaches five FOVs in
-one eligible stage. The retained Duodenal screen is small and coherent: all five rules
-contain Muscle or SMV, but no stage prevalence exceeds 11\%. This supports a recurring
-muscle-centered family while arguing against a strong new-avoidance stage claim.
+All the recurring new duodenal avoidances. Every one contains Muscle or smooth muscle; all peak in mild,
+so this family is reported as a consistent set rather than as a stage trend.
 
-\reportfigure{complex_new_duodenum_avoids_overview.png}{All recurring new Duodenal
-avoidances. The common muscle/SMV theme is biologically interesting, but the low prevalence
-keeps the stage interpretation exploratory.}{fig:new-duodenum-avoid-overview}
+\fig{new_clin_avoids_duodenum_overview.png}{Recurring new duodenal avoidances.}{fig:overview-new-avo-duo}
 
-The new avoidance Muscle $\rightarrow$ Fibroblast, Macrophage recurs in 17 FOVs, with
-median inverse Lift 1.40. A representative Duodenal FOV has Lift 0.717, support 0.0585,
-conviction 0.576 and FDR 0.00656. This joins the Fibroblast/Muscle/Neuron finding in pointing
-to the muscular--stromal compartment, but in the opposite spatial direction. Muscularis
-macrophages participate in gut neuromuscular homeostasis
-(\href{https://pmc.ncbi.nlm.nih.gov/articles/PMC4149228/}{M\"uller et al., 2014}); the
-present rule does not identify that macrophage subtype and should be followed up by cell
-state or marker analysis.
+\fig[0.80\textwidth]{new_clin_avoids_duodenum_rule_muscle_macrophage_smv.png}{Muscle against Macrophage
+and smooth muscle.}{fig:muscle-macro-smv}
 
-\evidence{Moderate recurrence; biologically plausible but subtype-agnostic}
+\bio{These panels cannot separate the two readings, because ``Macrophage'' here is a label and not a state
+--- the clearest case in the report for a marker or cell-state follow-up.}
 
-\reportfigure[0.82\textwidth]{complex_muscle_avoids_fibroblast_macrophage_strength.png}
-{Eligible stage prevalence and Lift for the new Muscle $\rightarrow$ Fibroblast, Macrophage
-avoidance. The exact FOV and patient counts show both its recurrence and why its stage trend
-remains exploratory.}{fig:muscle-fibro-macro-strength}
+\fig[0.94\textwidth]{new_clin_avoids_duodenum_avail_muscle_macrophage_smv.png}{Availability for that
+rule.}{fig:muscle-macro-smv-avail}
 
-The recurrence statistics motivate inspection of stage-specific fields. Since this is a
-new rule, the spatial panel correctly contains no simpler-rule row.
+\fig[0.72\textwidth]{new_clin_avoids_duodenum_fovs_muscle_macrophage_smv.png}{One field per stage for that
+rule.}{fig:muscle-macro-smv-fovs}
 
-\reportfigure{complex_muscle_avoids_fibroblast_macrophage_stage_fovs.png}{Automatically
-selected stage examples of the new Muscle $\rightarrow$ Fibroblast, Macrophage avoidance.
-Each available column shows the full field and the higher-order rule.}
-{fig:muscle-fibro-macro-fov}
+A second member of the family. Its severe field also shows the muscle-sampling confound directly.
 
-A complementary non-new avoidance, Muscle $\rightarrow$ Plasma, SMV, becomes substantially
-more prevalent in disease while its simpler-rule coverage remains high. Its complex Lift
-rises from 0.04 in Control to 0.17 in Mild and 0.11 in Severe: the avoidance is much more
-frequent in disease but is not stronger than the single Control estimate. The next figure
-shows both summaries and both rules, preventing prevalence from being confused with effect
-strength. Only one Control patient carries the complex rule, so the Lift trajectory is
-descriptive.
+\fig[0.80\textwidth]{new_clin_avoids_duodenum_rule_muscle_fibroblast_neuron.png}{Muscle against Fibroblast
+and Neuron.}{fig:muscle-fibro-neuron}
 
-\evidence{Strong FOV-level prevalence contrast; Control strength is based on one patient}
+\fig[0.72\textwidth]{new_clin_avoids_duodenum_fovs_muscle_fibroblast_neuron.png}{One field per stage; the
+muscle band fills much of the severe window.}{fig:muscle-fibro-neuron-fovs}
 
-\reportfigure{complex_eligible_muscle_avoids_plasma_smv_strength.png}{The non-new Duodenal
-Muscle $\rightarrow$ Plasma, SMV avoidance rises from 1/17 eligible Control FOVs to 19/58
-Mild and 9/15 Severe FOVs; its strongest simpler rule is shown in both panels.}
-{fig:muscle-plasma-smv-strength}
+\subsection{When a rule and its own pair move opposite ways}
+\label{sec:opposite}
 
-A distinct non-new rule, Muscle $\rightarrow$ CD8T, Fibroblast, has adequate eligible
-denominators in every stage. Complex-rule prevalence rises from 3/17 Control and 5/36 Mild
-FOVs to 13/21 Severe FOVs, whereas the strongest simpler rule is more common throughout.
-At the same time, complex Lift rises from 0.20 to 0.45, meaning the avoidance becomes weaker
-among rule-bearing FOVs. This divergence is important: prevalence and effect strength are
-different biological summaries and neither should substitute for the other.
+\note{Why this is worth a screen of its own.}{Everywhere else in this report a complex rule is compared
+with its pair to ask \emph{which is stronger}. This asks something different: does the pair ever move
+\emph{against} its own longer rule as disease advances? If so, the longer rule is not a louder version of
+the pair --- it is reporting something the pair actively contradicts.}
 
-\evidence{Strong descriptive example of prevalence--strength divergence; six Severe patients}
+Rules qualify only if both the complex rule and its strongest pair move by at least 10 points between
+control and severe, and in opposite directions. Across both organs, both rule kinds, both denominators
+and both staging axes, 43 rules qualify.
 
-\reportfigure{complex_eligible_muscle_avoids_cd8t_fibroblast_strength.png}{The complex rule
-becomes more prevalent but less strongly avoidant across stages. The side-by-side panels
-prevent the prevalence increase from being misread as stronger spatial separation.}
-{fig:muscle-cd8-fibro-strength}
+This is the clearest set. Goblet cells exclude each of these cell types \emph{individually} in far fewer
+fields as disease advances --- but exclude the \emph{pairs together} in more.
 
-The final maps show the stage examples behind both lines and retain the strongest simpler
-rule so the reader can inspect what the extra Fibroblast context adds.
+\fig{all_clin_avoids_duodenum_opposite.png}{Duodenal avoidances whose complex and simpler prevalence move
+opposite ways. Open circle = control, filled = severe; teal = the rule, tan = its strongest
+pair.}{fig:opposite-avo-duo}
 
-\reportfigure{complex_eligible_muscle_avoids_cd8t_fibroblast_fovs.png}{Representative
-Control, Mild and Severe examples of the complex and strongest simpler rule.}
-{fig:muscle-cd8-fibro-fovs}
+\bio{The goblet barrier does not simply fail --- it becomes selective, losing its grip on single cell
+types while tightening against specific combinations.}
+
+The attraction side, and one row settles a question left open in Section~\ref{sec:zonation}.
+
+\fig{elig_clin_attracts_duodenum_opposite.png}{Duodenal attractions moving opposite ways, eligible fields.
+Axes as in Figure~\ref{fig:opposite-avo-duo}.}{fig:opposite-att-duo}
+
+\bio{\emph{Plasma $\rightarrow$ Epithelial, Macrophage} falls 10\% $\rightarrow$ 0\% while its own pair
+\emph{rises} 20\% $\rightarrow$ 32\% --- the three-way arrangement is lost while its parts become more
+common, which cell abundance alone could not have shown.}
+
+The same screen in the colon, where the rules that qualify are all goblet exclusions again.
+
+\fig{all_clin_avoids_colon_opposite.png}{Colon avoidances moving opposite
+ways.}{fig:opposite-avo-colon}
+
+\fig{elig_clin_avoids_colon_opposite.png}{The same screen on eligible colon fields.}{fig:opposite-avo-colon-elig}
+
+Running the screen under the other staging axis is a reproducibility check rather than a new result, and
+the leading attraction rule survives it.
+
+\fig{all_path_attracts_duodenum_opposite.png}{Duodenal attractions moving opposite ways, pathological
+staging.}{fig:opposite-att-duo-path}
+
+\bio{\emph{Endothelial, Epithelial $\rightarrow$ SMV} gives 23\% $\rightarrow$ 7\% against a pair rising
+3\% $\rightarrow$ 20\% under clinical staging, and 23\% $\rightarrow$ 8\% against 3\% $\rightarrow$ 19\%
+under pathological --- the same answer on both axes.}
+
+\fig{elig_path_avoids_duodenum_opposite.png}{Duodenal avoidances moving opposite ways, pathological
+staging.}{fig:opposite-avo-duo-path}
+
+\fig{all_path_avoids_colon_opposite.png}{Colon avoidances moving opposite ways, pathological
+staging.}{fig:opposite-avo-colon-path}
+
+\subsection{Recorded but not claimed}
+
+Three patterns are strong in mild disease and back to their control level by severe. They stay in the
+notebooks and are listed here so they are not rediscovered as findings:
+
+\begin{itemize}\tightlist
+\item \emph{Plasma $\rightarrow$ Epithelial, Plasma\_CD38} (duodenum): 4\%, 24\%, 4\%.
+\item \emph{Mesenchymal\_VIM, SMV $\rightarrow$ Endothelial} (duodenum): 0\%, 19\%, 0\%.
+\item \emph{Fibroblast, Neuron $\rightarrow$ Goblet} (colon): 14\%, 0\%, 17\%.
+\end{itemize}
+
+\bio{A context that appears in mild disease and is gone again by severe may be a real transient, but this
+cohort cannot tell that from noise at these denominators.}
+
+% =============================================================================
+\clearpage
+\section{Which staging axis? Clinical against pathological}
+\label{sec:staging}
+% =============================================================================
+
+Everything above is staged by \textbf{clinical score}. The cohort also carries a \textbf{pathological
+score}, and the two disagree.
+
+\atlas{One of the long-standing clinical dilemmas in treatment of aGVHD is that pathological stages are
+only moderately correlated with the clinical stage, which is based on symptomatic disease severity. In our
+cohort, four patients had severe clinical disease and mild pathological scores. In two of these (50\%), we
+identified immune features that are usually observed in patients with severe disease \ldots{} We
+hypothesize that in these patients, we can already identify the immune hallmarks driving the disease, but
+epithelial deterioration was either not yet established or missed by the biopsy.}
+
+That is the atlas's own argument for the clinical axis when the measurement is about immune organisation
+--- which is what a spatial rule measures. It is equally the argument for keeping the pathological axis for
+anything structural: the pathological score is \emph{defined} partly by crypt damage and Paneth loss.
+
+\textbf{The split is not even across organs.}
+
+\begin{center}\small
+\begin{tabular}{lrrr}
+\toprule
+FOVs & Control & Mild & Severe \\
+\midrule
+Pathological, whole cohort & 56 & 143 & 68 \\
+Clinical, whole cohort     & 56 & 116 & 95 \\[0.3em]
+Pathological, colon        & 25 & 40  & 32 \\
+Clinical, colon            & 25 & \textbf{18}  & \textbf{54} \\[0.3em]
+Pathological, duodenum     & 31 & 103 & 36 \\
+Clinical, duodenum         & 31 & 98  & 41 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Almost the whole change lands in the colon, where clinical staging moves 22 fields from mild to severe.
+
+\subsection{Where pathological is better: goblet exclusion}
+
+The same colon avoidance screen as Figure~\ref{fig:overview-avo-colon-all}, restaged. The trends are
+cleaner here, and that is not an accident.
+
+\fig{all_path_avoids_colon_overview.png}{Colon avoidance rules, pathological
+staging.}{fig:overview-avo-colon-path}
+
+\bio{Clinically severe patients whose tissue is only mildly damaged still have goblet cells, so still have
+a barrier to measure --- which is why the clinical axis makes these rules rebound and the pathological axis
+does not.}
+
+The single rule side by side with its clinical version: 92\%, 12\%, 12\% here against 92\%, 6\%, 15\%
+there.
+
+\fig[0.92\textwidth]{all_path_avoids_colon_rule_goblet_cd8t_plasma.png}{The rule of
+Figure~\ref{fig:goblet-cd8-plasma}, staged pathologically: a clean monotonic
+loss.}{fig:goblet-cd8-plasma-path}
+
+\subsection{Where clinical is better: severe-stage power}
+
+This is the same Paneth rule as Figure~\ref{fig:epi-neuron-paneth}, and staged this way it reads as a
+clean disappearance. The severe denominator is six fields.
+
+\fig[0.80\textwidth]{new_path_attracts_duodenum_rule_epithelial_neuron_paneth.png}{The Paneth rule,
+pathological staging: 3/11, 8/58, \textbf{0/6}.}{fig:epi-neuron-paneth-path}
+
+\bio{An earlier draft of this report called that a disappearance; clinically there are thirteen severe
+fields, three carry the rule, and at the highest lift in the series --- the disappearance was an
+underpowered group.}
+
+The duodenal avoidance screen restaged. The muscle and CD8 rules rise on both axes, so that finding does
+not depend on the choice --- only its denominators do.
+
+\fig{elig_path_avoids_duodenum_overview.png}{Duodenal avoidance rules, pathological staging: severe
+denominators of 8--21 fields against 16--25 under clinical.}{fig:overview-avo-duo-path}
+
+\subsection{Where only one axis finds anything at all}
+
+Under pathological staging the colon yields \textbf{no} recurring new avoidance rules --- the notebook
+prints ``no rules pass the FOV threshold''. Under clinical it yields two
+(Figure~\ref{fig:overview-new-avo-colon}).
+
+\bio{With 32 severe colon fields the five-field recurrence bar cannot be met; with 54 it can --- so the
+result closest to the atlas's ECM-barrier hypothesis is invisible under pathological staging.}
+
+\subsection{Where clinical staging breaks down}
+
+The cost of the same shift, in the other direction. Read the mild column.
+
+\fig{elig_clin_avoids_colon_overview.png}{Colon avoidance rules on eligible fields, clinical staging:
+denominators of 1--6 fields, producing cells like ``100\%, 1/1
+FOVs''.}{fig:overview-avo-colon-elig-clin}
+
+\bio{No claim in this report rests on a colon mild cell under clinical staging, and none should.}
+
+\subsection{What to take from the comparison}
+
+\begin{itemize}\tightlist
+\item \textbf{Immune organisation, infiltration, barriers} $\rightarrow$ clinical axis. More severe fields,
+cleaner trends, and the axis the atlas argues immune features track.
+\item \textbf{Epithelial structure --- goblet, Paneth, crypt architecture} $\rightarrow$ report the
+pathological axis too.
+\item \textbf{Never read a colon mild cell under clinical staging.} Eligible denominators fall to 1--6
+fields.
+\item \textbf{Where the two disagree, say so.} The Paneth rule is the worked example: six fields against
+thirteen.
+\end{itemize}
+
+% =============================================================================
+\clearpage
+\section*{Limits}
+% =============================================================================
+
+\begin{itemize}\tightlist
+\item Every field result is tested. Every stage percentage and patient median is descriptive. No
+patient-level test is run, although 71 patients are available for one.
+\item Rules are selected by ranking across roughly 214{,}000 candidates, with no correction for that
+selection.
+\item For a new rule, ``gain'' is a floor set by the pair-mining threshold, not a measured ratio.
+\item Lift is unstable at low support, and here the most recurrent rules carry the lowest lifts. The 1.3
+threshold discards 315 of 447 recurrent new attraction rules.
+\item Support gating is asymmetric by design: an attraction rule at confidence $\geq0.9$ is admitted at
+half the usual support. Avoidance is gated on \emph{expected} meetings, which is why a rule can
+legitimately report support 0.
+\item How much muscularis a biopsy caught differs by stage, in opposite directions in the two organs. Any
+result naming Muscle mixes biology with what the biopsy included. The fix --- repeating those figures on
+muscularis-sampling fields only --- is not yet done.
+\item Cell types are labels, not states. A rule naming Macrophage cannot distinguish macrophage
+populations.
+\item Cells being near each other is not evidence that one causes the other. An avoidance rule is very
+often a tissue boundary rather than an interaction.
+\end{itemize}
+
+\section*{References}
+
+\begin{itemize}\tightlist
+\item Azulay \emph{et al.} (2025),
+\href{https://doi.org/10.1126/scitranslmed.adu6032}{A spatial atlas of human gastrointestinal acute GVHD
+reveals epithelial and immune dynamics underlying disease pathophysiology}, \emph{Science Translational
+Medicine} 17, eadu6032. All quoted passages are from this paper.
+\item Sato \emph{et al.} (2011), \href{https://doi.org/10.1038/nature09637}{Paneth cells constitute the
+niche for Lgr5 stem cells in intestinal crypts}, \emph{Nature} 469, 415--418.
+\item M\"uller \emph{et al.} (2014), \href{https://doi.org/10.1016/j.cell.2014.08.002}{Crosstalk between
+muscularis macrophages and enteric neurons regulates gastrointestinal motility}, \emph{Cell} 158, 300--313.
+\item Progatzky \emph{et al.} (2021), \href{https://doi.org/10.1038/s41586-021-04006-z}{Regulation of
+intestinal immunity and tissue repair by enteric glia}, \emph{Nature} 599, 125--130.
+\end{itemize}
 
 \end{document}

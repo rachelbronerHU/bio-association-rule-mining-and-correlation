@@ -179,6 +179,59 @@ def rank_rules(prevalence, stages, min_rule_fovs, top_n):
     return selected.sort_values(["name", "stage"]), order
 
 
+def opposite_direction_rules(prevalence, stages, min_rule_fovs, min_gap=0.10):
+    """Rules whose complex and simpler prevalence move opposite ways, control to severe.
+
+    Both moves must clear `min_gap`, so a rule only qualifies when each side really
+    moves rather than wobbling around its starting value. Returns one row per rule,
+    largest combined movement first.
+    """
+    if prevalence.empty or len(stages) < 2:
+        return pd.DataFrame()
+    first, last = stages[0], stages[-1]
+    counts = prevalence.pivot(index="name", columns="stage", values="complex")
+    complex_share = prevalence.pivot(index="name", columns="stage", values="complex_share")
+    simpler_share = prevalence.pivot(index="name", columns="stage", values="simpler_share")
+    if first not in complex_share or last not in complex_share:
+        return pd.DataFrame()
+
+    complex_move = complex_share[last] - complex_share[first]
+    simpler_move = simpler_share[last] - simpler_share[first]
+    enough_fovs = counts.max(axis=1) >= min_rule_fovs
+    opposed = (complex_move * simpler_move < 0)
+    both_move = (complex_move.abs() >= min_gap) & (simpler_move.abs() >= min_gap)
+
+    rows = pd.DataFrame({
+        "name": complex_share.index,
+        "complex_first": complex_share[first].to_numpy(),
+        "complex_last": complex_share[last].to_numpy(),
+        "simpler_first": simpler_share[first].to_numpy(),
+        "simpler_last": simpler_share[last].to_numpy(),
+        "complex_move": complex_move.to_numpy(),
+        "simpler_move": simpler_move.to_numpy(),
+        "fovs": counts.max(axis=1).to_numpy(),
+    })
+    keep = (enough_fovs & opposed & both_move).to_numpy()
+    rows = rows[keep].copy()
+    if rows.empty:
+        return rows
+    rows["movement"] = rows["complex_move"].abs() + rows["simpler_move"].abs()
+    return rows.sort_values("movement", ascending=False).reset_index(drop=True)
+
+
+def opposite_table(rows):
+    """The opposite-direction screen as plain percentages."""
+    if rows is None or rows.empty:
+        return pd.DataFrame({"note": ["No rule moves both ways by the required margin."]})
+    percent = lambda values: (values * 100).round(0).astype(int).astype(str) + "%"
+    return pd.DataFrame({
+        "rule": rows["name"].astype(str),
+        "complex": percent(rows["complex_first"]) + " -> " + percent(rows["complex_last"]),
+        "simpler": percent(rows["simpler_first"]) + " -> " + percent(rows["simpler_last"]),
+        "FOVs": rows["fovs"],
+    })
+
+
 def detail_rules(complex_rules, ranked_names, n=2, new_only=False):
     """Choose reproducible examples, covering both non-new success modes when possible."""
     if new_only:
@@ -251,26 +304,71 @@ def patient_strengths(name, complex_rules, all_rules, eligibility, fovs, organ,
 def _metrics(row):
     return {
         name: row.get(name, np.nan)
-        for name in ["Lift", "Support", "Conviction", "Individual_FDR"]
+        for name in ["Lift", "Confidence", "Leverage", "Support", "Conviction",
+                     "Individual_FDR"]
     }
 
 
+def cell_abundance(name, complex_rules, cells, eligibility, fovs, organ, stages,
+                   stage_column, use_eligibility):
+    """How common each of the rule's cell types is in every FOV of each stage.
+
+    Abundance is the share of that FOV's cells, so a 400 and an 800 micron field
+    can sit on the same axis. One row per FOV per cell type.
+    """
+    definition = complex_rules[complex_rules["name"] == name]
+    if definition.empty:
+        return pd.DataFrame(columns=["stage", "FOV", "cell type", "share"])
+    row = definition.iloc[0]
+    rule_cells = sorted(set(row["ant_t"] + row["con_t"]))
+
+    totals = cells.groupby("fov").size()
+    counts = (
+        cells[cells["cell type"].isin(rule_cells)]
+        .groupby(["fov", "cell type"]).size()
+    )
+    rows = []
+    for stage in stages:
+        stage_fovs = _scope_fovs(fovs, organ, stage, stage_column)
+        if use_eligibility:
+            stage_fovs &= set(eligibility.columns[eligibility.loc[name]])
+        for fov in sorted(stage_fovs):
+            total = int(totals.get(fov, 0))
+            if not total:
+                continue
+            for cell_type in rule_cells:
+                rows.append({
+                    "stage": stage,
+                    "FOV": fov,
+                    "cell type": cell_type,
+                    "share": int(counts.get((fov, cell_type), 0)) / total,
+                })
+    return pd.DataFrame(rows)
+
+
 def fov_examples(name, complex_rules, all_rules, eligibility, fovs, organ, stages,
-                 stage_column, metric, use_eligibility, new_only):
-    """One representative rule-bearing FOV per stage."""
+                 stage_column, metric, use_eligibility, new_only, max_fdr=0.05):
+    """One representative FOV per stage for a rule, and where the rule is absent
+    but one of its simpler rules still holds, a FOV showing that instead."""
     scoped = complex_rules[
         (complex_rules["name"] == name)
         & complex_rules["FOV"].isin(fovs.loc[fovs["Organ"] == organ, "FOV"])
     ]
+    eligible_fovs = set(eligibility.columns[eligibility.loc[name]])
     if use_eligibility:
-        scoped = scoped[scoped["FOV"].isin(
-            eligibility.columns[eligibility.loc[name]]
-        )]
+        scoped = scoped[scoped["FOV"].isin(eligible_fovs)]
     metadata = fovs.set_index("FOV")
+    parent_names = _parent_names(scoped)
     examples = []
     for stage in stages:
         rows = scoped[scoped["FOV"].map(metadata[stage_column]) == stage]
         if rows.empty:
+            fallback = _simpler_only_example(
+                name, stage, parent_names, all_rules, fovs, eligible_fovs, organ,
+                stage_column, metric, use_eligibility, new_only, max_fdr,
+            )
+            if fallback is not None:
+                examples.append(fallback)
             continue
         strengths = metric_strength(rows, metric)
         middle = strengths.median()
@@ -280,6 +378,7 @@ def fov_examples(name, complex_rules, all_rules, eligibility, fovs, organ, stage
             "stage": stage,
             "FOV": row["FOV"],
             "verdict": row["Complex_Class"],
+            "rule_present": True,
             "antecedent_cells": list(row["ant_t"]),
             "consequent_cells": list(row["con_t"]),
             "complex_metrics": _metrics(row),
@@ -298,6 +397,56 @@ def fov_examples(name, complex_rules, all_rules, eligibility, fovs, organ, stage
             )
         examples.append(item)
     return pd.DataFrame(examples)
+
+
+def _simpler_only_example(name, stage, parent_names, all_rules, fovs, eligible_fovs,
+                          organ, stage_column, metric, use_eligibility, new_only,
+                          max_fdr):
+    """A representative FOV of this stage where a simpler rule holds but the
+    complex rule does not. Nothing to show for a new rule, which has no parents."""
+    if new_only or not parent_names:
+        return None
+    stage_fovs = _scope_fovs(fovs, organ, stage, stage_column)
+    if use_eligibility:
+        stage_fovs &= eligible_fovs
+    rows = all_rules[
+        all_rules["stored_rule"].isin(parent_names)
+        & all_rules["FOV"].isin(stage_fovs)
+        & (all_rules["Individual_FDR"] <= max_fdr)
+    ]
+    if rows.empty:
+        return None
+    best_per_fov = [_best_row(group, metric) for _, group in rows.groupby("FOV")]
+    best_per_fov = [row for row in best_per_fov if row is not None]
+    if not best_per_fov:
+        return None
+    frame = pd.DataFrame(best_per_fov)
+    strengths = metric_strength(frame, metric)
+    middle = strengths.median()
+    row = frame.loc[(strengths - middle).abs().idxmin()]
+    ant, con = _rule_cells(row["stored_rule"])
+    return {
+        "rule": name,
+        "stage": stage,
+        "FOV": row["FOV"],
+        "verdict": "absent",
+        "rule_present": False,
+        "antecedent_cells": ant,
+        "consequent_cells": con,
+        "complex_metrics": {},
+        "simpler_rule": row["stored_rule"],
+        "simpler_metrics": _metrics(row),
+    }
+
+
+def _rule_cells(stored_rule):
+    """The two sides of a stored rule name, as plain cell-type lists."""
+    left, right = str(stored_rule).split(" -> ", 1)
+    clean = lambda side: [
+        item.replace("_CENTER", "").replace("_NEIGHBOR", "")
+        for item in side.split(" + ")
+    ]
+    return clean(left), clean(right)
 
 
 def result_table(prevalence, new_only=False):

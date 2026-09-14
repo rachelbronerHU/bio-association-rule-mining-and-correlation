@@ -15,7 +15,7 @@ from matplotlib.patches import Patch
 
 from vis_helper import (
     save_figure, figure_titles, tidy_axes, _plain_log_ticks,
-    plot_fov, set_cell_colors, INK, ZERO, NEUTRAL,
+    plot_fov, set_cell_colors, resolve_cell_colors, INK, ZERO, NEUTRAL,
 )
 
 
@@ -78,21 +78,35 @@ def _plain_rule(rule):
     return f"{', '.join(sorted(ant))} → {', '.join(sorted(con))}"
 
 
+# Short labels, because five metrics plus FDR have to fit over one small panel.
+METRIC_LABELS = (
+    ("Lift", "lift"),
+    ("Confidence", "conf"),
+    ("Leverage", "lev"),
+    ("Support", "supp"),
+    ("Conviction", "conv"),
+)
+METRICS_PER_ROW = 3
+
+
 def _rule_metric_text(values, include_fdr=False, wrap=False):
     """Compact metric line used above rule-highlighted FOVs."""
     if not isinstance(values, dict):
         return ""
     parts = []
-    for key, label in (("Lift", "lift"), ("Support", "support"),
-                       ("Conviction", "conviction")):
+    for key, label in METRIC_LABELS:
         value = values.get(key, np.nan)
         if pd.notna(value):
             parts.append(f"{label} {value:.3g}")
     fdr = values.get("Individual_FDR", np.nan)
     if include_fdr and pd.notna(fdr):
         parts.append(f"FDR {fdr:.3g}")
-    if wrap and len(parts) > 2:
-        return " · ".join(parts[:2]) + "\n" + " · ".join(parts[2:])
+    if not parts:
+        return ""
+    if wrap or len(parts) > METRICS_PER_ROW:
+        rows = [parts[start:start + METRICS_PER_ROW]
+                for start in range(0, len(parts), METRICS_PER_ROW)]
+        return "\n".join(" · ".join(row) for row in rows)
     return " · ".join(parts)
 
 
@@ -101,7 +115,7 @@ def plot_rule_fov_pairs(examples, df_cells, df_fovs, save=None, cell_size=16):
     if examples is None or len(examples) == 0:
         print("No FOV examples to plot.")
         return []
-    cell_colors = set_cell_colors(df_cells)
+    set_cell_colors(df_cells)
 
     figures = []
     for _, example in pd.DataFrame(examples).reset_index(drop=True).iterrows():
@@ -109,6 +123,11 @@ def plot_rule_fov_pairs(examples, df_cells, df_fovs, save=None, cell_size=16):
         detail = str(example.get("detail", "")).strip()
         simpler = example.get("simpler_rules", [])
         simpler = simpler if isinstance(simpler, (list, tuple)) else []
+        shown = list(example["antecedent_cells"]) + list(example["consequent_cells"])
+        for name in simpler:
+            ant, con = _rule_parts(name)
+            shown += ant + con
+        cell_colors = resolve_cell_colors(shown)
         panels = [(
             "Higher-order rule", example["rule"],
             list(example["antecedent_cells"]), list(example["consequent_cells"]),
@@ -138,7 +157,7 @@ def plot_rule_fov_pairs(examples, df_cells, df_fovs, save=None, cell_size=16):
         axes = axes.ravel()
         plot_fov(
             fov, "", df_cells, df_fovs, ax=axes[0], show_legend=False,
-            cell_size=cell_size,
+            cell_size=cell_size, colors=cell_colors,
         )
         axes[0].set_title("Full FOV", fontsize=10)
 
@@ -148,7 +167,7 @@ def plot_rule_fov_pairs(examples, df_cells, df_fovs, save=None, cell_size=16):
             plot_fov(
                 fov, "", df_cells, df_fovs, target_ant_cells=ant,
                 target_cons_cells=con, ax=ax, show_legend=False,
-                cell_size=cell_size,
+                cell_size=cell_size, colors=cell_colors,
             )
             is_simpler = label != "Higher-order rule"
             name = (
@@ -177,10 +196,12 @@ def plot_rule_fov_pairs(examples, df_cells, df_fovs, save=None, cell_size=16):
             )
             for cell in target_types
         ]
+        # No legend title: every handle is already labelled with its cell type, and
+        # the extra line collided with the bottom row's x-axis label.
         fig.legend(
-            handles=handles, title="Cell type", frameon=False,
+            handles=handles, frameon=False,
             ncol=max(len(handles), 1), loc="lower center",
-            bbox_to_anchor=(0.5, 0.005), fontsize=8, title_fontsize=9,
+            bbox_to_anchor=(0.5, 0.004), fontsize=8,
         )
         meta = df_fovs[df_fovs["FOV"] == fov]
         organ = meta["Organ"].iat[0] if not meta.empty and "Organ" in meta else None
@@ -190,7 +211,7 @@ def plot_rule_fov_pairs(examples, df_cells, df_fovs, save=None, cell_size=16):
         )
         axes_top -= 34 / (fig.get_figheight() * 72)
         fig.subplots_adjust(
-            bottom=0.10 if nrows > 1 else 0.14,
+            bottom=0.14 if nrows > 1 else 0.18,
             top=axes_top, wspace=0.18, hspace=0.30,
         )
         _finish(fig, save)
@@ -509,3 +530,13 @@ def plot_rule_occurrences(rows, rule, metric="Lift", stage_column="Pathological 
     )
     fig.subplots_adjust(bottom=0.28)
     _finish(fig, save)
+
+
+def clear_all_exports():
+    """Empty the figure folder, so a rename can never leave a stale file behind."""
+    _FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+    removed = 0
+    for path in _FIGURE_DIR.glob("*.png"):
+        path.unlink()
+        removed += 1
+    print(f"cleared {removed} figures from {_FIGURE_DIR.name}/")

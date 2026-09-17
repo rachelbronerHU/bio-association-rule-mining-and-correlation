@@ -258,7 +258,7 @@ def _blocks(counts):
 
 def plot_class_split(counts, labels=None, class_labels=None, organ=None,
                      subtitle=None, params=None,
-                     title="What the longer rules add", save=None):
+                     title="What the longer rules add", unit_label="rules", save=None):
     """How the library's verdicts split, one bar per rule shape.
 
     `counts` is rows x classes, already in the order to draw: the index is the rule
@@ -311,7 +311,7 @@ def plot_class_split(counts, labels=None, class_labels=None, organ=None,
     ax.set_ylim(y.max() + 0.7, -1.1 if grouped else -0.7)
     ax.set_xlim(0, 1)
     ax.set_xticks(np.linspace(0, 1, 5), [f"{v:.0%}" for v in np.linspace(0, 1, 5)])
-    ax.set_xlabel("share of the shape's rules      (how many rules, on the right)",
+    ax.set_xlabel(f"share within each shape      (number of {unit_label}, on the right)",
                   fontsize=10)
     ax.tick_params(axis="y", length=0)
 

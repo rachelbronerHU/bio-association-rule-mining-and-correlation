@@ -3,6 +3,8 @@
 Only plotting lives here; the tests and the tables stay in the notebook.
 The shared pieces - saving, titles, group colours - come from `vis_helper.py`.
 """
+import textwrap
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -609,7 +611,7 @@ def _stage_state_counts(states, eligibility, metadata, rule, organ, group_col,
 
 
 def _draw_state_bars(ax, stage_counts, eligible_counts, nets, stages,
-                     unit_label="FOVs", label_threshold=8, compact=False):
+                     unit_label="FOVs", label_threshold=8, compact=False, show_net=True):
     """Draw the shared all-unit rule-state bars."""
     x = np.arange(len(stages))
     bottom = np.zeros(len(stages))
@@ -643,6 +645,8 @@ def _draw_state_bars(ax, stage_counts, eligible_counts, nets, stages,
         bottom += percentages
 
     for position, net in enumerate(nets):
+        if not show_net:
+            continue
         prefix = "" if compact else "net "
         text = f"{prefix}n/a" if np.isnan(net) else f"{prefix}{net:+.0f}%"
         ax.text(position, 103, text, ha="center", va="bottom",
@@ -732,7 +736,7 @@ def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
 
 
 def _metric_panel(ax, metrics, eligibility, metadata, spec, stages, metric="Lift",
-                  reference=1, unit_col="FOV", state=None):
+                  reference=1, unit_col="FOV", state=None, connect=True):
     """One axes of raw metric values, drawn only where an eligible FOV has the rule."""
     rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
     columns = [unit_col, metric] + (["state"] if state is not None else [])
@@ -758,18 +762,22 @@ def _metric_panel(ax, metrics, eligibility, metadata, spec, stages, metric="Lift
 
     data = pd.DataFrame(plot_rows)
     if not data.empty:
+        colors = {stage: _STAGE_COLORS.get(stage, "#777570") for stage in stages}
         sns.stripplot(
-            data=data, x="stage", y=metric, order=stages, palette=_STAGE_COLORS,
+            data=data, x="stage", y=metric, hue="stage", legend=False,
+            order=stages, palette=colors,
             jitter=0.18, size=5, alpha=0.72, edgecolor="white", linewidth=0.6, ax=ax,
         )
-        ax.plot(range(len(stages)), medians, color="#777570", lw=1.5, zorder=4)
+        if connect:
+            ax.plot(range(len(stages)), medians, color="#777570", lw=1.5, zorder=4)
         ax.scatter(range(len(stages)), medians, marker="D", s=58,
-                   color=[_STAGE_COLORS[stage] for stage in stages],
+                   color=[colors[stage] for stage in stages],
                    edgecolor="white", linewidth=0.8, zorder=5)
     if reference is not None:
         ax.axhline(reference, color=_ZERO, lw=1.1)
     ax.set_xticks(range(len(stages)), labels)
     ax.set_xlabel("")
+    ax.set_xlim(-0.5, len(stages) - 0.5)
     direction = {1: "attraction", -1: "avoidance"}.get(state)
     ax.set_ylabel(f"{direction.title() + ' ' if direction else ''}{metric} where the rule fires")
     tidy_axes(ax, grid="y", hide=("top", "right"))
@@ -1107,7 +1115,7 @@ def _eligible_by_stage(eligibility, metadata, spec, stages):
         yield stage, can_test.index[can_test]
 
 
-def _prevalence_panel(ax, states, eligibility, metadata, spec, stages):
+def _prevalence_panel(ax, states, eligibility, metadata, spec, stages, bars=False):
     """How often the rule attracts and how often it avoids, as two separate lines."""
     attraction, avoidance = [], []
     attraction_n, avoidance_n, eligible_n = [], [], []
@@ -1126,8 +1134,14 @@ def _prevalence_panel(ax, states, eligibility, metadata, spec, stages):
             ("Avoidance", "avoid", avoidance, avoidance_n, "#D85D62")):
         if not any(counts):
             continue
-        ax.plot(range(len(stages)), values, marker="D", markersize=6, lw=2.2,
-                color=color, label=label)
+        if bars:
+            both = any(attraction_n) and any(avoidance_n)
+            offset = (-0.18 if short == "attract" else 0.18) if both else 0
+            ax.bar(np.arange(len(stages)) + offset, values,
+                   width=0.34 if both else 0.56, color=color, label=label)
+        else:
+            ax.plot(range(len(stages)), values, marker="D", markersize=6, lw=2.2,
+                    color=color, label=label)
         shown.append((short, counts))
 
     labels = [
@@ -1141,9 +1155,10 @@ def _prevalence_panel(ax, states, eligibility, metadata, spec, stages):
     ax.set_xticks(range(len(stages)), labels)
     ax.set_xlabel(" | ".join([short for short, _ in shown] + ["eligible FOVs"]),
                   fontsize=7.5, labelpad=2)
-    ax.set_ylabel("share of eligible FOVs (%)")
+    ax.set_ylabel("eligible FOVs\nwith rule (%)", labelpad=8)
     if shown:
-        ax.legend(frameon=False, fontsize=8.5)
+        ax.legend(frameon=False, fontsize=8.2, loc="center left",
+                  bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
     tidy_axes(ax, grid="y", hide=("top", "right"))
     ax.tick_params(length=0)
 
@@ -1173,15 +1188,16 @@ def _shares_panel(ax, cells, eligibility, metadata, spec, stages):
                 label=f"{role}: {cell_type.replace('_', ' ')}")
     ax.set_ylim(bottom=0)
     ax.set_xticks(range(len(stages)), labels)
-    ax.set_ylabel("share of the FOV's cells (%)")
-    ax.legend(frameon=False, fontsize=8.5)
+    ax.set_ylabel("cells in eligible\nFOVs (%)", labelpad=8)
+    ax.legend(frameon=False, fontsize=8.2, loc="center left",
+              bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
     tidy_axes(ax, grid="y", hide=("top", "right"))
     ax.tick_params(length=0)
 
 
 def plot_rule_summary(states, eligibility, cells, metrics, metadata, spec, stages,
                       metric="Lift", reference=1, trend_results=None,
-                      pair_results=None, save=None):
+                      pair_results=None, state=None, test_label=None, save=None):
     """One rule in four stacked panels: how often it fires, what it is made of, how
     strong it is where it fires, and what every FOV of the stage was classified as.
 
@@ -1190,38 +1206,47 @@ def plot_rule_summary(states, eligibility, cells, metrics, metadata, spec, stage
     """
     rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
     threshold = eligibility.attrs.get("min_cells")
+    test_unit = spec.get("test_unit", "FOV")
     detail = (
-        f"Unit: FOV · Organ: {organ} · Score: {group_col.replace(' score', '').lower()} · "
+        f"Plots: FOV · Tests: {test_unit} · Organ: {organ} · "
+        f"Score: {group_col.replace(' score', '').lower()} · "
         f"Stages: {' / '.join(stages)} · "
         f"Eligibility: {f'≥{threshold} cells/type' if threshold else 'controlled'} · "
         "n = eligible FOVs"
     )
-    tests = _rule_test_text(spec, trend_results, pair_results)
-    if tests:
-        detail += f"\nTests: {tests}"
-
     # Built at the width LaTeX gives it, so nothing shrinks on the page.
     with plt.rc_context(_PANEL_FONTS):
         fig, axes = plt.subplots(
-            4, 1, figsize=(_TEXT_WIDTH, 7.3),
-            gridspec_kw={"height_ratios": [1, 1, 1, 1], "hspace": 0.62},
+            4, 1, figsize=(_TEXT_WIDTH, 8.0),
+            gridspec_kw={"height_ratios": [1, 1, 1, 1], "hspace": 0.82},
         )
         _prevalence_panel(axes[0], states, eligibility, metadata, spec, stages)
         _shares_panel(axes[1], cells, eligibility, metadata, spec, stages)
         _metric_panel(axes[2], metrics, eligibility, metadata, spec, stages,
-                      metric, reference)
+                      metric, reference, state=state)
         counts, eligible_counts, nets = _stage_state_counts(
             states, eligibility, metadata, rule, organ, group_col, stages)
         _draw_state_bars(axes[3], counts, eligible_counts, nets, stages)
+        state_handles = [
+            Line2D([0], [0], marker="s", linestyle="none", markersize=6,
+                   color=_STATE_COLORS[name], label=name)
+            for name in _STATE_ORDER
+        ]
+        axes[3].legend(handles=state_handles, frameon=False, fontsize=7.4,
+                       loc="center left", bbox_to_anchor=(1.01, 0.5),
+                       borderaxespad=0)
 
+        direction = {1: "attraction", -1: "avoidance"}.get(state)
+        strength_title = f"how strong ({direction + ' ' if direction else ''}{metric})"
         for ax, name in zip(axes, ("how often it fires", "what it is made of",
-                                   f"how strong ({metric})", "every FOV")):
+                                   strength_title, "every FOV")):
             ax.set_title(name, fontsize=8.4, color="#5F5D58", loc="left", pad=5)
 
         fig.suptitle(f"{organ} · {rule.replace(' -> ', ' → ')}", fontsize=11.5, y=0.995)
         fig.text(0.5, 0.973, detail, ha="center", va="top", fontsize=7,
                  color="#706E68", linespacing=1.4)
-        fig.subplots_adjust(top=0.905, bottom=0.05, left=0.10, right=0.985)
+        fig.align_ylabels(axes)
+        fig.subplots_adjust(top=0.91, bottom=0.05, left=0.14, right=0.76)
         _finish(fig, save)
 
 
@@ -1313,64 +1338,106 @@ def plot_organ_rule_context(states, eligibility, cells, metadata, rule, group_co
 
 
 def plot_pair_rule_fovs(examples, stages, cells, metadata, organ, score,
-                        metric="Lift", min_cells=20, selection=None, save=None):
-    """Full and pair-highlighted views of one representative FOV per stage."""
+                        metric="Lift", min_cells=20, selection=None, save=None,
+                        highlight_label="Highlighted pair", split_states=False):
+    """Full and highlighted examples of each available rule state per stage.
+
+    Rule-bearing rows show attraction and avoidance separately when both occur in
+    the displayed data. A no-rule row shows an eligible counterexample wherever
+    one exists. Each state uses a full-FOV row and the matching highlighted view.
+    """
     eligible_n = getattr(examples, "attrs", {}).get("eligible_n", {})
     examples = pd.DataFrame(examples)
     if examples.empty:
         print("No representative FOVs to plot.")
         return
 
+    if split_states:
+        present = [s for s in (1, -1, 0) if not examples[examples.state.eq(s)].empty]
+        rule_states = [s for s in present if s]
+        # Six rows do not fit one page at full size, so a rule with both directions
+        # keeps them together and moves the no-rule comparison to its own figure.
+        groups = ([(rule_states, 'rules'), ([0], 'no_rule')]
+                  if len(rule_states) > 1 and 0 in present else [(present, None)])
+        figures = []
+        for members, label in groups:
+            subset = examples[examples.state.isin(members)].copy()
+            subset.attrs['eligible_n'] = eligible_n
+            target = None
+            if save:
+                path = Path(save)
+                target = (path if label is None
+                          else path.with_name(f'{path.stem}_{label}{path.suffix}'))
+            figures.append(plot_pair_rule_fovs(
+                subset, stages, cells, metadata, organ, score, metric=metric,
+                min_cells=min_cells, selection=selection, save=target,
+                highlight_label=highlight_label,
+            ))
+        return figures
+
     colors = set_cell_colors(cells)
     rule = examples["rule"].iat[0]
     ant = list(examples["antecedent_cells"].iat[0])
     con = list(examples["consequent_cells"].iat[0])
-    rows = examples.set_index("stage")
+    state_names = {1: "Attraction", -1: "Avoidance", 0: "No rule"}
+    present = set(pd.to_numeric(examples["state"], errors="coerce").dropna().astype(int))
+    states = [value for value in (1, -1, 0) if value in present]
+    rows = examples.set_index(["state", "stage"])
+    nrows = 2 * len(states)
+    panel = _TEXT_WIDTH / len(stages)
     fig, axes = plt.subplots(
-        2, len(stages), figsize=(3.75 * len(stages), 8.3),
+        nrows, len(stages),
+        figsize=(_TEXT_WIDTH, min(9.6, panel * nrows * 0.90 + 1.35)),
         squeeze=False, facecolor="white",
-        gridspec_kw={"wspace": 0.18, "hspace": 0.40},
+        gridspec_kw={"wspace": 0.18, "hspace": 0.48},
     )
 
-    for column, stage in enumerate(stages):
-        if stage not in rows.index:
-            for ax in axes[:, column]:
-                ax.axis("off")
-            axes[0, column].set_title(stage, fontsize=10)
-            message = ("0 eligible FOVs" if eligible_n.get(stage) == 0
-                       else "No rule-bearing eligible FOV")
-            axes[0, column].text(
-                0.5, 0.5, message,
-                ha="center", va="center", color="#898781", fontsize=8.5,
-            )
-            continue
+    for block, state in enumerate(states):
+        top, bottom = 2 * block, 2 * block + 1
+        for column, stage in enumerate(stages):
+            key = (state, stage)
+            if key not in rows.index:
+                for ax in axes[top:bottom + 1, column]:
+                    ax.axis("off")
+                axes[top, column].set_title(stage if block == 0 else "", fontsize=10)
+                message = ("0 eligible FOVs" if eligible_n.get(stage) == 0
+                           else f"No eligible {state_names[state].lower()} example")
+                axes[top, column].text(0.5, 0.5, message, ha="center", va="center",
+                                       color="#898781", fontsize=8.2)
+                continue
 
-        item = rows.loc[stage]
-        if isinstance(item, pd.DataFrame):
-            item = item.iloc[0]
-        fov = item["FOV"]
-        plot_fov(
-            fov, "", cells, metadata, ax=axes[0, column],
-            show_legend=False, cell_size=14,
-        )
-        biopsy = item.get("Biopsy", np.nan)
-        location = f"{stage} · {fov}\nFull FOV"
-        if pd.notna(biopsy):
-            location = f"{stage} · biopsy {biopsy}\n{fov} · full FOV"
-        axes[0, column].set_title(location, fontsize=9.5)
+            item = rows.loc[key]
+            if isinstance(item, pd.DataFrame):
+                item = item.iloc[0]
+            fov = item["FOV"]
+            plot_fov(fov, "", cells, metadata, ax=axes[top, column],
+                     show_legend=False, cell_size=14)
+            biopsy = item.get("Biopsy", np.nan)
+            location = f"{stage} · {fov}\nfull FOV"
+            if pd.notna(biopsy):
+                location = f"{stage} · biopsy {biopsy}\n{fov} · full FOV"
+            axes[top, column].set_title(location, fontsize=9.2)
+            axes[top, column].set_xlabel("")
+            axes[top, column].set_xticks([])
+            axes[top, column].set_yticks([])
 
-        plot_fov(
-            fov, "", cells, metadata, target_ant_cells=ant,
-            target_cons_cells=con, ax=axes[1, column],
-            show_legend=False, cell_size=14,
-        )
-        state = {1: "Attraction", -1: "Avoidance"}[int(item["state"])]
-        details = f"{state} · {metric.lower()} {item['metric']:.3g}"
-        if pd.notna(item.get("fdr", np.nan)):
-            details += f" · FDR {item['fdr']:.3g}"
-        if pd.notna(item.get("biopsy_net", np.nan)):
-            details += f"\nbiopsy net {100 * item['biopsy_net']:+.0f}%"
-        axes[1, column].set_title(f"Highlighted pair\n{details}", fontsize=9.2)
+            plot_fov(fov, "", cells, metadata, target_ant_cells=ant,
+                     target_cons_cells=con, ax=axes[bottom, column],
+                     show_legend=False, cell_size=14)
+            details = state_names[state]
+            if state and pd.notna(item.get("metric", np.nan)):
+                details += f" · {metric.lower()} {item['metric']:.3g}"
+            if pd.notna(item.get("biopsy_net", np.nan)):
+                details += f" · biopsy net {100 * item['biopsy_net']:+.0f}%"
+            axes[bottom, column].set_title(f"{highlight_label}\n{details}", fontsize=9.0)
+            axes[bottom, column].set_xlabel("")
+            axes[bottom, column].set_xticks([])
+            axes[bottom, column].set_yticks([])
+
+        axes[top, 0].set_ylabel(f"{state_names[state]}\nfull FOV", fontsize=9,
+                                fontweight="bold", labelpad=8)
+        axes[bottom, 0].set_ylabel(f"{state_names[state]}\nhighlighted", fontsize=9,
+                                   fontweight="bold", labelpad=8)
 
     cell_types = list(dict.fromkeys(ant + con))
     handles = [
@@ -1390,13 +1457,16 @@ def plot_pair_rule_fovs(examples, stages, cells, metadata, organ, score,
         f"{organ} {rule.replace(' -> ', ' → ')} — representative FOVs",
         fontsize=14, y=0.99,
     )
-    selection_text = selection or "median-strength rule-bearing FOV in each stage"
+    selection_text = selection or "median-strength occurrence; typical eligible no-rule field"
     fig.text(
         0.5, 0.946,
-        (f"Unit: FOV · Organ: {organ} · Score: {score.replace(' score', '').lower()} · "
-         f"Stages: {' / '.join(stages)} · Eligibility: ≥{min_cells} cells/type · "
-         f"Selection: {selection_text}"),
+        "\n".join(textwrap.wrap(
+            f"Unit: FOV · Organ: {organ} · Score: {score.replace(' score', '').lower()} · "
+            f"Stages: {' / '.join(stages)} · Eligibility: ≥{min_cells} cells/type · "
+            f"Selection: {selection_text}", 104)),
         ha="center", va="top", fontsize=8.5, color="#706E68",
     )
-    fig.subplots_adjust(top=0.84, bottom=0.10, wspace=0.18, hspace=0.40)
+    top = 0.88 if len(states) > 1 else 0.86
+    fig.subplots_adjust(top=top, bottom=0.08, left=0.08, right=0.99,
+                        wspace=0.18, hspace=0.48)
     _finish(fig, save)

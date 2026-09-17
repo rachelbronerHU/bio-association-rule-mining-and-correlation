@@ -1,0 +1,29 @@
+[
+  {
+    "niche": "Neuromuscular niche",
+    "types": ["Macrophage", "Neuron", "Muscle"],
+    "organs": ["Colon", "Duodenum"],
+    "context_pair": ["Macrophage", "Neuron"],
+    "claim": "Muscularis macrophages communicate with enteric neurons through BMP2; neurons supply CSF1, and the circuit regulates smooth-muscle contractions.",
+    "caveat": "Mouse muscularis externa, whereas these mucosal biopsies primarily sample muscularis mucosa. Broad labels cannot identify that macrophage subset. Reciprocal molecular signaling predicts neither equal nor unequal ARM prevalence. This is a retrospective anatomical consistency check, not causal validation.",
+    "source": "https://doi.org/10.1016/j.cell.2014.04.050"
+  },
+  {
+    "niche": "Crypt-support niche",
+    "types": ["Paneth", "Epithelial", "Fibroblast"],
+    "organs": ["Duodenum"],
+    "context_pair": ["Paneth", "Epithelial"],
+    "claim": "Paneth cells provide local Wnt to epithelial stem cells; subepithelial GLI1-positive mesenchymal cells provide a reserve Wnt source in mouse small intestine.",
+    "caveat": "Epithelial is not a stem-cell label, and Fibroblast does not identify GLI1-positive cells. The literature motivates this three-type neighborhood, not compulsory simultaneous contact or a numerical spatial-arrow inequality. Epithelial labels were fixed in the mining null.",
+    "source": "https://doi.org/10.1038/nature16937 ; https://doi.org/10.1038/s41586-018-0190-3"
+  },
+  {
+    "niche": "Inflammatory immune-stromal module",
+    "types": ["Macrophage", "CD4T", "Fibroblast", "Plasma"],
+    "organs": ["Colon", "Duodenum"],
+    "context_pair": ["Macrophage", "CD4T"],
+    "claim": "The human ileal Crohn GIMATS module links inflammatory phagocytes, activated T cells, stromal cells and IgG plasma cells; its inferred cytokine network includes macrophage-to-T-cell and macrophage-to-stromal signaling.",
+    "caveat": "This is a four-type spatial extension, not an established four-way 25-micron motif. The atlas lacks the required activation and IgG-subtype labels; its Plasma label is largely IgA-associated. Different organs and GVHD are not Crohn ileitis. Detection cannot validate GIMATS identity or its signaling direction.",
+    "source": "https://doi.org/10.1016/j.cell.2019.08.008"
+  }
+]

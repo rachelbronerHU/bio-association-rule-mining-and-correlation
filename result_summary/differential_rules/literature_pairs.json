@@ -1,0 +1,50 @@
+[
+  {
+    "a": "Macrophage", "b": "Fibroblast", "organs": ["Colon", "Duodenum"],
+    "expectation": "Intestinal fibroblast and macrophage subsets co-localize.",
+    "signaling": "Fibroblast-derived GM-CSF supports monocyte-to-macrophage differentiation.",
+    "spatial_direction": "No predicted stronger rule direction.",
+    "limitation": "Human IBD evidence concerns specific subsets; these atlas labels are broader.",
+    "source": "https://doi.org/10.1038/s41467-024-46076-3"
+  },
+  {
+    "a": "Macrophage", "b": "Neuron", "organs": ["Colon", "Duodenum"],
+    "expectation": "Muscularis macrophages associate with enteric neurons.",
+    "signaling": "Macrophage BMP2 acts on neurons; neuronal CSF1 supports macrophages.",
+    "spatial_direction": "Reciprocal signaling does not imply equal spatial conditional rates.",
+    "limitation": "Mechanistic mouse evidence; not every atlas macrophage is a muscularis macrophage.",
+    "source": "https://doi.org/10.1016/j.cell.2014.04.050"
+  },
+  {
+    "a": "Fibroblast", "b": "Epithelial", "organs": ["Colon", "Duodenum"],
+    "expectation": "Subepithelial mesenchymal cells form an epithelial stem-cell niche.",
+    "signaling": "Mesenchymal Wnt supports epithelial stem-cell renewal.",
+    "spatial_direction": "No predicted stronger rule direction with these broad labels.",
+    "limitation": "Mouse GLI1-positive mesenchyme and stem cells are not separately resolved here.",
+    "source": "https://doi.org/10.1038/s41586-018-0190-3"
+  },
+  {
+    "a": "Paneth", "b": "Epithelial", "organs": ["Duodenum"],
+    "expectation": "Paneth cells contact epithelial stem cells in small-intestinal crypts.",
+    "signaling": "Paneth cells provide Wnt, EGF and Notch niche signals to stem cells.",
+    "spatial_direction": "Paneth-centered epithelial proximity may be higher because Paneth cells occupy a restricted epithelial niche; this is an anatomical inference, not a published rule inequality.",
+    "limitation": "The Epithelial label includes more than LGR5-positive stem cells; mouse evidence.",
+    "source": "https://doi.org/10.1038/nature09637"
+  },
+  {
+    "a": "Plasma", "b": "Epithelial", "organs": ["Colon", "Duodenum"],
+    "expectation": "Mucosal plasma cells occupy APRIL-rich survival niches near epithelial structures.",
+    "signaling": "APRIL supports plasma-cell survival; its cellular source differs by intestinal location.",
+    "spatial_direction": "No predicted stronger rule direction.",
+    "limitation": "The study found no small-intestinal epithelial APRIL production; neutrophils supplied APRIL there. Proximity cannot identify the producer.",
+    "source": "https://doi.org/10.1172/JCI33760"
+  },
+  {
+    "a": "SMV", "b": "Endothelial", "organs": ["Colon", "Duodenum"],
+    "expectation": "Vascular smooth muscle and endothelial cells form adjacent vessel-wall compartments.",
+    "signaling": "Endothelial PDGF-B recruits/supports PDGFR-beta-positive mural cells during development.",
+    "spatial_direction": "No predicted stronger rule direction across a mixture of vessel sizes.",
+    "limitation": "Mouse vascular-development evidence; adult gut proximity cannot validate developmental signaling.",
+    "source": "https://doi.org/10.1242/dev.126.14.3047"
+  }
+]

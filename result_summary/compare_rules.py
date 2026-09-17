@@ -28,12 +28,13 @@ _SUBTITLES = {1: "Attraction examples",
 _TITLE_ABOVE = 0.95      # the three-level title, before any panel caption
 _LINE = 0.145            # one caption line
 _LEGEND_BLOCK = 0.55
-_LABEL_MARGIN = 0.55
-_EDGE = 0.06
+_LABEL_MARGIN = 0.40
+_EDGE = 0.03
 _MAX_HEIGHT = 9.6
-_WSPACE = 0.05
-_CELL_SIZE = 10
+_WSPACE = 0.02
+_CELL_SIZE = 8
 _LABEL_WIDTH = 30
+_CAPTION_WIDTH = 34      # wider than this and a caption spills over the next column
 
 _METRIC_ORDER = ("lift", "conf", "conv", "sup", "lev")
 _PASSING = "#6B7A63"
@@ -63,6 +64,7 @@ def _caption(item):
 
     why = item.get("why")
     if isinstance(why, str) and why:
+        why = textwrap.fill(why, _CAPTION_WIDTH)
         return f"{text}\n{why}" if text else why
     return text
 
@@ -124,6 +126,14 @@ def _layout(n_stages, n_cols, head_lines, row_lines):
             left / TEXT_WIDTH, (left + plot_width) / TEXT_WIDTH)
 
 
+def _lines(text):
+    return text.count("\n") + 1 if text else 0
+
+
+def _wrapped(label):
+    return textwrap.fill(label, _LABEL_WIDTH)
+
+
 def _blank(ax):
     ax.set_xticks([])
     ax.set_yticks([])
@@ -147,11 +157,14 @@ def _one_state(examples, state, views, stages, cells, metadata, organ, score,
 
     n_cols = 1 + len(views)
     every = [view.captions.get(stage, "") for view in views for stage in stages]
-    row_lines = max((text.count("\n") + 1 for text in every if text), default=1)
-    head_lines = 1 + max((views[i].captions.get(stages[0], "").count("\n") + 1
-                          for i in range(len(views))), default=1) if stages else 2
+    row_lines = max((_lines(text) for text in every if text), default=1)
+    # The first row carries a column label as well, and a long rule name wraps.
+    first = stages[0] if stages else None
+    head_lines = max(
+        [2] + [_lines(_wrapped(view.label)) + _lines(view.captions.get(first, ""))
+               for view in views])
     height, title_block, hspace, left, right = _layout(
-        len(stages), n_cols, max(head_lines, 2), row_lines)
+        len(stages), n_cols, head_lines, row_lines)
     fig, axes = plt.subplots(len(stages), n_cols, figsize=(TEXT_WIDTH, height),
                              squeeze=False, facecolor="white",
                              gridspec_kw={"wspace": _WSPACE, "hspace": hspace})
@@ -185,8 +198,8 @@ def _one_state(examples, state, views, stages, cells, metadata, organ, score,
                      target_cons_cells=list(view.consequent), ax=ax, show_legend=False,
                      cell_size=_CELL_SIZE, colors=cell_colors)
             caption = view.captions.get(stage, "")
-            label = textwrap.fill(view.label, _LABEL_WIDTH)
-            ax.set_title(f"{label}\n{caption}" if row == 0 else caption, fontsize=7.5,
+            ax.set_title(f"{_wrapped(view.label)}\n{caption}" if row == 0 else caption,
+                         fontsize=7.5,
                          color=_PASSING if view.passing.get(stage) else _NOT_PASSING)
 
         for ax in axes[row]:

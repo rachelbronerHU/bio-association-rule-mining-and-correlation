@@ -61,27 +61,6 @@ def prepare(rules, cells, metadata, config):
                 metadata=metadata, config=config)
 
 
-def stage_counts(data, organ, rule, parent):
-    """Both rules use the complex rule's eligible FOVs in every displayed stage."""
-    states, eligible, metadata, config = (data[key] for key in
-                                          ['states', 'eligible', 'metadata', 'config'])
-    records = []
-    for stage in ci.STAGES:
-        scope = metadata[metadata.Organ.eq(organ) & metadata[config.score].eq(stage)]
-        ids = scope.FOV[eligible.loc[rule, scope.FOV].to_numpy()].tolist()
-        patients = scope.set_index('FOV').loc[ids, 'PatientID']
-        for name, role in [(parent, 'parent'), (rule, 'complex')]:
-            values = states.loc[name, ids]
-            attraction = int(values.eq(1).sum())
-            avoidance = int(values.eq(-1).sum())
-            records.append(dict(stage=stage, role=role, rule=name, eligible=len(ids),
-                                patients=patients.nunique(), attraction=attraction,
-                                avoidance=avoidance,
-                                rule_patients=patients[values.to_numpy() != 0].nunique(),
-                                net=(attraction - avoidance) / len(ids) if ids else np.nan))
-    return pd.DataFrame(records)
-
-
 def select(data, min_eligible=10, min_patients=3, min_gap=.20, min_hits=5,
            top_n=2, min_mild_eligible=8):
     """Rank balanced sign reversals; no named rule or significance gate enters selection."""
@@ -129,7 +108,7 @@ def select(data, min_eligible=10, min_patients=3, min_gap=.20, min_hits=5,
     for pair in pairs.itertuples(index=False):
         if organ_counts[pair.organ] >= top_n or (pair.organ, pair.rule) in seen_rules:
             continue
-        counts = stage_counts(data, pair.organ, pair.rule, pair.parent)
+        counts = ci.stage_counts(data, pair.organ, pair.rule, pair.parent)
         endpoints = counts[counts.stage.isin(['Control', 'Severe'])]
         if endpoints.patients.min() < min_patients or counts.eligible.min() < min_mild_eligible:
             continue

@@ -337,6 +337,27 @@ def analyse(rules, cells, metadata, config=Config(), mode='all', extra=None, inf
                 config=config, mode=mode, informative=informative)
 
 
+def stage_counts(data, organ, rule, parent):
+    """Both rules use the complex rule's eligible FOVs in every displayed stage."""
+    states, eligible, metadata, config = (data[key] for key in
+                                          ['states', 'eligible', 'metadata', 'config'])
+    records = []
+    for stage in STAGES:
+        scope = metadata[metadata.Organ.eq(organ) & metadata[config.score].eq(stage)]
+        ids = scope.FOV[eligible.loc[rule, scope.FOV].to_numpy()].tolist()
+        patients = scope.set_index('FOV').loc[ids, 'PatientID']
+        for name, role in [(parent, 'parent'), (rule, 'complex')]:
+            values = states.loc[name, ids]
+            attraction = int(values.eq(1).sum())
+            avoidance = int(values.eq(-1).sum())
+            records.append(dict(stage=stage, role=role, rule=name, eligible=len(ids),
+                                patients=patients.nunique(), attraction=attraction,
+                                avoidance=avoidance,
+                                rule_patients=patients[values.to_numpy() != 0].nunique(),
+                                net=(attraction - avoidance) / len(ids) if ids else np.nan))
+    return pd.DataFrame(records)
+
+
 def matched_parents(rule, kind, rows, all_rules):
     """Measured same-FOV parents; average their center variants before ranking."""
     current = rows[(rows.Clean_Rule == rule) & (rows.Kind == kind)]

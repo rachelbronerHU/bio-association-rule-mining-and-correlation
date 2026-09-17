@@ -51,24 +51,22 @@ def summary(analysis, metadata, spec, save=None, pooled=False, cells=None):
     plot_spec = dict(spec, score=config.score)
     states, eligible, rows = (analysis[key] for key in ['states','eligible','rows'])
     with plt.rc_context(dv._PANEL_FONTS):
-        nrows = 4 if cells is not None else 3
-        fig, axes = plt.subplots(nrows, 1, figsize=(dv._TEXT_WIDTH, 8.5 if cells is not None else 6.6),
-                                 gridspec_kw={'height_ratios':[1,1,1.1,1] if cells is not None else [1,1.1,1],
+        # How often the rule fires is drawn by parent_vs_complex, with the parent
+        # beside it, so it is not repeated here.
+        nrows = 3 if cells is not None else 2
+        fig, axes = plt.subplots(nrows, 1, figsize=(dv._TEXT_WIDTH, 6.9 if cells is not None else 5.0),
+                                 gridspec_kw={'height_ratios':[1,1.1,1] if cells is not None else [1.1,1],
                                               'hspace':.72})
-        dv._prevalence_panel(axes[0], states, eligible, shown, plot_spec, groups, bars=pooled)
-        axes[0].set_xlim(-.5, len(groups)-.5)
         metric_state = {'attracts':1,'avoids':-1}[spec['kind']] if analysis.get('test_metric')=='Lift' else None
-        metric_axis = 2 if cells is not None else 1
-        state_axis = 3 if cells is not None else 2
+        metric_axis = 1 if cells is not None else 0
+        state_axis = 2 if cells is not None else 1
         if cells is not None:
-            _abundance_panel(axes[1], cells, eligible, shown, plot_spec, groups)
+            _abundance_panel(axes[0], cells, eligible, shown, plot_spec, groups)
         dv._metric_panel(axes[metric_axis], rows, eligible, shown, plot_spec, groups,
                          state=metric_state, connect=not pooled)
         counts = dv._stage_state_counts(states, eligible, shown, spec['rule'], spec['organ'], config.score, groups)
         dv._draw_state_bars(axes[state_axis], *counts, groups, show_net=False)
-        titles = ['how often does this complex rule fire?']
-        if cells is not None:
-            titles.append('what cell types are present? (diagnostic, not a finding)')
+        titles = ['what cell types are present? (diagnostic, not a finding)'] if cells is not None else []
         titles += ['how strong is it? (Lift)', 'every FOV, including ineligible fields']
         for ax,title in zip(axes, titles):
             ax.set_title(title, loc='left', color='#5F5D58', pad=6)
@@ -202,36 +200,82 @@ def parent_in_same_fields(all_rules, examples, parent):
     return frame
 
 
-def parent_eligibility(analysis, spec, parent):
-    """The complex rule's own eligible fields, under the parent's name.
+_PARENT_GREY = '#777777'
+_FIELD_COLORS = {'attraction': '#2878D0', 'avoidance': '#E66A4E'}
+_FIELD_LABELS = {'attraction': 'Attraction (%)', 'avoidance': 'Avoidance (%)'}
+_COUNT_WORDS = {'attraction': 'attracted', 'avoidance': 'avoided', 'eligible': 'eligible'}
 
-    The two rules are only comparable over the same fields, so the parent is never
-    given a denominator of its own here.
+
+def arrow(rule):
+    return rule.replace(' -> ', ' → ')
+
+
+def parent_counts(analysis, metadata, spec, parent, grouped):
+    """Per-stage counts for the complex rule and its parent, over the same fields.
+
+    `analysis['states']` holds only the complex rules, so the parent's row is built
+    from its own passing occurrences. Both rules then take the complex rule's
+    eligibility, which is what makes the two shares comparable.
     """
-    return analysis['eligible'].loc[[spec['rule']]].rename(index={spec['rule']: parent})
+    fovs = analysis['states'].columns
+    states = pd.DataFrame(0, index=[spec['rule'], parent], columns=fovs, dtype='int8')
+    states.loc[spec['rule']] = analysis['states'].loc[spec['rule']].reindex(
+        fovs, fill_value=0).to_numpy()
+    if grouped is not None and len(grouped):
+        states.loc[parent, grouped.FOV] = grouped.state.to_numpy()
+    eligible = analysis['eligible'].loc[[spec['rule']] * 2]
+    eligible.index = [spec['rule'], parent]
+    return ci.stage_counts(dict(states=states, eligible=eligible, metadata=metadata,
+                                config=analysis['config']),
+                           spec['organ'], spec['rule'], parent)
 
 
-def parent_prevalence(analysis, all_rules, metadata, spec, save=None):
-    """One fixed, most frequently best measured parent; not a changing per-FOV union."""
-    config = analysis['config']
-    parent, grouped, matched_fovs = fixed_parent(analysis, all_rules, metadata, spec)
-    if parent is None:
+def parent_vs_complex(table, organ, rule, parent, save=None):
+    """One panel per direction, the shorter rule and the complex one in each.
+
+    Both rules are counted over the complex rule's eligible fields, so the two
+    lines share a denominator. A direction the complex rule never takes is not
+    drawn at all, and its count is left off the axis.
+    """
+    by_role = {role: table[table.role.eq(role)].set_index('stage').loc[ci.STAGES]
+               for role in ('parent', 'complex')}
+    fields = [field for field in ('attraction', 'avoidance') if by_role['complex'][field].sum()]
+    if not fields:
+        print('The complex rule never attracts or avoids here; no panel to draw.')
         return
-    eligible = parent_eligibility(analysis, spec, parent)
-    states = pd.DataFrame(0,index=[parent],columns=eligible.columns,dtype='int8')
-    if len(grouped):
-        states.loc[parent,grouped.FOV] = grouped.state.to_numpy()
-    fig,ax = plt.subplots(figsize=(dv._TEXT_WIDTH,3.15))
-    dv._prevalence_panel(ax,states,eligible,metadata,
-                         dict(organ=spec['organ'],rule=parent,score=config.score),ci.STAGES)
-    ax.set_title('How often does one fixed measured shorter rule fire?',loc='left',fontsize=9)
-    fig.suptitle(f'{spec["organ"]} · {parent.replace(" -> "," → ")}',fontsize=11)
-    fig.text(.5,.88,'Same FOV eligibility as the complex rule; one parent identity across all stages',
-             ha='center',fontsize=7,color='#706E68')
-    fig.subplots_adjust(top=.76,bottom=.23,left=.15,right=.77)
-    dv._finish(fig,save)
-    print(f'Fixed parent: {parent}; most often the best measured shorter rule in '
-          f'{matched_fovs} matched FOVs.')
+
+    height = 1.95 + 1.9 * len(fields)
+    fig, axes = plt.subplots(len(fields), 1, figsize=(dv._TEXT_WIDTH, height),
+                             sharex=True, gridspec_kw={'hspace': .3})
+    axes = np.atleast_1d(axes)
+    for ax, field in zip(axes, fields):
+        for role, color in (('parent', _PARENT_GREY), ('complex', _FIELD_COLORS[field])):
+            block = by_role[role]
+            denom = block.eligible.to_numpy()
+            share = 100 * block[field].to_numpy() / np.where(denom, denom, np.nan)
+            ax.plot(range(3), share, marker='D', lw=2, ms=5, color=color,
+                    label=role.capitalize())
+        ax.set_ylabel(_FIELD_LABELS[field], fontsize=8)
+        ax.set_xlim(-.25, 2.25)
+        ax.set_ylim(0, 100)
+        dv.tidy_axes(ax, grid='y', hide=('top', 'right'))
+        ax.legend(frameon=False, loc='center left', bbox_to_anchor=(1.01, .5), fontsize=8)
+
+    counted = fields + ['eligible']
+    axes[-1].set_xticks(range(3), [
+        stage + '\n' + ' | '.join(str(int(by_role['complex'].loc[stage, name]))
+                                  for name in counted)
+        for stage in ci.STAGES])
+    axes[-1].set_xlabel(' | '.join(_COUNT_WORDS[name] for name in counted)
+                        + ' FOVs, complex rule', fontsize=8)
+
+    fig.suptitle(f'{organ} · {arrow(rule)}', fontsize=12, y=1 - .28 / height)
+    fig.text(.5, 1 - .55 / height, 'Complex rule versus its shorter parent',
+             ha='center', va='top', fontsize=9.5)
+    fig.text(.5, 1 - .76 / height, f'Parent: {arrow(parent)} · % of eligible FOVs',
+             ha='center', va='top', fontsize=8, color='#706E68')
+    fig.subplots_adjust(top=1 - 1.0 / height, bottom=.95 / height, left=.13, right=.80)
+    dv._finish(fig, save)
 
 
 def show_selected(index, specs, analysis, rules, cells, metadata, prefix,
@@ -246,8 +290,12 @@ def show_selected(index, specs, analysis, rules, cells, metadata, prefix,
     counts = analysis['counts']
     block = counts[(counts.rule == spec['rule']) & (counts.organ == spec['organ'])]
     display(block[['stage','kind','hits','eligible','total','hit_patients','patients']].reset_index(drop=True))
+    parent, grouped, _ = fixed_parent(analysis, rules, metadata, spec)
+    if parent:
+        parent_vs_complex(parent_counts(analysis, metadata, spec, parent, grouped),
+                          spec['organ'], spec['rule'], parent,
+                          filename(prefix, spec, 'parent_vs_complex'))
     summary(analysis,metadata,spec,filename(prefix,spec,'summary'),pooled,cells)
-    parent_prevalence(analysis,rules,metadata,spec,filename(prefix,spec,'parent_prevalence'))
     if parents:
         parent_comparison(analysis,rules,metadata,spec,filename(prefix,spec,'parents'))
     if maps:

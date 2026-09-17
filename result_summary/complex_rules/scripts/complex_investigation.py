@@ -18,7 +18,7 @@ import differential_stats as ds
 
 STAGES = ['Control', 'Mild', 'Severe']
 ORGANS = ['Colon', 'Duodenum']
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass(frozen=True)

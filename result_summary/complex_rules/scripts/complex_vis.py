@@ -19,7 +19,7 @@ from vis_helper import (
 )
 
 
-_FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
+_FIGURE_DIR = Path(__file__).resolve().parent.parent / "summary_downloads"
 
 
 def _finish(fig, save=None, dpi=200):

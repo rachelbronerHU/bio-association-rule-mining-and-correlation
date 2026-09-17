@@ -29,6 +29,16 @@ def state_tables(rules, cells, fovs, min_cells=20):
     return states, eligible, states.astype(float).where(eligible)
 
 
+_METRIC_COLUMNS = {"lift": "Lift", "conf": "Confidence", "conv": "Conviction",
+                   "sup": "Support", "lev": "Leverage"}
+
+
+def rule_metrics(item):
+    """The mining metrics of one rule occurrence, under short names."""
+    return {short: pd.to_numeric(item.get(column, np.nan), errors="coerce")
+            for short, column in _METRIC_COLUMNS.items()}
+
+
 def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
                         groups, metric="Lift", state=None, include_no_rule=True,
                         include_all_states=True):
@@ -53,6 +63,9 @@ def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
     definition = definitions.iloc[0]
     ant = dh.base_items(definition["Antecedents"])
     con = dh.base_items(definition["Consequents"])
+    items = {"antecedent_items": definition["Antecedents"],
+             "consequent_items": definition["Consequents"],
+             "kind": definition.get("Kind", "attracts")}
     available_states = set(rows["state"].astype(int))
     if state is not None:
         shown_states = [state]
@@ -84,7 +97,8 @@ def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
                 "rule": rule, "stage": group, "FOV": item["FOV"],
                 "state": int(item["state"]), "metric": item[metric],
                 "fdr": item.get("Individual_FDR", np.nan),
-                "antecedent_cells": ant, "consequent_cells": con,
+                "metrics": rule_metrics(item),
+                "antecedent_cells": ant, "consequent_cells": con, **items,
             })
 
         if include_no_rule:
@@ -99,8 +113,8 @@ def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
                     if count_col else sorted(no_rule, key=str)[len(no_rule) // 2]
                 examples.append({
                     "rule": rule, "stage": group, "FOV": fov,
-                    "state": 0, "metric": np.nan, "fdr": np.nan,
-                    "antecedent_cells": ant, "consequent_cells": con,
+                    "state": 0, "metric": np.nan, "fdr": np.nan, "metrics": {},
+                    "antecedent_cells": ant, "consequent_cells": con, **items,
                 })
     result = pd.DataFrame(examples)
     result.attrs["eligible_n"] = eligible_n

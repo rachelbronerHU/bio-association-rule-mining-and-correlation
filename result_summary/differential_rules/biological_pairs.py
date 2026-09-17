@@ -16,6 +16,7 @@ from statsmodels.stats.multitest import multipletests
 
 import data_helper as dh
 import differential_vis as dv
+import compare_rules as cr
 
 
 def load_pairs():
@@ -241,8 +242,7 @@ def show_selected(index, specs, rules, states, eligible, cells, metadata, eviden
     plot_known_rule(spec, rules, states, eligible, metadata, evidence, stages, score, stem + "_summary.pdf")
     examples = ds.representative_fovs(rules, eligible, metadata, spec["rule"], spec["organ"],
                                       score, stages, "Lift")
-    dv.plot_pair_rule_fovs(examples, stages, cells, metadata, spec["organ"], score,
-                           min_cells=eligible.attrs.get("min_cells", 20),
-                           selection="each observed state near median Lift; typical eligible no-rule FOV",
-                           save=stem + "_fovs.pdf", split_states=True)
+    cr.plot_rule_fovs(examples, stages, cells, metadata, spec["organ"], score,
+                      min_cells=eligible.attrs.get("min_cells", 20),
+                      save=stem + "_fovs.pdf")
     return examples

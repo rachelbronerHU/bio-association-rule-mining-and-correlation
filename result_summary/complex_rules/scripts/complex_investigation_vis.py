@@ -9,6 +9,8 @@ from IPython.display import Markdown, display
 
 import differential_stats as ds
 import differential_vis as dv
+import compare_rules as cr
+import rule_metrics as rm
 import complex_investigation as ci
 
 
@@ -190,10 +192,9 @@ def show_selected(index, specs, analysis, rules, cells, metadata, prefix,
         config = analysis['config']
         examples = ds.representative_fovs(analysis['rows'],analysis['eligible'],metadata,spec['rule'],
                                           spec['organ'],config.score,ci.STAGES,'Lift')
-        dv.plot_pair_rule_fovs(examples,ci.STAGES,cells,metadata,spec['organ'],config.score,
-                               min_cells=config.min_cells,highlight_label='Highlighted rule cell types',
-                               selection='each observed state near median Lift; typical eligible no-rule FOV',
-                               save=filename(prefix,spec,'fovs'),split_states=True)
+        examples = rm.explain_missing(examples, cells)
+        cr.plot_rule_fovs(examples,ci.STAGES,cells,metadata,spec['organ'],config.score,
+                          min_cells=config.min_cells,max_fdr=config.mining_fdr,save=filename(prefix,spec,'fovs'))
 
 
 def show_threshold(index, specs, baseline, stricter, metadata, prefix='support', cells=None):

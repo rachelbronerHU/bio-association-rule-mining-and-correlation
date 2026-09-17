@@ -75,19 +75,8 @@ def transactions_of(cells, fov, settings, label_col="cell type",
     return built
 
 
-def metrics_in_fov(antecedents, consequents, cells, fov, settings, **columns):
-    """Every descriptive metric for one rule in one field, or None when unmeasurable.
-
-    The numbers are the mining's own: same patches, same support, same formulas.
-    No p-value is returned: it needs the whole shuffled run for that field, and an
-    FDR needs every rule tested there, so neither is defined for one rule alone.
-    """
-    antecedents, consequents = items_of(antecedents), items_of(consequents)
-    built = transactions_of(cells, fov, settings, **columns)
-    if not built:
-        return None
-
-    matrix, index = mining_rules.weight_matrix(built)
+def _measure(matrix, index, antecedents, consequents):
+    """One rule against one field's weight matrix."""
     missing = [item for item in antecedents + consequents if item not in index]
     joint = mining_rules.support_of(frozenset(antecedents + consequents), matrix, index)
     ant_support = mining_rules.support_of(frozenset(antecedents), matrix, index)
@@ -106,6 +95,55 @@ def metrics_in_fov(antecedents, consequents, cells, fov, settings, **columns):
         "patches": matrix.shape[0],
         "missing_items": tuple(missing),
     }
+
+
+class Fields:
+    """One field's patches, built once and reused for every rule asked about it.
+
+    Building a field's transactions costs far more than measuring a rule in them
+    (~68 ms against ~0.02 ms), so anything comparing rules over many fields should
+    go through one of these rather than call `metrics_in_fov` per rule.
+    """
+
+    def __init__(self, cells, settings=None, **columns):
+        self.cells = cells
+        self.settings = current_settings() if settings is None else settings
+        self._columns = columns
+        self._built = {}
+
+    def _matrix(self, fov):
+        if fov not in self._built:
+            built = transactions_of(self.cells, fov, self.settings, **self._columns)
+            self._built[fov] = (mining_rules.weight_matrix(built) if built else None)
+        return self._built[fov]
+
+    def metrics(self, antecedents, consequents, fov):
+        """The same dict as `metrics_in_fov`, off the shared matrix."""
+        if self.settings is None:
+            return None
+        built = self._matrix(fov)
+        if built is None:
+            return None
+        return _measure(*built, items_of(antecedents), items_of(consequents))
+
+    def lift(self, antecedents, consequents, fov):
+        """Just the lift, for a figure that plots it."""
+        measured = self.metrics(antecedents, consequents, fov)
+        return np.nan if measured is None or measured["missing_items"] else measured["lift"]
+
+
+def metrics_in_fov(antecedents, consequents, cells, fov, settings, **columns):
+    """Every descriptive metric for one rule in one field, or None when unmeasurable.
+
+    The numbers are the mining's own: same patches, same support, same formulas.
+    No p-value is returned: it needs the whole shuffled run for that field, and an
+    FDR needs every rule tested there, so neither is defined for one rule alone.
+    """
+    built = transactions_of(cells, fov, settings, **columns)
+    if not built:
+        return None
+    return _measure(*mining_rules.weight_matrix(built),
+                    items_of(antecedents), items_of(consequents))
 
 
 def would_be_mined(measured, settings, kind=ATTRACTS):
@@ -197,19 +235,23 @@ def caption_metrics(measured):
             "lev": measured["leverage"]}
 
 
-def explain_missing(examples, cells, settings=None, **columns):
-    """Fill the metrics and the missed gate into every field that carries no rule."""
-    settings = current_settings() if settings is None else settings
-    if settings is None or examples.empty or "state" not in examples.columns:
+def explain_missing(examples, cells, settings=None, fields=None, **columns):
+    """Fill the metrics and the missed gate into every field that carries no rule.
+
+    Pass a shared `Fields` when several rules are explained over the same fields;
+    each field is then built once rather than once per rule.
+    """
+    fields = Fields(cells, settings, **columns) if fields is None else fields
+    if fields.settings is None or examples.empty or "state" not in examples.columns:
         return examples
     examples = examples.copy()
     if "why" not in examples.columns:
         examples["why"] = None
     for position in examples.index[examples["state"].eq(0)]:
         row = examples.loc[position]
-        measured = metrics_in_fov(row["antecedent_items"], row["consequent_items"],
-                                  cells, row["FOV"], settings, **columns)
+        measured = fields.metrics(row["antecedent_items"], row["consequent_items"],
+                                  row["FOV"])
         examples.at[position, "metrics"] = caption_metrics(measured)
         examples.at[position, "why"] = why_not_mined(
-            measured, settings, row.get("kind", ATTRACTS))
+            measured, fields.settings, row.get("kind", ATTRACTS))
     return examples

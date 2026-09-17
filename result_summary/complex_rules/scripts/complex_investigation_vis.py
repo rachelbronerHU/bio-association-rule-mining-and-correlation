@@ -91,6 +91,37 @@ def summary(analysis, metadata, spec, save=None, pooled=False, cells=None):
         dv._finish(fig, save)
 
 
+def fixed_parent(analysis, all_rules, metadata, spec, quiet=False):
+    """The one shorter rule the comparison is against: most often the best measured one.
+
+    Returns (name, rows, matched_fovs). The rows are collapsed over center variants,
+    so `Clean_Rule` is the parent name and there is one row per field.
+    """
+    matched = ci.matched_parents(spec['rule'], spec.get('kind','attracts'),
+                                 analysis['rows'], all_rules)
+    matched = matched[matched.FOV.isin(metadata.loc[metadata.Organ.eq(spec['organ']),'FOV'])]
+    if matched.empty:
+        if not quiet:
+            print('No measured shorter rule for a prevalence comparison.')
+        return None, None, 0
+    config = analysis['config']
+    source = pd.DataFrame()
+    for parent in matched.parent.value_counts().index:
+        candidate = all_rules[all_rules.Cell_Rule.eq(parent)].copy()
+        gate = np.where(candidate.Kind.eq('attracts'),
+                        (candidate.Support >= config.support) & (candidate.Confidence >= config.confidence),
+                        candidate.Expected_support >= config.expected_support)
+        candidate = candidate[(candidate.Individual_FDR <= config.mining_fdr) & gate]
+        if candidate.FOV.isin(metadata.loc[metadata.Organ.eq(spec['organ']),'FOV']).any():
+            source = candidate
+            break
+    if source.empty:
+        if not quiet:
+            print('No shorter rule passes the same investigation gates in this organ.')
+        return None, None, 0
+    return parent, ci.collapse_centers(source), matched[matched.parent.eq(parent)].FOV.nunique()
+
+
 def parent_comparison(analysis, all_rules, metadata, spec, save=None):
     """Compare actual matched FOVs; zero Lift stays zero, never a clipped huge gain."""
     matched = ci.matched_parents(spec['rule'], spec.get('kind','attracts'), analysis['rows'], all_rules)
@@ -132,30 +163,61 @@ def parent_comparison(analysis, all_rules, metadata, spec, save=None):
              significant_parents=('parent_fdr',lambda x:int((x<=analysis['config'].mining_fdr).sum()))))
 
 
+def parent_in_same_fields(all_rules, examples, parent):
+    """The shorter rule measured in the fields the complex rule is drawn in.
+
+    Its cell types come from its own definition, never from the complex rule, so
+    only its own cells are highlighted. Where it was not mined in one of those
+    fields the row is left at state 0, and `explain_missing` fills in the gate it
+    misses.
+    """
+    carried = examples[examples.state.ne(0)]
+    occurrences = ci.collapse_centers(all_rules[all_rules.Cell_Rule.eq(parent)])
+    if carried.empty or occurrences.empty:
+        return pd.DataFrame()
+
+    definition = occurrences.iloc[0]
+    antecedents, consequents = definition['Antecedents'], definition['Consequents']
+    identity = dict(rule=parent, antecedent_items=antecedents, consequent_items=consequents,
+                    antecedent_cells=ci.dh.base_items(antecedents),
+                    consequent_cells=ci.dh.base_items(consequents))
+    # Every field the parent was mined in, gates or not: a rule that was measured
+    # and then dropped is not the same as one that was never there.
+    mined = occurrences.set_index('FOV')
+
+    rows = []
+    for _, example in carried.iterrows():
+        here = mined.loc[example.FOV] if example.FOV in mined.index else None
+        if isinstance(here, pd.DataFrame):
+            here = here.iloc[0]
+        rows.append(dict(
+            identity, stage=example.stage, FOV=example.FOV,
+            kind=example.get('kind', 'attracts'),
+            state=0 if here is None else int(here.state),
+            metrics={} if here is None else ds.rule_metrics(here),
+            fdr=np.nan if here is None else here.Individual_FDR,
+        ))
+    frame = pd.DataFrame(rows)
+    frame.attrs['eligible_n'] = examples.attrs.get('eligible_n', {})
+    return frame
+
+
+def parent_eligibility(analysis, spec, parent):
+    """The complex rule's own eligible fields, under the parent's name.
+
+    The two rules are only comparable over the same fields, so the parent is never
+    given a denominator of its own here.
+    """
+    return analysis['eligible'].loc[[spec['rule']]].rename(index={spec['rule']: parent})
+
+
 def parent_prevalence(analysis, all_rules, metadata, spec, save=None):
     """One fixed, most frequently best measured parent; not a changing per-FOV union."""
-    matched = ci.matched_parents(spec['rule'], spec.get('kind','attracts'),
-                                 analysis['rows'], all_rules)
-    matched = matched[matched.FOV.isin(metadata.loc[metadata.Organ.eq(spec['organ']),'FOV'])]
-    if matched.empty:
-        print('No measured shorter rule for a prevalence comparison.')
-        return
     config = analysis['config']
-    source = pd.DataFrame()
-    for parent in matched.parent.value_counts().index:
-        candidate = all_rules[all_rules.Cell_Rule.eq(parent)].copy()
-        gate = np.where(candidate.Kind.eq('attracts'),
-                        (candidate.Support >= config.support) & (candidate.Confidence >= config.confidence),
-                        candidate.Expected_support >= config.expected_support)
-        candidate = candidate[(candidate.Individual_FDR <= config.mining_fdr) & gate]
-        if candidate.FOV.isin(metadata.loc[metadata.Organ.eq(spec['organ']),'FOV']).any():
-            source = candidate
-            break
-    if source.empty:
-        print('No shorter rule passes the same investigation gates in this organ.')
+    parent, grouped, matched_fovs = fixed_parent(analysis, all_rules, metadata, spec)
+    if parent is None:
         return
-    grouped = ci.collapse_centers(source)
-    eligible = analysis['eligible'].loc[[spec['rule']]].rename(index={spec['rule']:parent})
+    eligible = parent_eligibility(analysis, spec, parent)
     states = pd.DataFrame(0,index=[parent],columns=eligible.columns,dtype='int8')
     if len(grouped):
         states.loc[parent,grouped.FOV] = grouped.state.to_numpy()
@@ -169,7 +231,7 @@ def parent_prevalence(analysis, all_rules, metadata, spec, save=None):
     fig.subplots_adjust(top=.76,bottom=.23,left=.15,right=.77)
     dv._finish(fig,save)
     print(f'Fixed parent: {parent}; most often the best measured shorter rule in '
-          f'{matched[matched.parent.eq(parent)].FOV.nunique()} matched FOVs.')
+          f'{matched_fovs} matched FOVs.')
 
 
 def show_selected(index, specs, analysis, rules, cells, metadata, prefix,
@@ -192,9 +254,19 @@ def show_selected(index, specs, analysis, rules, cells, metadata, prefix,
         config = analysis['config']
         examples = ds.representative_fovs(analysis['rows'],analysis['eligible'],metadata,spec['rule'],
                                           spec['organ'],config.score,ci.STAGES,'Lift')
-        examples = rm.explain_missing(examples, cells)
+        # The complex rule and its parent are explained over the same fields, so
+        # the patches of each field are built once and shared.
+        fields = rm.Fields(cells)
+        examples = rm.explain_missing(examples, cells, fields=fields)
+        parent, _, _ = fixed_parent(analysis, rules, metadata, spec, quiet=True)
+        shorter = parent_in_same_fields(rules, examples, parent) if parent else pd.DataFrame()
+        if len(shorter):
+            shorter = rm.explain_missing(shorter, cells, fields=fields)
         cr.plot_rule_fovs(examples,ci.STAGES,cells,metadata,spec['organ'],config.score,
-                          min_cells=config.min_cells,max_fdr=config.mining_fdr,save=filename(prefix,spec,'fovs'))
+                          min_cells=config.min_cells,max_fdr=config.mining_fdr,
+                          others=[(f'shorter: {parent.replace(" -> "," → ")}', shorter)]
+                                 if len(shorter) else (),
+                          save=filename(prefix,spec,'fovs'))
 
 
 def show_threshold(index, specs, baseline, stricter, metadata, prefix='support', cells=None):

@@ -149,7 +149,7 @@ def _bare(ax):
 
 
 def _one_state(examples, state, views, stages, cells, metadata, organ, score,
-               min_cells, save, figure_dir, eligible_n):
+               min_cells, save, figure_dir, eligible_n, subtitle=None):
     rule = examples["rule"].iat[0]
     rows = examples.set_index("stage")
     shown_cells = tuple(dict.fromkeys(cell for view in views for cell in view.cells))
@@ -218,7 +218,7 @@ def _one_state(examples, state, views, stages, cells, metadata, organ, score,
 
     fig.suptitle(f"{organ} · {rule.replace(' -> ', ' → ')}", fontsize=13,
                  y=1 - 0.30 / height)
-    fig.text(0.5, 1 - 0.58 / height, _SUBTITLES[state],
+    fig.text(0.5, 1 - 0.58 / height, subtitle or _SUBTITLES[state],
              ha="center", va="top", fontsize=10)
     fig.text(0.5, 1 - 0.82 / height, _scope(score, stages, min_cells),
              ha="center", va="top", fontsize=8.5, color="#706E68")
@@ -231,7 +231,8 @@ def _one_state(examples, state, views, stages, cells, metadata, organ, score,
 
 
 def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
-                   min_cells=20, max_fdr=0.05, save=None, figure_dir=None, others=()):
+                   min_cells=20, max_fdr=0.05, save=None, figure_dir=None, others=(),
+                   subtitle=None):
     """One figure per observed state: stages down the rows, each rule its own column.
 
     `others` : (label, frame) pairs covering the same fields — a shorter rule, say.
@@ -262,6 +263,6 @@ def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
                 views.append(view_of(frame, label, stages, max_fdr))
         figures.append(_one_state(
             subset, state, views, stages, cells, metadata, organ, score, min_cells,
-            _target(save, state), figure_dir, eligible_n,
+            _target(save, state), figure_dir, eligible_n, subtitle,
         ))
     return figures

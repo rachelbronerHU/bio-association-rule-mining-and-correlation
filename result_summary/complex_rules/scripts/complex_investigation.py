@@ -105,7 +105,7 @@ def load(config=Config()):
     return cells, metadata, rules
 
 
-def investigation_rows(rules, config, mode='all', informative=True):
+def investigation_rows(rules, config, mode='all', informative=True, collapse=True):
     """A per-FOV investigation gate, not a new mining threshold."""
     gate = np.where(rules.Kind.eq('attracts'),
                     (rules.Support >= config.support) & (rules.Confidence >= config.confidence),
@@ -120,7 +120,7 @@ def investigation_rows(rules, config, mode='all', informative=True):
     elif mode != 'all':
         raise ValueError(mode)
     selected = rules[keep].copy()
-    return collapse_centers(selected) if 'Cell_Rule' in selected else selected
+    return collapse_centers(selected) if collapse and 'Cell_Rule' in selected else selected
 
 
 def collapse_centers(rows):
@@ -151,6 +151,17 @@ def collapse_centers(rows):
                     'simpler_are_noise': 2, 'consequent_driven': 1, 'redundant_by_simpler': 0}
         result['Complex_Class'] = grouped.Complex_Class.agg(
             lambda values: max(values, key=lambda value: priority.get(value, -1))
+        ).to_numpy()
+    if 'Complex_Class_2' in rows:
+        # 'no shorter' last: one arrangement without a parent does not unmeasure the other.
+        priority = {'stronger than shorter': 3, 'not improving': 2,
+                    'simpler_are_noise': 1, 'no shorter': 0}
+        result['Complex_Class_2'] = grouped.Complex_Class_2.agg(
+            lambda values: max(values, key=lambda value: priority.get(value, -1))
+        ).to_numpy()
+        result['Adds_Information_2'] = result.Complex_Class_2.ne('not improving')
+        result['Simpler_Rules_2'] = grouped.Simpler_Rules_2.agg(
+            lambda values: tuple(sorted(set().union(*values)))
         ).to_numpy()
     result['Clean_Rule'] = result.Cell_Rule
     result['state'] = np.sign(result.Lift - 1).astype('int8')

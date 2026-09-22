@@ -648,6 +648,7 @@ def tidy_axes(ax, grid=None, hide=("top", "right")):
 # Filled once by set_cell_colors(); every FOV map then uses the same colors.
 _CELL_COLORS = {}
 _OTHER_COLOR = (0.5, 0.5, 0.5)
+_COUNTED_GREY = "#D5D5D5"       # a cell that took no part, as faint as a greyed one
 _CELL_COLOR_OVERRIDES = {
     "Endothelial": "#0072B2",
     "Epithelial": "#7A9E3F",
@@ -931,6 +932,22 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
     if own_fig:
         plt.tight_layout()
         _finish(fig, save)
+
+
+def plot_counted_cells(ax, fov_id, df_cells, df_fovs, groups, cell_size=None):
+    """One field drawn in grey, with only the cells in `groups` in color.
+
+    `groups` : (positions, color) pairs, each position counted within the field's
+    own cells, drawn in the order given. This is how a rule is shown against the
+    cells it was counted on, whatever those cells are called.
+    """
+    grey = dict.fromkeys(df_cells["cell type"].dropna().unique(), _COUNTED_GREY)
+    plot_fov(fov_id, "", df_cells, df_fovs, ax=ax, show_legend=False,
+             cell_size=cell_size, colors=grey)
+    block = df_cells[df_cells["fov"] == fov_id]
+    for positions, color in groups:
+        here = block.iloc[list(positions)]
+        ax.scatter(here["x_um"], here["y_um"], s=cell_size, c=color, linewidths=0)
 
 
 def _complex_plot(module, name, args, kwargs):

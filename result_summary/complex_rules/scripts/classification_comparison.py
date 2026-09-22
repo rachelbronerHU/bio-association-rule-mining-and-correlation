@@ -20,7 +20,6 @@ import reclassify as rc
 import rule_metrics as rm
 import vis_helper as vh
 from complex_vis import CLASS_COLORS
-from spatial_association_rules import transactions as mt
 from vis_helper import tidy_axes
 
 TYPE_LABELS = {'ant-complex': 'Multiple antecedents', 'con-complex': 'Multiple consequents'}
@@ -165,7 +164,7 @@ def show_rule(picks, index, rows, rules, cells, metadata, config, prefix):
     for column, rule in [(1, longer), (2, shorter)]:
         _field(axes[0, column], fov, cells, metadata, _caption(rule, column == 2), colours,
                ant=dh.base_items(rule.Antecedents), con=dh.base_items(rule.Consequents))
-        _taking_part(axes[1, column], fov, cells, metadata, rule, settings, colours)
+        _taking_part(axes[1, column], fov, cells, metadata, rule, settings)
     axes[1, 0].set_visible(False)
 
     fig.suptitle(f'{info.at[fov, "Organ"]} · {longer.Cell_Rule.replace(" -> ", " → ")}',
@@ -198,51 +197,14 @@ def _field(ax, fov, cells, metadata, title, colours, ant=None, con=None):
     _bare(ax, title)
 
 
-def _taking_part(ax, fov, cells, metadata, rule, settings, colours):
+def _taking_part(ax, fov, cells, metadata, rule, settings):
     """The cells of the patches where every item of the rule is present."""
-    # No cell type is named, so every cell is drawn as background and nothing highlighted.
-    vh.plot_fov(fov, '', cells, metadata, target_ant_cells=['none'], ax=ax,
-                show_legend=False, cell_size=6, colors=colours)
-    block = cells[cells.fov.eq(fov)]
-    taking = _counting_cells(block, rule, settings)
-    for side, colour in TAKING_PART.items():
-        here = block.iloc[sorted(taking[side])]
-        ax.scatter(here.x_um, here.y_um, s=6, c=colour, linewidths=0)
-    counted = len(taking['antecedent'] | taking['consequent'])
-    _bare(ax, f'cells that count for it\n{counted} of {len(block)} cells')
-
-
-def _counting_cells(block, rule, settings):
-    """Which cells make the rule hold: one set per side of the arrow.
-
-    A patch counts when its center carries the rule's center item and every other item
-    is on one of its neighbours - the same condition the mining counts support by.
-    """
-    coords = block[['x_um', 'y_um']].to_numpy(dtype=float)
-    labels = block['cell type'].to_numpy(dtype=object)
-    sides = {'antecedent': rule.ant, 'consequent': rule.con}
-    wanted = {side: {mt.strip_role(item) for item in items if not mt.is_center(item)}
-              for side, items in sides.items()}
-    middle = {side: {mt.strip_role(item) for item in items if mt.is_center(item)}
-              for side, items in sides.items()}
-    center_label = next(iter(middle['antecedent'] | middle['consequent']))
-
-    taking = {side: set() for side in sides}
-    patches = mt.measure_patches(mt.find_patches(coords, settings), coords, settings)
-    for patch in patches:
-        if labels[patch.center] != center_label:
-            continue
-        if mt.is_crowded_by_one_type(labels[patch.members], settings.max_one_type_share):
-            continue
-        beside = set(labels[patch.neighbors])
-        if not (wanted['antecedent'] | wanted['consequent']) <= beside:
-            continue
-        taking['antecedent' if middle['antecedent'] else 'consequent'].add(patch.center)
-        for neighbor in patch.neighbors:
-            for side in sides:
-                if labels[neighbor] in wanted[side]:
-                    taking[side].add(neighbor)
-    return taking
+    counted = rm.counted_cells(rule.ant, rule.con, cells, fov, settings)
+    vh.plot_counted_cells(ax, fov, cells, metadata,
+                          [(counted.antecedent, TAKING_PART['antecedent']),
+                           (counted.consequent, TAKING_PART['consequent'])], 6)
+    _bare(ax, f'cells that count for it\n'
+              f'{counted.total} of {cells.fov.eq(fov).sum()} cells')
 
 
 def _bare(ax, title):

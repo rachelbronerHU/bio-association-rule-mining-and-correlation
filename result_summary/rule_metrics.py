@@ -14,6 +14,7 @@ import json
 from dataclasses import fields as dataclass_fields
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -98,6 +99,73 @@ def transactions_of(cells, fov, settings, label_col="cell type",
     measured = mining_transactions.measure_patches(patches, coords, settings)
     built, _ = mining_transactions.build_transactions(measured, labels, settings)
     return built
+
+
+class Counted(NamedTuple):
+    """The cells a rule was counted on in one field, as positions in that field."""
+
+    centers: tuple          # the patch centers that carry the whole rule
+    neighbors: tuple        # the neighbors that complete it, centers left out
+    antecedent: tuple       # the same cells, by the side of the arrow they fill
+    consequent: tuple
+
+    @property
+    def total(self):
+        return len(self.centers) + len(self.neighbors)
+
+
+def counted_cells(antecedent_items, consequent_items, cells, fov, settings=None,
+                  label_col="cell type", coord_cols=("x_um", "y_um"), fov_col="fov"):
+    """The cells that make a rule hold in one field.
+
+    A patch counts when its center carries the rule's center item and every other
+    item is on one of its neighbors, which is the condition the mining counts
+    support by. The cells of those patches come back both ways: by the role they
+    play, and by the side of the arrow they fill.
+    """
+    settings = current_settings() if settings is None else settings
+    block = cells[cells[fov_col] == fov]
+    if settings is None or block.empty:
+        return Counted((), (), (), ())
+
+    sides = {"antecedent": items_of(antecedent_items),
+             "consequent": items_of(consequent_items)}
+    middle = {side: {mining_transactions.strip_role(item) for item in items
+                     if mining_transactions.is_center(item)}
+              for side, items in sides.items()}
+    around = {side: {mining_transactions.strip_role(item) for item in items
+                     if not mining_transactions.is_center(item)}
+              for side, items in sides.items()}
+
+    coords = block[list(coord_cols)].to_numpy(dtype=float)
+    labels = block[label_col].to_numpy(dtype=object)
+    patches = mining_transactions.measure_patches(
+        mining_transactions.find_patches(coords, settings), coords, settings)
+
+    center_types = middle["antecedent"] | middle["consequent"]
+    neighbor_types = around["antecedent"] | around["consequent"]
+
+    centers, neighbors = set(), set()
+    taking = {side: set() for side in sides}
+    for patch in patches:
+        if not center_types <= {labels[patch.center]}:
+            continue
+        if mining_transactions.is_crowded_by_one_type(labels[patch.members],
+                                                      settings.max_one_type_share):
+            continue
+        if not neighbor_types <= set(labels[patch.neighbors]):
+            continue
+        centers.add(patch.center)
+        neighbors.update(patch.neighbors[np.isin(labels[patch.neighbors],
+                                                 list(neighbor_types))])
+        for side in sides:
+            if labels[patch.center] in middle[side]:
+                taking[side].add(patch.center)
+            taking[side].update(patch.neighbors[np.isin(labels[patch.neighbors],
+                                                        list(around[side]))])
+    return Counted(tuple(sorted(centers)), tuple(sorted(neighbors - centers)),
+                   tuple(sorted(taking["antecedent"])),
+                   tuple(sorted(taking["consequent"])))
 
 
 def _measure(matrix, index, antecedents, consequents):

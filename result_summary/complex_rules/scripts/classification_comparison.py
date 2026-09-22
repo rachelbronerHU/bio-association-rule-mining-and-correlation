@@ -5,6 +5,7 @@ the shorter rule that judged it, on the metric each classification is decided on
 two panels read the same metric the dots stay put - only their colour, the verdict, changes.
 """
 import textwrap
+from itertools import product
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -297,3 +298,78 @@ def _legend(fig, colors, labels, when, height):
     fig.legend(handles=keys, title=when, loc='upper center', ncol=3, frameon=False,
                fontsize=7, title_fontsize=7.5, bbox_to_anchor=(.5, height),
                columnspacing=1.2, handletextpad=.4)
+
+
+# Who keeps a rule, per rule shape: the name on the figure, the verdict column, its kept value.
+KEPT_BY = {rc.ANT: [('Min improvement\nlift x1.1', 'Complex_Class', 'stronger_effect'),
+                    ("Webb's test", 'Complex_Class_2', rc.STRONGER),
+                    ("Webb's test +\nlift x1.1", 'Complex_Class_3', rc.STRONGER)],
+           rc.CON: [('Min improvement\nlift x1.1', 'Complex_Class', 'stronger_effect'),
+                    ('Conviction\nimprovement', 'Complex_Class_2', rc.STRONGER)]}
+KEPT_COLORS = {'all': CLASS_COLORS['stronger_effect'], 'some': '#8fb3bd', 'none': '#d9d3c7'}
+GAIN_RANGE = (-1.0, 2.5)
+
+
+def show_overlap(rows, prefix):
+    """Which classifications keep the same rule, one panel per rule shape and direction.
+
+    Each column is one exact set of classifications that keep a rule, as the linked dots
+    below it say; each dot above is one rule in one field, at its gain in lift.
+    """
+    fig = plt.figure(figsize=(dv._TEXT_WIDTH, 7.0), facecolor='white')
+    outer = fig.add_gridspec(2, 2, hspace=.28, wspace=.42, left=.15, right=.99,
+                             top=.9, bottom=.09)
+    for spec, (rule_type, kind) in zip(outer, product([rc.ANT, rc.CON], ['attracts', 'avoids'])):
+        _overlap_panel(fig, spec, rows, rule_type, kind)
+    fig.suptitle('Which classifications keep the same rule', fontsize=10, y=.99)
+    keys = [Line2D([], [], marker='o', linestyle='', markersize=5, color=color,
+                   label=f'kept by {name}') for name, color in KEPT_COLORS.items()]
+    fig.legend(handles=keys, loc='lower center', ncol=3, frameon=False, fontsize=7,
+               bbox_to_anchor=(.57, .018))
+    fig.text(.57, .006, f'one dot = one rule in one field · gain cut to {list(GAIN_RANGE)}',
+             ha='center', fontsize=5.8, color='#8a8a8a')
+    dv._finish(fig, str(ci.ROOT / 'summary_downloads' / f'{prefix}_overlap.pdf'))
+
+
+def _overlap_panel(fig, spec, rows, rule_type, kind):
+    here = rows[rows.Rule_Type.eq(rule_type) & rows.Kind.eq(kind) & rows.gain_lift.notna()]
+    methods = KEPT_BY[rule_type]
+    kept = np.column_stack([here[column].eq(value) for _, column, value in methods])
+    sizes = {combo: (kept == combo).all(axis=1).sum()
+             for combo in product([True, False], repeat=len(methods))}
+    combos = sorted([one for one in sizes if sizes[one]], key=lambda one: (-sum(one), -sizes[one]))
+    grid = spec.subgridspec(2, 1, height_ratios=[3.2, .3 + .32 * len(methods)], hspace=.05)
+    top, bottom = fig.add_subplot(grid[0]), fig.add_subplot(grid[1])
+    low, high = GAIN_RANGE
+    spread = np.random.default_rng(0)
+    for x, combo in enumerate(combos):
+        gain = here.gain_lift[(kept == combo).all(axis=1)].clip(low, high).to_numpy()
+        colour = KEPT_COLORS['all' if all(combo) else 'some' if any(combo) else 'none']
+        top.scatter(x + spread.uniform(-.36, .36, len(gain)), gain, s=1.6, linewidth=0,
+                    alpha=.55, color=colour, rasterized=True)
+        top.text(x, high + .12, f'{sizes[combo]:,}', ha='center', va='bottom', fontsize=6.8,
+                 color='#333333')
+        top.text(x, high + .45, f'{sizes[combo] / len(here):.0%}', ha='center', va='bottom',
+                 fontsize=6, color='#8a8a8a')
+        members = [row for row, member in enumerate(combo) if member]
+        bottom.scatter([x] * len(methods), range(len(methods)), s=14, color='#e4e4e4', zorder=1)
+        if members:
+            bottom.plot([x, x], [min(members), max(members)], color='#333333', lw=1.1, zorder=2)
+            bottom.scatter([x] * len(members), members, s=14, color='#333333', zorder=3)
+
+    top.axhline(0, color='#999999', linewidth=.7, zorder=0)
+    for ax in (top, bottom):
+        ax.set_xlim(-.6, len(combos) - .4)
+        ax.set_xticks([])
+    top.set_ylim(low - .1, high + 1.0)
+    top.set_yticks(range(int(np.ceil(low)), int(high) + 1))
+    top.set_title(f'{TYPE_LABELS[rule_type]} · {kind}\n{len(here):,} rules', fontsize=8.2, pad=2)
+    top.set_ylabel('gain in lift', fontsize=7)
+    top.tick_params(labelsize=6.5)
+    for side in ('top', 'right', 'bottom'):
+        top.spines[side].set_visible(False)
+    bottom.set_yticks(range(len(methods)), [name for name, _, _ in methods], fontsize=6.2)
+    bottom.set_ylim(len(methods) - .5, -.5)
+    bottom.tick_params(length=0)
+    for side in bottom.spines.values():
+        side.set_visible(False)

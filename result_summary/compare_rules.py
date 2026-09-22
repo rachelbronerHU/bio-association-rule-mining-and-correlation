@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 from vis_helper import save_figure, plot_fov, set_cell_colors, resolve_cell_colors
+import rule_metrics as rm
 
 TEXT_WIDTH = 6.85
 
@@ -244,6 +245,13 @@ def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
     if examples.empty:
         print("No representative FOVs to plot.")
         return []
+
+    if "why" not in examples.columns:
+        fields = rm.Fields(cells)
+        examples = rm.explain_missing(examples, cells, fields=fields, max_fdr=max_fdr)
+        others = [(label, rm.explain_missing(pd.DataFrame(frame), cells, fields=fields,
+                                             max_fdr=max_fdr))
+                  for label, frame in others]
 
     if figure_dir is None:
         figure_dir = Path.cwd() / "summary_downloads"

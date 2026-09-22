@@ -54,6 +54,31 @@ def current_settings():
         return None
 
 
+_STORED_METRICS = {"lift": "Lift", "conf": "Confidence", "conv": "Conviction",
+                   "sup": "Support", "lev": "Leverage"}
+
+
+@lru_cache(None)
+def _mined_rows(run_dir, max_items=4):
+    """Every rule the run measured in a field, before the FDR and redundancy filters."""
+    import data_helper
+
+    rules = data_helper._read_rules(run_dir, max_items)
+    if rules.empty:
+        return {}
+    found = {}
+    for row in rules.to_dict("records"):
+        found.setdefault(
+            (str(row["Antecedents"]), str(row["Consequents"]), row["FOV"]), row)
+    return found
+
+
+def stored_metrics(row):
+    """The numbers the run already wrote for this rule in this field."""
+    return {short: float(row[column]) for short, column in _STORED_METRICS.items()
+            if pd.notna(row.get(column))}
+
+
 def items_of(stored):
     """A stored side of a rule as its role-carrying items, e.g. ['Goblet_CENTER']."""
     if isinstance(stored, str):
@@ -172,8 +197,12 @@ def _attraction_checks(measured, settings):
               and measured["confidence"] >= settings.strong_confidence)
     needed = (settings.min_support_when_strong if strong else settings.min_support)
     floor = max(needed, settings.min_patches / n)
+    counted = settings.min_patches / n > needed
+    support_reason = (
+        f"only {measured['support'] * n:.0f} patches, needs {settings.min_patches}" if counted
+        else "sup {} < {}".format(*_shortfall(measured["support"], floor)))
     return [
-        (measured["support"] >= floor, "sup {} < {}".format(*_shortfall(measured["support"], floor))),
+        (measured["support"] >= floor, support_reason),
         (measured["lift"] >= settings.min_lift,
          "lift {} < {}".format(*_shortfall(measured["lift"], settings.min_lift))),
         (settings.min_confidence is None or measured["confidence"] >= settings.min_confidence,
@@ -235,20 +264,37 @@ def caption_metrics(measured):
             "lev": measured["leverage"]}
 
 
-def explain_missing(examples, cells, settings=None, fields=None, **columns):
+def explain_missing(examples, cells, settings=None, fields=None, max_fdr=None, **columns):
     """Fill the metrics and the missed gate into every field that carries no rule.
+
+    A field the run already measured keeps the run's own numbers and its FDR; only
+    a field the run never wrote a row for is measured again here.
 
     Pass a shared `Fields` when several rules are explained over the same fields;
     each field is then built once rather than once per rule.
     """
+    import data_helper
+
     fields = Fields(cells, settings, **columns) if fields is None else fields
     if fields.settings is None or examples.empty or "state" not in examples.columns:
         return examples
+    mined = _mined_rows(str(data_helper.RESULT_CSV_PATH))
     examples = examples.copy()
     if "why" not in examples.columns:
         examples["why"] = None
     for position in examples.index[examples["state"].eq(0)]:
         row = examples.loc[position]
+        written = mined.get((str(row["antecedent_items"]), str(row["consequent_items"]),
+                             row["FOV"]))
+        if written is not None:
+            fdr = pd.to_numeric(written.get("Individual_FDR"), errors="coerce")
+            examples.at[position, "metrics"] = stored_metrics(written)
+            examples.at[position, "fdr"] = fdr
+            examples.at[position, "why"] = (
+                "measured here, not significant"
+                if max_fdr is not None and pd.notna(fdr) and fdr > max_fdr
+                else "measured here, dropped by a later filter")
+            continue
         measured = fields.metrics(row["antecedent_items"], row["consequent_items"],
                                   row["FOV"])
         examples.at[position, "metrics"] = caption_metrics(measured)

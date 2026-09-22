@@ -1,6 +1,6 @@
 import os as _os
 
-from fpgrowth_rule_mining import Method, Settings, Weighting
+from spatial_association_rules import Method, Settings, Weighting
 
 
 def _parse_list_env(env_var: str, default: list) -> list:

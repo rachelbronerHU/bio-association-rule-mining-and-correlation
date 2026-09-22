@@ -20,7 +20,7 @@ import reclassify as rc
 import rule_metrics as rm
 import vis_helper as vh
 from complex_vis import CLASS_COLORS
-from fpgrowth_rule_mining import transactions as mt
+from spatial_association_rules import transactions as mt
 from vis_helper import tidy_axes
 
 TYPE_LABELS = {'ant-complex': 'Multiple antecedents', 'con-complex': 'Multiple consequents'}

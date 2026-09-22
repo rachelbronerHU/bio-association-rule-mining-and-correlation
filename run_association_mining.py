@@ -23,7 +23,7 @@ from constants import (
     WEIGHTING,
     WORKERS,
 )
-from fpgrowth_rule_mining import run_samples
+from spatial_association_rules import run_samples
 
 logger = logging.getLogger("manager")
 warnings.filterwarnings('ignore')

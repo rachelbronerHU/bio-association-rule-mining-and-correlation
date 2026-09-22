@@ -6,7 +6,7 @@ package the same question it asks during a run, for a rule and a field of your
 choosing, so a "no rule" panel can say which number fell short.
 
 Nothing here reimplements the mining. Patches, transactions, support, the metrics
-and the verdict all come from `fpgrowth_rule_mining`, so a change there changes
+and the verdict all come from `spatial_association_rules`, so a change there changes
 this too. Recomputing stored rules reproduces their numbers to 1e-16.
 """
 import ast
@@ -18,11 +18,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fpgrowth_rule_mining import rules as mining_rules
-from fpgrowth_rule_mining import transactions as mining_transactions
-from fpgrowth_rule_mining.attraction import attracts
-from fpgrowth_rule_mining.avoidance import avoids
-from fpgrowth_rule_mining.settings import Method, Settings, Weighting
+from spatial_association_rules import rules as mining_rules
+from spatial_association_rules import transactions as mining_transactions
+from spatial_association_rules.attraction import attracts
+from spatial_association_rules.avoidance import avoids
+from spatial_association_rules.settings import Method, Settings, Weighting
 
 ATTRACTS = "attracts"
 

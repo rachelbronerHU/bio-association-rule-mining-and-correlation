@@ -101,17 +101,39 @@ def transactions_of(cells, fov, settings, label_col="cell type",
     return built
 
 
+class Parts(NamedTuple):
+    """A rule's cell types, by the part each one plays in a counting patch."""
+
+    center: tuple           # the cell a patch is built around, normally one type
+    antecedent: tuple       # the other antecedent types, met as neighbors
+    consequent: tuple       # the consequent types, met as neighbors
+
+
 class Counted(NamedTuple):
     """The cells a rule was counted on in one field, as positions in that field."""
 
     centers: tuple          # the patch centers that carry the whole rule
-    neighbors: tuple        # the neighbors that complete it, centers left out
-    antecedent: tuple       # the same cells, by the side of the arrow they fill
-    consequent: tuple
+    antecedent: tuple       # the other antecedent cells around them
+    consequent: tuple       # the consequent cells around them
 
     @property
     def total(self):
-        return len(self.centers) + len(self.neighbors)
+        return len(set(self.centers) | set(self.antecedent) | set(self.consequent))
+
+
+def rule_parts(antecedent_items, consequent_items):
+    """Which cell types a rule asks for as its center, and which as neighbors.
+
+    A longer rule names more than one antecedent, and only one of them can be the
+    center a patch is built around; this is what tells them apart.
+    """
+    def types(items, center):
+        return tuple(sorted({mining_transactions.strip_role(item) for item in items
+                             if mining_transactions.is_center(item) is center}))
+
+    antecedent, consequent = items_of(antecedent_items), items_of(consequent_items)
+    return Parts(types(antecedent + consequent, True),
+                 types(antecedent, False), types(consequent, False))
 
 
 def counted_cells(antecedent_items, consequent_items, cells, fov, settings=None,
@@ -126,46 +148,34 @@ def counted_cells(antecedent_items, consequent_items, cells, fov, settings=None,
     settings = current_settings() if settings is None else settings
     block = cells[cells[fov_col] == fov]
     if settings is None or block.empty:
-        return Counted((), (), (), ())
+        return Counted((), (), ())
 
-    sides = {"antecedent": items_of(antecedent_items),
-             "consequent": items_of(consequent_items)}
-    middle = {side: {mining_transactions.strip_role(item) for item in items
-                     if mining_transactions.is_center(item)}
-              for side, items in sides.items()}
-    around = {side: {mining_transactions.strip_role(item) for item in items
-                     if not mining_transactions.is_center(item)}
-              for side, items in sides.items()}
+    parts = rule_parts(antecedent_items, consequent_items)
+    center_types = set(parts.center)
+    neighbor_types = set(parts.antecedent) | set(parts.consequent)
 
     coords = block[list(coord_cols)].to_numpy(dtype=float)
     labels = block[label_col].to_numpy(dtype=object)
     patches = mining_transactions.measure_patches(
         mining_transactions.find_patches(coords, settings), coords, settings)
 
-    center_types = middle["antecedent"] | middle["consequent"]
-    neighbor_types = around["antecedent"] | around["consequent"]
-
-    centers, neighbors = set(), set()
-    taking = {side: set() for side in sides}
+    centers = set()
+    around = {"antecedent": set(), "consequent": set()}
     for patch in patches:
         if not center_types <= {labels[patch.center]}:
             continue
         if mining_transactions.is_crowded_by_one_type(labels[patch.members],
                                                       settings.max_one_type_share):
             continue
-        if not neighbor_types <= set(labels[patch.neighbors]):
+        beside = labels[patch.neighbors]
+        if not neighbor_types <= set(beside):
             continue
         centers.add(patch.center)
-        neighbors.update(patch.neighbors[np.isin(labels[patch.neighbors],
-                                                 list(neighbor_types))])
-        for side in sides:
-            if labels[patch.center] in middle[side]:
-                taking[side].add(patch.center)
-            taking[side].update(patch.neighbors[np.isin(labels[patch.neighbors],
-                                                        list(around[side]))])
-    return Counted(tuple(sorted(centers)), tuple(sorted(neighbors - centers)),
-                   tuple(sorted(taking["antecedent"])),
-                   tuple(sorted(taking["consequent"])))
+        for side, wanted in around.items():
+            wanted.update(patch.neighbors[np.isin(beside, list(getattr(parts, side)))])
+    return Counted(tuple(sorted(centers)),
+                   tuple(sorted(around["antecedent"] - centers)),
+                   tuple(sorted(around["consequent"] - centers)))
 
 
 def _measure(matrix, index, antecedents, consequents):

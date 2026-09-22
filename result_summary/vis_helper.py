@@ -649,6 +649,9 @@ def tidy_axes(ax, grid=None, hide=("top", "right")):
 _CELL_COLORS = {}
 _OTHER_COLOR = (0.5, 0.5, 0.5)
 _COUNTED_GREY = "#D5D5D5"       # a cell that took no part, as faint as a greyed one
+# The part each cell plays where a rule is counted. Kept apart from the cell-type
+# palette, and in drawing order: the center goes on top.
+ROLE_COLORS = {"center": "#1A1A1A", "antecedent": "#D08C34", "consequent": "#7048E8"}
 _CELL_COLOR_OVERRIDES = {
     "Endothelial": "#0072B2",
     "Epithelial": "#7A9E3F",
@@ -934,20 +937,41 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
         _finish(fig, save)
 
 
-def plot_counted_cells(ax, fov_id, df_cells, df_fovs, groups, cell_size=None):
-    """One field drawn in grey, with only the cells in `groups` in color.
+def plot_counted_cells(ax, fov_id, df_cells, df_fovs, counted, cell_size=None):
+    """One field drawn in grey, with only the cells a rule was counted on in color.
 
-    `groups` : (positions, color) pairs, each position counted within the field's
-    own cells, drawn in the order given. This is how a rule is shown against the
-    cells it was counted on, whatever those cells are called.
+    `counted` is what `rule_metrics.counted_cells` returns. Consequents first, then
+    the other antecedents, then the centers on top, so the cell a patch is built
+    around is never hidden by one of its neighbors.
     """
     grey = dict.fromkeys(df_cells["cell type"].dropna().unique(), _COUNTED_GREY)
     plot_fov(fov_id, "", df_cells, df_fovs, ax=ax, show_legend=False,
              cell_size=cell_size, colors=grey)
     block = df_cells[df_cells["fov"] == fov_id]
-    for positions, color in groups:
+    for positions, role in ((counted.consequent, "consequent"),
+                            (counted.antecedent, "antecedent"),
+                            (counted.centers, "center")):
         here = block.iloc[list(positions)]
-        ax.scatter(here["x_um"], here["y_um"], s=cell_size, c=color, linewidths=0)
+        ax.scatter(here["x_um"], here["y_um"], s=cell_size, c=ROLE_COLORS[role],
+                   linewidths=0)
+
+
+def role_key(parts):
+    """One (color, label) per part the figure's rules have cells for.
+
+    `parts` : one `rule_metrics.Parts` per rule drawn. A part is named by its cell
+    types, because which antecedent is the center cannot otherwise be read off the
+    picture; where two rules disagree on it, the colour is left to speak alone.
+    """
+    entries = []
+    for role, color in ROLE_COLORS.items():
+        seen = {getattr(part, role) for part in parts if getattr(part, role)}
+        if not seen:
+            continue
+        types = seen.pop() if len(seen) == 1 else ()
+        named = ", ".join(one.replace("_", " ") for one in types)
+        entries.append((color, f"{role} ({named})" if named else role))
+    return entries
 
 
 def _complex_plot(module, name, args, kwargs):

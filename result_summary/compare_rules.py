@@ -18,8 +18,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from vis_helper import (save_figure, plot_fov, plot_counted_cells, set_cell_colors,
-                        resolve_cell_colors)
+from vis_helper import (save_figure, plot_fov, plot_counted_cells, role_key,
+                        set_cell_colors, resolve_cell_colors)
 import rule_metrics as rm
 
 TEXT_WIDTH = 6.85
@@ -32,7 +32,8 @@ _SUBTITLES = {1: "Attraction examples",
 
 _TITLE_ABOVE = 0.95      # the three-level title, before any panel caption
 _LINE = 0.145            # one caption line
-_LEGEND_BLOCK = 0.55
+_LEGEND_BLOCK = 0.85     # two keys, one under the other
+_ROLE_BLOCK = 0.32
 _LABEL_MARGIN = 0.40
 _EDGE = 0.03
 _MAX_HEIGHT = 9.6
@@ -44,8 +45,6 @@ _CAPTION_WIDTH = 34      # wider than this and a caption spills over the next co
 _METRIC_ORDER = ("lift", "conf", "conv", "sup", "lev")
 _PASSING = "#6B7A63"
 _NOT_PASSING = "#A2645A"
-_CENTER_COLOR = "#1A1A1A"
-_NEIGHBOR_COLOR = "#D08C34"
 _CHECK_LABEL = "cells counted for the rule"
 
 
@@ -198,32 +197,36 @@ def _rule_panel(ax, fov, cells, metadata, cell_colors, view, stage, named):
 def _check_panel(ax, fov, cells, metadata, view, named):
     """The same field again, with only the cells the rule was counted on."""
     counted = rm.counted_cells(view.antecedent_items, view.consequent_items, cells, fov)
-    plot_counted_cells(ax, fov, cells, metadata,
-                       [(counted.neighbors, _NEIGHBOR_COLOR),
-                        (counted.centers, _CENTER_COLOR)], _CELL_SIZE)
+    plot_counted_cells(ax, fov, cells, metadata, counted, _CELL_SIZE)
     line = (f"{len(counted.centers)} centers · "
             f"{counted.total}/{(cells['fov'] == fov).sum()} cells")
     ax.set_title(f"{_wrapped(_CHECK_LABEL)}\n{line}" if named else line, fontsize=7.5)
 
 
-def _key(shown_cells, cell_colors):
-    """One dot per cell type, then one per role in the counted panels."""
+def _key(shown_cells, cell_colors, views):
+    """The cell types, and the part each rule's types play where it is counted.
+
+    Two keys rather than one: with the cell types written into the role labels,
+    a single row runs off the page.
+    """
     def dot(color, label):
         return Line2D([0], [0], marker="o", linestyle="none", markeredgecolor="none",
                       markerfacecolor=color, markersize=7, label=label)
 
+    parts = [rm.rule_parts(view.antecedent_items, view.consequent_items)
+             for view in views]
     return ([dot(cell_colors.get(cell, "black"), cell.replace("_", " "))
-             for cell in shown_cells]
-            + [dot(_CENTER_COLOR, "rule center"), dot(_NEIGHBOR_COLOR, "rule neighbor")])
+             for cell in shown_cells],
+            [dot(color, label) for color, label in role_key(parts)])
 
 
-def _frame(fig, box, organ, rule, subtitle, scope, shown_cells, cell_colors,
-           save, figure_dir):
-    """The three-level title, the key underneath, and the saved file."""
-    handles = _key(shown_cells, cell_colors)
-    fig.legend(handles=handles, title="Cell type · role", frameon=False,
-               ncol=len(handles), loc="lower center", bbox_to_anchor=(0.5, 0.006),
-               fontsize=8.5, title_fontsize=9)
+def _frame(fig, box, organ, rule, subtitle, scope, keys, save, figure_dir):
+    """The three-level title, the two keys underneath, and the saved file."""
+    for handles, title, above in ((keys[0], "Cell type", _ROLE_BLOCK),
+                                  (keys[1], None, 0.04)):
+        fig.legend(handles=handles, title=title, frameon=False, ncol=len(handles),
+                   loc="lower center", bbox_to_anchor=(0.5, above / box.height),
+                   fontsize=8.5, title_fontsize=9)
 
     fig.suptitle(f"{organ} · {rule.replace(' -> ', ' → ')}", fontsize=13,
                  y=1 - 0.30 / box.height)
@@ -280,7 +283,7 @@ def _state_figure(examples, state, view, stages, cells, metadata, organ, score,
 
     return _frame(fig, box, organ, examples["rule"].iat[0],
                   subtitle or _SUBTITLES[state], _scope(score, stages, min_cells),
-                  view.cells, cell_colors, save, figure_dir)
+                  _key(view.cells, cell_colors, [view]), save, figure_dir)
 
 
 def _stage_figure(examples, state, stage, views, stages, cells, metadata, organ,
@@ -310,8 +313,8 @@ def _stage_figure(examples, state, stage, views, stages, cells, metadata, organ,
 
     return _frame(fig, box, organ, examples["rule"].iat[0],
                   f"{subtitle or _SUBTITLES[state]} · {stage}",
-                  _scope(score, stages, min_cells), shown_cells, cell_colors,
-                  save, figure_dir)
+                  _scope(score, stages, min_cells),
+                  _key(shown_cells, cell_colors, views), save, figure_dir)
 
 
 def plot_rule_fovs(examples, stages, cells, metadata, organ, score,

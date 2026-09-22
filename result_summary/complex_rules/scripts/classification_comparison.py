@@ -33,8 +33,6 @@ ACROSS_LABELS = {'occasions': {'attracts': 'support of the longer rule',
 OCCASIONS = {'attracts': 'Support', 'avoids': 'Expected_support'}
 
 LEAST = 10          # a band is widened to this many rules before anything is chosen
-# The two sides of a counting patch. No cell type is drawn in either colour.
-TAKING_PART = {'antecedent': '#e8590c', 'consequent': '#5f3dc4'}
 
 # Weakest verdict first, so the rules a classification keeps are drawn on top.
 OLD_LABELS = {'redundant_by_simpler': 'a shorter rule explains it',
@@ -146,8 +144,8 @@ def show_rule(picks, index, rows, rules, cells, metadata, config, prefix):
     """One picked rule as fields, in two rows.
 
     Above: the whole field, the rule's cell types, the shorter rule's. Below, under each
-    of those two, the cells that actually make the rule hold, in their own cell-type
-    colours, with the rule's other cells in one colour that belongs to no cell type.
+    of those two, the cells that actually make the rule hold, coloured by the part they
+    play in it: the center, the other antecedents, the consequents.
     """
     pick = picks.loc[index]
     longer = rows.loc[pick.position]
@@ -170,8 +168,9 @@ def show_rule(picks, index, rows, rules, cells, metadata, config, prefix):
     fig.suptitle(f'{info.at[fov, "Organ"]} · {longer.Cell_Rule.replace(" -> ", " → ")}',
                  fontsize=12, y=.985)
     fig.text(.5, .945, f'point {index} · {info.at[fov, config.score]}', ha='center', fontsize=9)
-    _cell_key(fig, types, colours)
-    fig.subplots_adjust(top=.88, bottom=.07, left=.02, right=.98, wspace=.03, hspace=.12)
+    _cell_key(fig, types, colours, [rm.rule_parts(one.ant, one.con)
+                                    for one in (longer, shorter)])
+    fig.subplots_adjust(top=.88, bottom=.11, left=.02, right=.98, wspace=.03, hspace=.12)
     dv._finish(fig, str(ci.ROOT / 'summary_downloads' /
                         f'{prefix}_{longer.Rule_Type}_{longer.Kind}_{index}_fovs.pdf'))
 
@@ -200,9 +199,7 @@ def _field(ax, fov, cells, metadata, title, colours, ant=None, con=None):
 def _taking_part(ax, fov, cells, metadata, rule, settings):
     """The cells of the patches where every item of the rule is present."""
     counted = rm.counted_cells(rule.ant, rule.con, cells, fov, settings)
-    vh.plot_counted_cells(ax, fov, cells, metadata,
-                          [(counted.antecedent, TAKING_PART['antecedent']),
-                           (counted.consequent, TAKING_PART['consequent'])], 6)
+    vh.plot_counted_cells(ax, fov, cells, metadata, counted, 6)
     _bare(ax, f'cells that count for it\n'
               f'{counted.total} of {cells.fov.eq(fov).sum()} cells')
 
@@ -215,14 +212,20 @@ def _bare(ax, title):
     ax.set_yticks([])
 
 
-def _cell_key(fig, types, colours):
-    """One key for the cell types and for the cells the rule is not counted on."""
-    keys = [Line2D([], [], marker='o', linestyle='', markersize=5, color=colours[name],
-                   label=name.replace('_', ' ')) for name in types]
-    keys += [Line2D([], [], marker='o', linestyle='', markersize=5, color=colour,
-                    label=f'{side}s that count') for side, colour in TAKING_PART.items()]
-    fig.legend(handles=keys, loc='lower center', ncol=len(keys), frameon=False,
-               fontsize=7, bbox_to_anchor=(.5, .005))
+def _cell_key(fig, types, colours, parts):
+    """One key for the cell types, one for the part each plays where it counts."""
+    def dot(colour, label):
+        return Line2D([], [], marker='o', linestyle='', markersize=5, color=colour,
+                      label=label)
+
+    for keys, title, above in (
+            ([dot(colours[name], name.replace('_', ' ')) for name in types],
+             'Cell type', .048),
+            ([dot(colour, label) for colour, label in vh.role_key(parts)],
+             None, .005)):
+        fig.legend(handles=keys, title=title, loc='lower center', ncol=len(keys),
+                   frameon=False, fontsize=7, title_fontsize=7.5,
+                   bbox_to_anchor=(.5, above))
 
 
 def show(rows, rule_type, kind, prefix, gain, across='occasions', mark=None):

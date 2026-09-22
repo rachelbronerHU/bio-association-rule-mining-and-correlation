@@ -17,7 +17,7 @@ from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, sprea
                         ZERO as _ZERO, INK as _INK)
 
 
-_FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
+_FIGURE_DIR = Path(__file__).resolve().parent.parent / "summary_downloads"
 
 # A4 minus the summary's 1.8 cm margins: the width a full-width figure is given.
 _TEXT_WIDTH = 6.85

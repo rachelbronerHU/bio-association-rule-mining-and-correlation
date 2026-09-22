@@ -724,7 +724,7 @@ def resolve_cell_colors(cell_types, floor=MIN_CELL_DELTA_E):
     two of a rule's types can arrive identical. Pass the result to every panel of
     one figure and to its legend, so the whole figure agrees.
     """
-    wanted = [name for name in dict.fromkeys(cell_types) if name in _CELL_COLORS]
+    wanted = sorted({name for name in cell_types if name in _CELL_COLORS})
     if len(wanted) < 2:
         return dict(_CELL_COLORS)
 

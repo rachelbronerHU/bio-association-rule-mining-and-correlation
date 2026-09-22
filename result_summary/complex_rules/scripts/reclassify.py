@@ -31,8 +31,8 @@ def transaction_counts(run_dir):
     return {fov: int(n) for fov, n in re.findall(r'\[(.+?)\] (\d+) transactions', log)}
 
 
-def reclassify(rules, transactions, max_fdr=.05, alpha=.05):
-    """Add Complex_Class_2, Adds_Information_2 and Simpler_Rules_2."""
+def reclassify(rules, transactions, max_fdr=.05, alpha=.05, min_lift_gain=1.1):
+    """Add Complex_Class_2, Complex_Class_3, Adds_Information_2 and Simpler_Rules_2."""
     rules = rules.copy()
     table = _table(rules, transactions, max_fdr)
     shorter = _shorter_lookup(table)
@@ -42,6 +42,9 @@ def reclassify(rules, transactions, max_fdr=.05, alpha=.05):
     rules['Simpler_Rules_2'] = [[parent.name for parent in group] for group in found]
     rules['Complex_Class_2'] = [_class_of(row, group, alpha)
                                 for row, group in zip(table.itertuples(), found)]
+    rules['Complex_Class_3'] = [_class_with_lift(row, group, verdict, min_lift_gain)
+                                for row, group, verdict in zip(table.itertuples(), found,
+                                                               rules.Complex_Class_2)]
     rules['Adds_Information_2'] = rules.Complex_Class_2 != NOT_IMPROVING
     return rules
 
@@ -55,6 +58,7 @@ def _table(rules, transactions, max_fdr):
         'type': rules.Rule_Type.to_numpy(),
         'n_items': rules.n_items.to_numpy(),
         'support': rules.Support.to_numpy(),
+        'lift': rules.Lift.to_numpy(),
         # The antecedent side on its own: expected support is the two sides multiplied.
         'ant_support': (rules.Expected_support / _consequent_support(rules)).to_numpy(),
         'confidence': rules.Confidence.to_numpy(),
@@ -96,6 +100,16 @@ def _class_of(row, shorter, alpha):
         return SIMPLER_ARE_NOISE
     beats = _beats_confidence if row.type == ANT else _beats_conviction
     return STRONGER if all(beats(row, parent, alpha) for parent in judged) else NOT_IMPROVING
+
+
+def _class_with_lift(row, shorter, verdict, min_lift_gain):
+    """Multiple antecedents: Webb's test, and lift at least min_lift_gain past every shorter rule."""
+    if row.type != ANT or verdict != STRONGER:
+        return verdict
+    judged = [parent for parent in shorter if parent.passed]
+    far = all(row.lift >= parent.lift * min_lift_gain if row.kind == 'attracts'
+              else row.lift < parent.lift / min_lift_gain for parent in judged)
+    return STRONGER if far else NOT_IMPROVING
 
 
 def _improved(rule, parent, value):

@@ -1,8 +1,8 @@
-"""Today's classification next to the new one, over the same occurrences.
+"""The min-improvement classification (lift x1.1) next to the new ones, over the same occurrences.
 
 One dot per longer rule and field: how much support it has, and how far it improves on
-the shorter rule that judged it. The dots never move between panels - only their colour,
-which is the verdict each classification gives them.
+the shorter rule that judged it, on the metric each classification is decided on. Where
+two panels read the same metric the dots stay put - only their colour, the verdict, changes.
 """
 import textwrap
 from pathlib import Path
@@ -47,8 +47,14 @@ NEW_COLORS = {rc.NOT_IMPROVING: CLASS_COLORS['redundant_by_simpler'],
               rc.STRONGER: CLASS_COLORS['stronger_effect'],
               rc.NO_SHORTER: CLASS_COLORS['new']}
 
-OLD = ('Complex_Class', CLASS_COLORS, OLD_LABELS, 'today')
-NEW = ('Complex_Class_2', NEW_COLORS, {}, 'new')
+OLD = ('Complex_Class', CLASS_COLORS, OLD_LABELS, 'Min improvement - lift x1.1')
+NEW = ('Complex_Class_2', NEW_COLORS, {}, 'Conviction improvement')
+WEBB = ('Complex_Class_2', NEW_COLORS, {}, "Webb's test")
+WEBB_AND_LIFT = ('Complex_Class_3', NEW_COLORS, {}, "Webb's test + min improvement - lift x1.1")
+# The verdict whose kept rules the example fields are taken from.
+PICKED_FROM = {rc.ANT: 'Complex_Class_3', rc.CON: 'Complex_Class_2'}
+
+LEGEND_HEIGHT = .76     # inches under the panels for each classification's key
 
 
 def load(config):
@@ -67,7 +73,9 @@ def dots(rules, config, gain):
     rows = ci.investigation_rows(rules, config, informative=False, collapse=False)
     rows = rows[rows.n_items == 3].copy()
     rows['occasions'] = np.where(rows.Kind.eq('attracts'), rows.Support, rows.Expected_support)
-    return rows.join(_against_shorter(rows, rules, config.mining_fdr, gain))
+    on_lift = _against_shorter(rows, rules, config.mining_fdr, dict.fromkeys(gain, 'Lift'))
+    return (rows.join(_against_shorter(rows, rules, config.mining_fdr, gain))
+            .join(on_lift[['gain', 'kept_share']].add_suffix('_lift')))
 
 
 def _against_shorter(rows, rules, max_fdr, gain):
@@ -105,13 +113,13 @@ def _against_shorter(rows, rules, max_fdr, gain):
 
 
 def examples(rows, rule_type, kind, places, band, flattest_too=True):
-    """The rules to look at as fields, taken from the ones the new verdict keeps.
+    """The rules to look at as fields, taken from the ones PICKED_FROM keeps.
 
     `places` even steps along the kept share, from its left end to its right, each giving
     the strongest gain within `band` of it, and the flattest one as well when asked.
     """
     here = rows[rows.Rule_Type.eq(rule_type) & rows.Kind.eq(kind)
-                & rows.Complex_Class_2.eq(rc.STRONGER) & rows.kept_share.notna()]
+                & rows[PICKED_FROM[rule_type]].eq(rc.STRONGER) & rows.kept_share.notna()]
     picks, taken = [], set()
     for place in np.linspace(0, 1, places):
         around = _band(here, place, band)
@@ -230,31 +238,40 @@ def _cell_key(fig, types, colours, parts):
 
 
 def show(rows, rule_type, kind, prefix, gain, across='occasions', mark=None):
-    """One rule shape and one direction: today's verdicts above, the new ones below."""
+    """One rule shape and one direction: the min-improvement verdicts above, the new ones below.
+
+    Multiple antecedents get a third panel: Webb's test and the lift margin together.
+    """
     here = rows[rows.Rule_Type.eq(rule_type) & rows.Kind.eq(kind)]
-    value = gain[rule_type].lower()
-    fig, axes = plt.subplots(2, 1, figsize=(dv._TEXT_WIDTH, 7.6), sharex=True, sharey=True)
-    for ax, (column, colors, labels, when) in zip(axes, [OLD, NEW]):
-        _panel(ax, here, column, colors, when, across, value)
-        if when == 'new':   # the picks come from the new verdict, so only it is marked
+    classes = [OLD, WEBB, WEBB_AND_LIFT] if rule_type == rc.ANT else [OLD, NEW]
+    height = 7.6 if len(classes) == 2 else 9.0
+    fig, axes = plt.subplots(len(classes), 1, figsize=(dv._TEXT_WIDTH, height),
+                             sharex=True, sharey=gain[rule_type] == 'Lift')
+    for ax, (column, colors, labels, when) in zip(axes, classes):
+        # Min improvement is decided on lift, so its panel reads lift whatever the others read.
+        value, suffix = ('Lift', '_lift') if column == OLD[0] else (gain[rule_type], '')
+        x = across + suffix if across == 'kept_share' else across
+        _panel(ax, here, column, colors, when, x, 'gain' + suffix, value.lower())
+        if column == PICKED_FROM[rule_type]:   # only the verdict the picks come from is marked
             _mark(ax, mark, across)
-    axes[1].set_xlabel(ACROSS_LABELS[across][kind])
+    axes[-1].set_xlabel(ACROSS_LABELS[across][kind])
 
     missing = here[[across, 'gain']].isna().any(axis=1).sum()
     fig.suptitle(f'{TYPE_LABELS[rule_type]} · {kind}: {len(here) - missing} occurrences\n'
                  f'{missing} more cannot be placed: no shorter rule was measured, or it never met',
                  fontsize=10)
-    fig.tight_layout(rect=(0, .20, 1, .94))
-    for (column, colors, labels, when), height in zip([OLD, NEW], [.19, .09]):
-        _legend(fig, colors, labels, when, height)
+    fig.tight_layout(rect=(0, len(classes) * LEGEND_HEIGHT / height, 1, 1 - .456 / height))
+    for number, (column, colors, labels, when) in enumerate(classes):
+        _legend(fig, colors, labels, when,
+                ((len(classes) - number) * LEGEND_HEIGHT - .08) / height)
     name = f'{prefix}_{rule_type}_{kind}' + ('' if across == 'occasions' else '_kept')
     dv._finish(fig, str(ci.ROOT / 'summary_downloads' / f'{name}.pdf'))
 
 
-def _panel(ax, here, column, colors, title, across, value):
+def _panel(ax, here, column, colors, title, x, y, value):
     for name in colors:
         group = here[here[column].eq(name)]
-        ax.scatter(group[across], group.gain, s=7, linewidth=0, alpha=.6,
+        ax.scatter(group[x], group[y], s=7, linewidth=0, alpha=.6,
                    color=colors[name])
     ax.axhline(0, color='#999999', linewidth=.8, zorder=0)
     ax.set_title(title, fontsize=9)

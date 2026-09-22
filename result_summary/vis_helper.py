@@ -648,7 +648,9 @@ def tidy_axes(ax, grid=None, hide=("top", "right")):
 # Filled once by set_cell_colors(); every FOV map then uses the same colors.
 _CELL_COLORS = {}
 _OTHER_COLOR = (0.5, 0.5, 0.5)
-_COUNTED_GREY = "#D5D5D5"       # a cell that took no part, as faint as a greyed one
+_OTHER_ALPHA = 0.2
+_COUNTED_GREY = "#D5D5D5"       # a cell of a type the rule never names
+_RULE_GREY = "#A0A0A0"          # one of the rule's own cell types that took no part
 # The part each cell plays where a rule is counted. Kept apart from the cell-type
 # palette, and in drawing order: the center goes on top.
 ROLE_COLORS = {"center": "#1A1A1A", "antecedent": "#D08C34", "consequent": "#7048E8"}
@@ -889,7 +891,7 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
         if other.any():
             g = df_fov[other]
             ax.scatter(g["x_um"], g["y_um"], s=cell_size, c=[_OTHER_COLOR],
-                       alpha=0.2, linewidths=0, label="Other")
+                       alpha=_OTHER_ALPHA, linewidths=0, label="Other")
         for ct, g in df_fov[~other].groupby("cell type"):
             ax.scatter(g["x_um"], g["y_um"], s=cell_size,
                        c=[colors.get(ct, (0, 0, 0))], label=ct,
@@ -937,14 +939,18 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
         _finish(fig, save)
 
 
-def plot_counted_cells(ax, fov_id, df_cells, df_fovs, counted, cell_size=None):
+def plot_counted_cells(ax, fov_id, df_cells, df_fovs, counted, parts, cell_size=None):
     """One field drawn in grey, with only the cells a rule was counted on in color.
 
-    `counted` is what `rule_metrics.counted_cells` returns. Consequents first, then
-    the other antecedents, then the centers on top, so the cell a patch is built
-    around is never hidden by one of its neighbors.
+    `counted` and `parts` are what `rule_metrics` returns for the rule. Consequents
+    first, then the other antecedents, then the centers on top, so the cell a patch
+    is built around is never hidden by one of its neighbors. The rule's own cell
+    types keep a darker grey where they took no part, so what the rule had to work
+    with is still there to see.
     """
-    grey = dict.fromkeys(df_cells["cell type"].dropna().unique(), _COUNTED_GREY)
+    named = set(parts.center) | set(parts.antecedent) | set(parts.consequent)
+    grey = {cell: (_RULE_GREY if cell in named else _COUNTED_GREY)
+            for cell in df_cells["cell type"].dropna().unique()}
     plot_fov(fov_id, "", df_cells, df_fovs, ax=ax, show_legend=False,
              cell_size=cell_size, colors=grey)
     block = df_cells[df_cells["fov"] == fov_id]

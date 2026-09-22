@@ -199,7 +199,8 @@ def _field(ax, fov, cells, metadata, title, colours, ant=None, con=None):
 def _taking_part(ax, fov, cells, metadata, rule, settings):
     """The cells of the patches where every item of the rule is present."""
     counted = rm.counted_cells(rule.ant, rule.con, cells, fov, settings)
-    vh.plot_counted_cells(ax, fov, cells, metadata, counted, 6)
+    vh.plot_counted_cells(ax, fov, cells, metadata, counted,
+                          rm.rule_parts(rule.ant, rule.con), 6)
     _bare(ax, f'cells that count for it\n'
               f'{counted.total} of {cells.fov.eq(fov).sum()} cells')
 

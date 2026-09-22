@@ -43,8 +43,9 @@ _LABEL_WIDTH = 30
 _CAPTION_WIDTH = 34      # wider than this and a caption spills over the next column
 
 _METRIC_ORDER = ("lift", "conf", "conv", "sup", "lev")
-_PASSING = "#6B7A63"
-_NOT_PASSING = "#A2645A"
+_PASSING = "#6B7A63"          # the rule holds here
+_SHORTER = "#5A7A96"          # the shorter rule holds here
+_NOT_PASSING = "#A2645A"      # no rule here, whichever rule it is
 _CHECK_LABEL = "cells counted for the rule"
 
 
@@ -59,6 +60,7 @@ class View(NamedTuple):
     passing: dict                 # stage -> did this rule clear the FDR gate here
     antecedent_items: tuple       # the same cells with their role, e.g. Goblet_CENTER
     consequent_items: tuple
+    shorter: bool                 # is this the shorter rule the other is compared with
 
 
 class _Box(NamedTuple):
@@ -96,7 +98,7 @@ def _row_of(frame, stage):
     return item.iloc[0] if isinstance(item, pd.DataFrame) else item
 
 
-def view_of(examples, label, stages, max_fdr):
+def view_of(examples, label, stages, max_fdr, shorter=False):
     """An examples frame turned into one rule of the figure."""
     rows = examples.set_index("stage")
     first = examples.iloc[0]
@@ -112,7 +114,7 @@ def view_of(examples, label, stages, max_fdr):
     return View(label, tuple(dict.fromkeys(antecedent + consequent)),
                 antecedent, consequent, captions, passing,
                 rm.items_of(first["antecedent_items"]),
-                rm.items_of(first["consequent_items"]))
+                rm.items_of(first["consequent_items"]), shorter)
 
 
 def _scope(score, stages, min_cells):
@@ -189,15 +191,17 @@ def _rule_panel(ax, fov, cells, metadata, cell_colors, view, stage, named):
              target_cons_cells=list(view.consequent), ax=ax, show_legend=False,
              cell_size=_CELL_SIZE, colors=cell_colors)
     caption = view.captions.get(stage, "")
+    holds = _SHORTER if view.shorter else _PASSING
     ax.set_title(f"{_wrapped(view.label)}\n{caption}" if named else caption,
                  fontsize=7.5,
-                 color=_PASSING if view.passing.get(stage) else _NOT_PASSING)
+                 color=holds if view.passing.get(stage) else _NOT_PASSING)
 
 
 def _check_panel(ax, fov, cells, metadata, view, named):
     """The same field again, with only the cells the rule was counted on."""
     counted = rm.counted_cells(view.antecedent_items, view.consequent_items, cells, fov)
-    plot_counted_cells(ax, fov, cells, metadata, counted, _CELL_SIZE)
+    parts = rm.rule_parts(view.antecedent_items, view.consequent_items)
+    plot_counted_cells(ax, fov, cells, metadata, counted, parts, _CELL_SIZE)
     line = (f"{len(counted.centers)} centers · "
             f"{counted.total}/{(cells['fov'] == fov).sum()} cells")
     ax.set_title(f"{_wrapped(_CHECK_LABEL)}\n{line}" if named else line, fontsize=7.5)
@@ -354,7 +358,7 @@ def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
             frame = pd.DataFrame(frame)
             frame = frame[frame.FOV.isin(set(subset.FOV))]
             if not frame.empty:
-                views.append(view_of(frame, label, stages, max_fdr))
+                views.append(view_of(frame, label, stages, max_fdr, shorter=True))
 
         if len(views) == 1:
             figures.append(_state_figure(

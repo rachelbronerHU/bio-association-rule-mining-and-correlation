@@ -556,7 +556,8 @@ _STATE_COLORS = {
     "Insufficient cells": "#B8B4C7",
 }
 
-_STAGE_COLORS = {"Control": "#67B58A", "Mild": "#E7A33E", "Severe": "#D85D62"}
+_STAGE_COLORS = {"Control": "#67B58A", "Mild": "#E7A33E", "Severe": "#D85D62",
+                 "<30": "#9E8FD0", "30-100": "#7258B8", ">100": "#4A2F8F"}
 _STATE_ORDER = ["Attraction", "No rule", "Avoidance", "Insufficient cells"]
 
 

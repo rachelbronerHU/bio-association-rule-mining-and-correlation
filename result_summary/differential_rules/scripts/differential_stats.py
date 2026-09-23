@@ -7,6 +7,7 @@ import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
 import data_helper as dh
+import rule_metrics as rm
 
 
 def state_tables(rules, cells, fovs, min_cells=20):
@@ -41,15 +42,18 @@ def rule_metrics(item):
 
 def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
                         groups, metric="Lift", state=None, include_no_rule=True,
-                        include_all_states=True):
+                        include_all_states=True, cells=None):
     """Choose typical attraction, avoidance and eligible no-rule FOVs per group.
 
     ``state`` restricts the rule-bearing example to one direction. Otherwise both
     directions are returned when they occur anywhere in the displayed groups. An
     eligible no-rule example is also returned by default. This makes the tissue maps
     an honest companion to the prevalence plot, rather than showing hits only.
+    With ``cells``, a no-rule field with too few patches or meetings to test the
+    rule is shown only when no testable one is left.
     """
     info = metadata.drop_duplicates("FOV").set_index("FOV")
+    fields = rm.Fields(cells) if cells is not None else None
     allowed = eligible.columns[eligible.loc[rule]]
     rows = rules[
         (rules["Clean_Rule"] == rule) & rules["FOV"].isin(allowed)
@@ -104,6 +108,11 @@ def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
         if include_no_rule:
             hit_fovs = set(current["FOV"])
             no_rule = [fov for fov in eligible_fovs if fov not in hit_fovs]
+            if fields is not None and fields.settings is not None:
+                testable = [fov for fov in no_rule if not rm.too_few(
+                    fields.metrics(items["antecedent_items"], items["consequent_items"], fov),
+                    fields.settings, items["kind"])]
+                no_rule = testable or no_rule
             if no_rule:
                 # Median total cell count gives a typical, deterministic field.
                 cell_counts = metadata.set_index("FOV").reindex(no_rule)

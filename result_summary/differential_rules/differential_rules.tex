@@ -45,7 +45,8 @@ fields from one patient are clustered. \netdef}
 \newcommand{\fovvalues}{Columns are stages or time windows, one rule state per figure. Each
 example appears first as a full FOV and then with only the rule's cell types highlighted.
 Rule-bearing examples are nearest their state's median Lift; a no-rule figure uses eligible
-comparison fields.}
+comparison fields, preferring fields where the rule could be tested and falling back to
+fields with too few patches or expected meetings only when none is left.}
 
 \newcommand{\fovref}{Maps and example selection follow Figure~\ref{fig:fov-guide}.}
 

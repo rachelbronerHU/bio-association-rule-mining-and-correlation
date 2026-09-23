@@ -308,6 +308,15 @@ def _avoidance_checks(measured, settings):
     ]
 
 
+def too_few(measured, settings, kind=ATTRACTS):
+    """True when the field has too few patches or meetings for the rule to be tested."""
+    if measured is None or measured["patches"] == 0 or measured["missing_items"]:
+        return True
+    checks = (_attraction_checks(measured, settings)[:1] if kind == ATTRACTS
+              else _avoidance_checks(measured, settings)[:2])
+    return not all(ok for ok, _ in checks)
+
+
 def why_not_mined(measured, settings, kind=ATTRACTS):
     """Short reason this rule is not here, naming the threshold it misses."""
     if measured is None or measured["patches"] == 0:

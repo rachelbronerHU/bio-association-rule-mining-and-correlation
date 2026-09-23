@@ -1289,7 +1289,7 @@ def show_rule(spec, states, eligibility, cells, rules, metadata, stages, metric=
     )
     examples = ds.representative_fovs(
         rules, eligibility, metadata, spec["rule"], spec["organ"], spec["score"],
-        stages, metric,
+        stages, metric, cells=cells,
     )
     cr.plot_rule_fovs(
         examples, stages, cells, metadata, spec["organ"], spec["score"],

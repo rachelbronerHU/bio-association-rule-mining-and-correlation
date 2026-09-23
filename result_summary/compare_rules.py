@@ -323,12 +323,14 @@ def _stage_figure(examples, state, stage, views, stages, cells, metadata, organ,
 
 def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
                    min_cells=20, max_fdr=0.05, save=None, figure_dir=None, others=(),
-                   subtitle=None):
+                   subtitle=None, stages_per_figure=None):
     """One figure per state, or per state and stage when there is a rule to compare.
 
     `others` : (label, frame) pairs covering the same fields — a shorter rule, say.
     Each becomes one more rule in the figure, so the rules are compared in one
     field rather than across two figures.
+    `stages_per_figure` : split each state's figure into parts of this many stages,
+    saved as ..._part1, ..._part2.
     """
     eligible_n = getattr(examples, "attrs", {}).get("eligible_n", {})
     examples = pd.DataFrame(examples)
@@ -361,10 +363,14 @@ def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
                 views.append(view_of(frame, label, stages, max_fdr, shorter=True))
 
         if len(views) == 1:
-            figures.append(_state_figure(
-                subset, state, views[0], stages, cells, metadata, organ, score,
-                min_cells, _target(save, _STATE_SLUGS[state]), figure_dir,
-                eligible_n, subtitle))
+            size = stages_per_figure or len(stages)
+            parts = [stages[start:start + size] for start in range(0, len(stages), size)]
+            for number, shown in enumerate(parts, start=1):
+                tail = [f"part{number}"] if len(parts) > 1 else []
+                figures.append(_state_figure(
+                    subset, state, views[0], shown, cells, metadata, organ, score,
+                    min_cells, _target(save, _STATE_SLUGS[state], *tail), figure_dir,
+                    eligible_n, subtitle))
             continue
         for stage in stages:
             figure = _stage_figure(

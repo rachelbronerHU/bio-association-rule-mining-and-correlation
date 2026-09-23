@@ -21,11 +21,12 @@ import pandas as pd
 
 from spatial_association_rules import rules as mining_rules
 from spatial_association_rules import transactions as mining_transactions
-from spatial_association_rules.attraction import attracts
-from spatial_association_rules.avoidance import avoids
+from spatial_association_rules.attraction import attracts, passes_support_policy
+from spatial_association_rules.avoidance import avoids, enough_to_judge_avoidance
 from spatial_association_rules.settings import Method, Settings, Weighting
 
 ATTRACTS = "attracts"
+AVOIDS = "avoids"
 
 
 def settings_of_run(run_dir):
@@ -88,16 +89,17 @@ def items_of(stored):
 
 
 def transactions_of(cells, fov, settings, label_col="cell type",
-                    coord_cols=("x_um", "y_um"), fov_col="fov"):
+                    coord_cols=("x_um", "y_um"), fov_col="fov", patches=None):
     """The transactions the mining would build for this one field."""
     block = cells[cells[fov_col] == fov]
     if block.empty:
         return []
     coords = block[list(coord_cols)].to_numpy(dtype=float)
     labels = block[label_col].to_numpy(dtype=object)
-    patches = mining_transactions.find_patches(coords, settings)
-    measured = mining_transactions.measure_patches(patches, coords, settings)
-    built, _ = mining_transactions.build_transactions(measured, labels, settings)
+    if patches is None:
+        patches = mining_transactions.measure_patches(
+            mining_transactions.find_patches(coords, settings), coords, settings)
+    built, _ = mining_transactions.build_transactions(patches, labels, settings)
     return built
 
 
@@ -137,7 +139,8 @@ def rule_parts(antecedent_items, consequent_items):
 
 
 def counted_cells(antecedent_items, consequent_items, cells, fov, settings=None,
-                  label_col="cell type", coord_cols=("x_um", "y_um"), fov_col="fov"):
+                  label_col="cell type", coord_cols=("x_um", "y_um"), fov_col="fov",
+                  patches=None):
     """The cells that make a rule hold in one field.
 
     A patch counts when its center carries the rule's center item and every other
@@ -156,8 +159,9 @@ def counted_cells(antecedent_items, consequent_items, cells, fov, settings=None,
 
     coords = block[list(coord_cols)].to_numpy(dtype=float)
     labels = block[label_col].to_numpy(dtype=object)
-    patches = mining_transactions.measure_patches(
-        mining_transactions.find_patches(coords, settings), coords, settings)
+    if patches is None:
+        patches = mining_transactions.measure_patches(
+            mining_transactions.find_patches(coords, settings), coords, settings)
 
     centers = set()
     around = {"antecedent": set(), "consequent": set()}
@@ -208,17 +212,44 @@ class Fields:
     go through one of these rather than call `metrics_in_fov` per rule.
     """
 
-    def __init__(self, cells, settings=None, **columns):
+    def __init__(self, cells, settings=None, label_col="cell type",
+                 coord_cols=("x_um", "y_um"), fov_col="fov"):
         self.cells = cells
         self.settings = current_settings() if settings is None else settings
-        self._columns = columns
+        self.label_col, self.coord_cols, self.fov_col = label_col, coord_cols, fov_col
+        self._columns = dict(label_col=label_col, coord_cols=coord_cols, fov_col=fov_col)
         self._built = {}
+        self._common = {}
+        self._patches = {}
+        self._eligibility = {}
+
+    def patches(self, fov):
+        """Spatial patches shared by eligibility, metrics and counted-cell plots."""
+        if fov not in self._patches:
+            block = self.cells[self.cells[self.fov_col] == fov]
+            coords = block[list(self.coord_cols)].to_numpy(float)
+            self._patches[fov] = mining_transactions.measure_patches(
+                mining_transactions.find_patches(coords, self.settings), coords, self.settings)
+        return self._patches[fov]
+
+    def counted_cells(self, antecedents, consequents, fov):
+        if self.settings is None:
+            return Counted((), (), ())
+        return counted_cells(antecedents, consequents, self.cells, fov, self.settings,
+                             patches=self.patches(fov), **self._columns)
 
     def _matrix(self, fov):
         if fov not in self._built:
-            built = transactions_of(self.cells, fov, self.settings, **self._columns)
+            built = transactions_of(self.cells, fov, self.settings,
+                                    patches=self.patches(fov), **self._columns)
             self._built[fov] = (mining_rules.weight_matrix(built) if built else None)
         return self._built[fov]
+
+    def _common_labels(self, fov):
+        if fov not in self._common:
+            labels = self.cells.loc[self.cells[self.fov_col] == fov, self.label_col]
+            self._common[fov] = mining_rules.labels_with_enough_cells(labels, self.settings)
+        return self._common[fov]
 
     def metrics(self, antecedents, consequents, fov):
         """The same dict as `metrics_in_fov`, off the shared matrix."""
@@ -233,6 +264,79 @@ class Fields:
         """Just the lift, for a figure that plots it."""
         measured = self.metrics(antecedents, consequents, fov)
         return np.nan if measured is None or measured["missing_items"] else measured["lift"]
+
+    def side_supports(self, sides, fov):
+        """Support of each side (a frozenset of items) in this field; 0 when an item is absent."""
+        supports = np.zeros(len(sides))
+        built = self._matrix(fov)
+        if built is None:
+            return supports, 0
+        matrix, index = built
+        for size in {len(side) for side in sides}:
+            rows = [i for i, side in enumerate(sides) if len(side) == size and side <= index.keys()]
+            if rows:
+                columns = np.array([[index[item] for item in sorted(sides[i])] for i in rows])
+                supports[rows] = mining_rules.support_of_many(matrix, columns)
+        return supports, matrix.shape[0]
+
+
+def testable(settings, ant, con, n, kinds=(ATTRACTS, AVOIDS),
+             min_support=0.0, min_confidence=0.0, min_expected=0.0):
+    """Which rules some arrangement of the cells could test, from their side supports.
+
+    Every gate gets easier as the joint support rises (attraction) or falls (avoidance),
+    so attraction is judged at min(P(A), P(B)) and avoidance needs only P(A) and P(B).
+    The min_* floors add a later filter's own gates: attraction support and confidence,
+    and avoidance P(A)P(B).
+    """
+    best = np.minimum(ant, con)
+    confidence = np.divide(best, ant, out=np.zeros_like(best), where=ant > 0)
+    ok = np.zeros(len(ant), dtype=bool)
+    if ATTRACTS in kinds:
+        ok |= (passes_support_policy(settings, best, confidence, n)
+               & (best >= min_support) & (confidence >= min_confidence))
+    if AVOIDS in kinds and settings.include_avoidance_rules:
+        ok |= enough_to_judge_avoidance(settings, ant, con, n) & (ant * con >= min_expected)
+    return ok
+
+
+def testable_fovs(rule_items, cells, kinds=(ATTRACTS, AVOIDS), fields=None, **floors):
+    """Rule x FOV mask: True where at least one requested rule kind can be tested.
+
+    rule_items : {rule name: (antecedent items, consequent items)}, as stored,
+                 e.g. (['Paneth_CENTER'], ['Epithelial_NEIGHBOR']).
+    kinds : modes included in the analysis; pass one for a single-kind analysis.
+    fields : share one Fields instance for the same cells and mining settings.
+    floors : min_support, min_confidence, min_expected, passed on to `testable`.
+    """
+    fields = Fields(cells) if fields is None else fields
+    if fields.settings is None:
+        raise ValueError("Cannot determine rule eligibility without a valid run_config.json.")
+    kinds = tuple(kinds)
+    key = (tuple((name, items_of(ant), items_of(con)) for name, (ant, con) in rule_items.items()),
+           kinds, tuple(sorted(floors.items())))
+    if key in fields._eligibility:
+        return fields._eligibility[key].copy()
+    ants = [frozenset(items_of(ant)) for ant, _ in rule_items.values()]
+    cons = [frozenset(items_of(con)) for _, con in rule_items.values()]
+    sides = list(dict.fromkeys(ants + cons))
+    where = {side: i for i, side in enumerate(sides)}
+    ant_at, con_at = [where[side] for side in ants], [where[side] for side in cons]
+    types = [{mining_transactions.strip_role(item) for item in ant | con}
+             for ant, con in zip(ants, cons)]
+
+    fovs = sorted(cells[fields.fov_col].unique())
+    mask = np.zeros((len(rule_items), len(fovs)), dtype=bool)
+    for column, fov in enumerate(fovs):
+        supports, n = fields.side_supports(sides, fov)
+        if n:
+            common = fields._common_labels(fov)
+            known = np.array([cell_types <= common for cell_types in types], dtype=bool)
+            mask[:, column] = known & testable(fields.settings, supports[ant_at],
+                                               supports[con_at], n, kinds, **floors)
+    result = pd.DataFrame(mask, index=pd.Index(list(rule_items)), columns=fovs)
+    fields._eligibility[key] = result
+    return result.copy()
 
 
 def metrics_in_fov(antecedents, consequents, cells, fov, settings, **columns):

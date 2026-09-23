@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 import complex_investigation as ci
+import rule_metrics as rm
 
 
 def role_preserving_parent(parent_ant, parent_con, child_ant, child_con):
@@ -50,15 +51,10 @@ def prepare(rules, cells, metadata, config):
     states = grouped[grouped.Clean_Rule.isin(names)].pivot(
         index='Clean_Rule', columns='FOV', values='state'
     ).reindex(index=names, columns=fovs).fillna(0).astype('int8')
-    cell_counts = cells.groupby(['cell type', 'fov']).size().unstack(fill_value=0)
-    enough = cell_counts.reindex(columns=fovs, fill_value=0).ge(config.min_cells)
-    eligible = pd.DataFrame(
-        [enough.reindex(list(definitions.at[name, 'types']), fill_value=False).all(axis=0).to_numpy()
-         for name in names], index=names, columns=fovs,
-    )
-    eligible.attrs['min_cells'] = config.min_cells
+    fields = rm.Fields(cells)
+    eligible = ci.cell_rule_testable_fovs(list(names), cells, metadata, config, fields=fields)
     return dict(rows=grouped, pairs=pairs, states=states, eligible=eligible,
-                metadata=metadata, config=config)
+                metadata=metadata, config=config, fields=fields)
 
 
 def select(data, min_eligible=10, min_patients=3, min_gap=.20, min_hits=5,
@@ -80,7 +76,7 @@ def select(data, min_eligible=10, min_patients=3, min_gap=.20, min_hits=5,
             for organ in ci.ORGANS
         ])
         scoped = organ_masks[pairs.organ.map({organ: i for i, organ in enumerate(ci.ORGANS)})]
-        common = eligible[child_index] & scoped
+        common = eligible[child_index] & eligible[parent_index] & scoped
         denominator = common.sum(axis=1)
         pairs[label + '_eligible'] = denominator
         for role, index in [('parent', parent_index), ('complex', child_index)]:

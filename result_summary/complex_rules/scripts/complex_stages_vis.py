@@ -42,7 +42,7 @@ STATE_LABELS = {
     "redundant":   "here, but a shorter rule already said it",
     "pairs_only":  "not here at all, but its pairs are",
     "nothing":     "eligible, but neither the rule nor its pairs are here",
-    "ineligible":  "too few cells to measure this rule",
+    "ineligible":  "rule cannot be tested",
     # Not a state but a share of one: of the FOVs where the rule or ANY ONE of its
     # pairwise parts turned up, how often the rule was the better description.
     "earns": "how often the rule beats its parts, where either turns up",

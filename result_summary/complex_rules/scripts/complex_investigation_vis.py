@@ -80,7 +80,7 @@ def summary(analysis, metadata, spec, save=None, pooled=False, cells=None):
         title = f'{spec["organ"]} · {spec["rule"].replace(" -> ", " → ")}'
         fig.suptitle(textwrap.fill(title, 78), fontsize=11, y=.995)
         endpoint = analysis['mode']+' informative' if analysis.get('informative',True) else 'all passing'
-        subtitle = (f'{config.score} · ≥{config.min_cells} cells/type · {endpoint} occurrences\n'
+        subtitle = (f'{config.score} · rule can be tested · {endpoint} occurrences\n'
                     f'attraction support ≥{config.support:g}; avoidance expected support ≥{config.expected_support:g}')
         fig.text(.5,.927,subtitle,ha='center',va='top',fontsize=7,color='#706E68')
         fig.align_ylabels(axes)
@@ -214,8 +214,8 @@ def parent_counts(analysis, metadata, spec, parent, grouped):
     """Per-stage counts for the complex rule and its parent, over the same fields.
 
     `analysis['states']` holds only the complex rules, so the parent's row is built
-    from its own passing occurrences. Both rules then take the complex rule's
-    eligibility, which is what makes the two shares comparable.
+    from its own passing occurrences. Both shares use the FOVs where both rules
+    are testable.
     """
     fovs = analysis['states'].columns
     states = pd.DataFrame(0, index=[spec['rule'], parent], columns=fovs, dtype='int8')
@@ -223,8 +223,11 @@ def parent_counts(analysis, metadata, spec, parent, grouped):
         fovs, fill_value=0).to_numpy()
     if grouped is not None and len(grouped):
         states.loc[parent, grouped.FOV] = grouped.state.to_numpy()
-    eligible = analysis['eligible'].loc[[spec['rule']] * 2]
-    eligible.index = [spec['rule'], parent]
+    fields = analysis['fields']
+    eligible = pd.concat([
+        analysis['eligible'].loc[[spec['rule']]],
+        ci.cell_rule_testable_fovs([parent], fields.cells, metadata, analysis['config'], fields=fields),
+    ])
     return ci.stage_counts(dict(states=states, eligible=eligible, metadata=metadata,
                                 config=analysis['config']),
                            spec['organ'], spec['rule'], parent)
@@ -233,7 +236,7 @@ def parent_counts(analysis, metadata, spec, parent, grouped):
 def parent_vs_complex(table, organ, rule, parent, save=None):
     """One panel per direction, the shorter rule and the complex one in each.
 
-    Both rules are counted over the complex rule's eligible fields, so the two
+    Both rules are counted where both rules are testable, so the two
     lines share a denominator. A direction the complex rule never takes is not
     drawn at all, and its count is left off the axis.
     """
@@ -272,7 +275,7 @@ def parent_vs_complex(table, organ, rule, parent, save=None):
     fig.suptitle(f'{organ} · {arrow(rule)}', fontsize=12, y=1 - .28 / height)
     fig.text(.5, 1 - .55 / height, 'Complex rule versus its shorter parent',
              ha='center', va='top', fontsize=9.5)
-    fig.text(.5, 1 - .76 / height, f'Parent: {arrow(parent)} · % of eligible FOVs',
+    fig.text(.5, 1 - .76 / height, f'Parent: {arrow(parent)} · % of FOVs testable for both rules',
              ha='center', va='top', fontsize=8, color='#706E68')
     fig.subplots_adjust(top=1 - 1.0 / height, bottom=.95 / height, left=.13, right=.80)
     dv._finish(fig, save)
@@ -304,17 +307,16 @@ def show_selected(index, specs, analysis, rules, cells, metadata, prefix,
                                           spec['organ'],config.score,ci.STAGES,'Lift')
         # The complex rule and its parent are explained over the same fields, so
         # the patches of each field are built once and shared.
-        fields = rm.Fields(cells)
+        fields = analysis['fields']
         examples = rm.explain_missing(examples, cells, fields=fields)
-        parent, _, _ = fixed_parent(analysis, rules, metadata, spec, quiet=True)
         shorter = parent_in_same_fields(rules, examples, parent) if parent else pd.DataFrame()
         if len(shorter):
             shorter = rm.explain_missing(shorter, cells, fields=fields)
         cr.plot_rule_fovs(examples,ci.STAGES,cells,metadata,spec['organ'],config.score,
-                          min_cells=config.min_cells,max_fdr=config.mining_fdr,
+                          max_fdr=config.mining_fdr,
                           others=[(f'shorter: {parent.replace(" -> "," → ")}', shorter)]
                                  if len(shorter) else (),
-                          save=filename(prefix,spec,'fovs'))
+                          save=filename(prefix,spec,'fovs'), fields=fields)
 
 
 def show_threshold(index, specs, baseline, stricter, metadata, prefix='support', cells=None):

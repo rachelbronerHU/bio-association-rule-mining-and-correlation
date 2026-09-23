@@ -10,7 +10,7 @@ import data_helper as dh
 import rule_metrics as rm
 
 
-def state_tables(rules, cells, fovs, min_cells=20):
+def state_tables(rules, cells, fovs, kinds=(rm.ATTRACTS, rm.AVOIDS)):
     """Return all rule states, eligibility, and states masked by eligibility."""
     states = (
         rules.pivot(index="Clean_Rule", columns="FOV", values="state")
@@ -19,14 +19,11 @@ def state_tables(rules, cells, fovs, min_cells=20):
         .astype(int)
     )
     definitions = rules.drop_duplicates("Clean_Rule").set_index("Clean_Rule")
-    rule_cells = {
-        rule: dh.base_items(row["Antecedents"]) + dh.base_items(row["Consequents"])
-        for rule, row in definitions.iterrows()
-    }
-    eligible = dh.eligible_fovs(rule_cells, cells, min_cells).reindex(
+    rule_items = {rule: (row["Antecedents"], row["Consequents"])
+                  for rule, row in definitions.iterrows()}
+    eligible = rm.testable_fovs(rule_items, cells, kinds=kinds).reindex(
         index=states.index, columns=states.columns, fill_value=False
     )
-    eligible.attrs["min_cells"] = min_cells
     return states, eligible, states.astype(float).where(eligible)
 
 

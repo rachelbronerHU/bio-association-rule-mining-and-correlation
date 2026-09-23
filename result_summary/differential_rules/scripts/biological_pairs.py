@@ -14,6 +14,7 @@ from scipy.stats import binomtest, hypergeom
 from statsmodels.stats.multitest import multipletests
 
 import data_helper as dh
+import rule_metrics as rm
 import differential_vis as dv
 
 
@@ -26,7 +27,7 @@ def pair_specs(pairs):
             for pair in pairs for organ in pair["organs"]]
 
 
-def prepare_directional_rules(raw, cells, metadata, pairs, min_cells=20):
+def prepare_directional_rules(raw, cells, metadata, pairs):
     """Keep CENTER -> NEIGHBOR explicitly; preserve unmined reverse directions."""
     ant = raw["Antecedents"].map(ast.literal_eval)
     con = raw["Consequents"].map(ast.literal_eval)
@@ -36,17 +37,16 @@ def prepare_directional_rules(raw, cells, metadata, pairs, min_cells=20):
     definitions = {}
     for pair in pairs:
         a, b = pair["a"], pair["b"]
-        definitions[f"{a} -> {b}"] = [a, b]
-        definitions[f"{b} -> {a}"] = [a, b]
+        definitions[f"{a} -> {b}"] = ([f"{a}_CENTER"], [f"{b}_NEIGHBOR"])
+        definitions[f"{b} -> {a}"] = ([f"{b}_CENTER"], [f"{a}_NEIGHBOR"])
     rules = rules[rules["Clean_Rule"].isin(definitions)
                   & rules["FOV"].isin(metadata["FOV"])].copy()
     if rules.duplicated(["Clean_Rule", "FOV"]).any():
         raise ValueError("Multiple states for one centered rule/FOV: inspect the run.")
     states = rules.pivot(index="Clean_Rule", columns="FOV", values="state")
     states = states.reindex(index=list(definitions), columns=metadata["FOV"]).fillna(0)
-    eligible = dh.eligible_fovs(definitions, cells, min_cells).reindex(
+    eligible = rm.testable_fovs(definitions, cells).reindex(
         index=states.index, columns=states.columns, fill_value=False)
-    eligible.attrs["min_cells"] = min_cells
     return rules, states, eligible, int((~keep).sum())
 
 
@@ -89,7 +89,8 @@ def spatial_diagnostics(cells, metadata, pairs, eligible, radius=25, score="Clin
         organ = info.at[fov, "Organ"]
         for pair in pairs:
             a, b = pair["a"], pair["b"]
-            if organ not in pair["organs"] or not eligible.at[f"{a} -> {b}", fov]:
+            both = eligible.at[f"{a} -> {b}", fov] and eligible.at[f"{b} -> {a}", fov]
+            if organ not in pair["organs"] or not both:
                 continue
             values = neighbor_rates(block[["x_um", "y_um"]].to_numpy(),
                                     block["cell type"].to_numpy(), a, b, radius)

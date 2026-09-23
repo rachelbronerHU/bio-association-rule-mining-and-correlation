@@ -15,6 +15,7 @@ from statsmodels.stats.multitest import multipletests
 
 import data_helper as dh
 import differential_stats as ds
+import rule_metrics as rm
 
 STAGES = ['Control', 'Mild', 'Severe']
 ORGANS = ['Colon', 'Duodenum']
@@ -24,7 +25,6 @@ ROOT = Path(__file__).resolve().parent.parent
 @dataclass(frozen=True)
 class Config:
     max_items: int = 4
-    min_cells: int = 20
     mining_fdr: float = .05
     support: float = .01
     confidence: float = .5  # attraction only; avoidance has a separate opportunity gate
@@ -169,17 +169,28 @@ def collapse_centers(rows):
     return result[result.state.ne(0)].reset_index(drop=True)
 
 
-def matrices(rules, rows, cells, metadata, config, extra=None):
+def centered_versions(name):
+    """Each antecedent type as the center: the stored rules one cell-type rule pools."""
+    ant, con = (side.split(' + ') for side in name.split(' -> '))
+    return [(tuple(sorted([center+'_CENTER', *(t+'_NEIGHBOR' for t in ant if t != center)])),
+             tuple(t+'_NEIGHBOR' for t in con)) for center in ant]
+
+
+def cell_rule_testable_fovs(names, cells, metadata, config, fields=None):
+    """Cell-type rule x FOV: True where one centered version passes the mining and
+    investigation gates for some arrangement of the cells."""
+    versions = {(name, i): version for name in names
+                for i, version in enumerate(centered_versions(name))}
+    mask = rm.testable_fovs(versions, cells, fields=fields, min_support=config.support,
+                            min_confidence=config.confidence,
+                            min_expected=config.expected_support)
+    return mask.groupby(level=0).any().reindex(index=names, columns=metadata.FOV, fill_value=False)
+
+
+def matrices(rules, rows, cells, metadata, config, extra=None, fields=None):
     key = 'Cell_Rule' if 'Cell_Rule' in rules else 'Clean_Rule'
-    definitions = rules[rules.n_items >= 3].drop_duplicates(key).set_index(key)
-    types = definitions.types.to_dict()
-    types.update(extra or {})
-    cell_counts = cells.groupby(['cell type','fov']).size().unstack(fill_value=0)
-    enough = cell_counts.reindex(columns=metadata.FOV,fill_value=0).ge(config.min_cells)
-    masks = {t: enough.reindex(list(t),fill_value=False).all(axis=0).to_numpy()
-             for t in set(tuple(v) for v in types.values())}
-    eligibility = pd.DataFrame([masks[tuple(t)] for t in types.values()],index=list(types),columns=metadata.FOV)
-    eligibility.attrs['min_cells'] = config.min_cells
+    names = list(dict.fromkeys([*rules.loc[rules.n_items >= 3, key], *(extra or {})]))
+    eligibility = cell_rule_testable_fovs(names, cells, metadata, config, fields=fields)
     states = rows.pivot(index='Clean_Rule', columns='FOV', values='state').reindex(
         index=eligibility.index, columns=eligibility.columns).fillna(0).astype('int8')
     return states, eligibility
@@ -339,23 +350,27 @@ def candidates(counts, tests, config, purpose='changes'):
     return pd.concat(selected).drop_duplicates(['organ','rule','kind']).reset_index(drop=True)
 
 
-def analyse(rules, cells, metadata, config=Config(), mode='all', extra=None, informative=True):
+def analyse(rules, cells, metadata, config=Config(), mode='all', extra=None, informative=True,
+            fields=None):
+    fields = rm.Fields(cells) if fields is None else fields
     rows = investigation_rows(rules, config, mode, informative)
-    states, eligible = matrices(rules, rows, cells, metadata, config, extra)
+    states, eligible = matrices(rules, rows, cells, metadata, config, extra, fields=fields)
     counts = occurrence_table(states, eligible, rows, metadata, config)
     tests = stage_tests(states, eligible, counts, metadata, config)
     return dict(rows=rows, states=states, eligible=eligible, counts=counts, tests=tests,
-                config=config, mode=mode, informative=informative)
+                config=config, mode=mode, informative=informative, fields=fields)
 
 
 def stage_counts(data, organ, rule, parent):
-    """Both rules use the complex rule's eligible FOVs in every displayed stage."""
+    """Compare passing occurrences where both rules are testable."""
     states, eligible, metadata, config = (data[key] for key in
                                           ['states', 'eligible', 'metadata', 'config'])
     records = []
     for stage in STAGES:
         scope = metadata[metadata.Organ.eq(organ) & metadata[config.score].eq(stage)]
-        ids = scope.FOV[eligible.loc[rule, scope.FOV].to_numpy()].tolist()
+        child_ok = eligible.loc[rule, scope.FOV]
+        parent_ok = eligible.loc[parent, scope.FOV]
+        ids = scope.FOV[(child_ok & parent_ok).to_numpy()].tolist()
         patients = scope.set_index('FOV').loc[ids, 'PatientID']
         for name, role in [(parent, 'parent'), (rule, 'complex')]:
             values = states.loc[name, ids]

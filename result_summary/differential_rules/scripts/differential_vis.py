@@ -553,12 +553,12 @@ _STATE_COLORS = {
     "Attraction": "#2878D0",
     "No rule": "#E8E7E2",
     "Avoidance": "#E66A4E",
-    "Insufficient cells": "#B8B4C7",
+    "Rule not testable": "#B8B4C7",
 }
 
 _STAGE_COLORS = {"Control": "#67B58A", "Mild": "#E7A33E", "Severe": "#D85D62",
                  "<30": "#9E8FD0", "30-100": "#7258B8", ">100": "#4A2F8F"}
-_STATE_ORDER = ["Attraction", "No rule", "Avoidance", "Insufficient cells"]
+_STATE_ORDER = ["Attraction", "No rule", "Avoidance", "Rule not testable"]
 
 
 def _rule_test_text(spec, trend_results=None, pair_results=None, test_label=None):
@@ -600,7 +600,7 @@ def _stage_state_counts(states, eligibility, metadata, rule, organ, group_col,
             "Attraction": int((can_test & (state > 0)).sum()),
             "No rule": int((can_test & (state == 0)).sum()),
             "Avoidance": int((can_test & (state < 0)).sum()),
-            "Insufficient cells": int((~can_test).sum()),
+            "Rule not testable": int((~can_test).sum()),
         }
         stage_counts.append(counts)
         eligible_counts.append((eligible_n, len(units)))
@@ -678,11 +678,6 @@ def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
         n_panels, 1, figsize=(11.8, figure_height), squeeze=False,
     )
     axes = axes[:, 0]
-    threshold = eligibility.attrs.get("min_cells")
-    eligibility_text = (
-        f"eligibility ≥{threshold} cells/type" if threshold is not None
-        else "eligibility-controlled"
-    )
     groupings = list(dict.fromkeys(
         spec["score"].replace(" score", "").lower() for spec in specs
     ))
@@ -692,7 +687,7 @@ def plot_rule_states(states, eligibility, metadata, specs, stages, heading,
     )
     figure_subtitle = (
         f"Analysis: pairwise rule states · Unit: FOV · Score: {grouping_scope} · "
-        f"Stages: {' / '.join(stages)} · Eligibility: {eligibility_text.replace('eligibility ', '')} · "
+        f"Stages: {' / '.join(stages)} · Eligibility: rule can be tested · "
         "Bars: all FOVs"
     )
     if any(isinstance(value, dict) for value in (pair_results or {}).values()):
@@ -799,11 +794,10 @@ def plot_rule_metric(metrics, eligibility, metadata, spec, stages, metric="Lift"
         spec, trend_results, pair_results,
         f"{direction} {metric}" if direction else metric,
     )
-    threshold = eligibility.attrs.get("min_cells")
     detail = (
         f"Analysis: pairwise rules · Unit: FOV · Organ: {organ} · "
         f"Score: {group_col.replace(' score', '').lower()} · Stages: {' / '.join(stages)} · "
-        f"Eligibility: {f'≥{threshold} cells/type' if threshold else 'controlled'} · "
+        "Eligibility: rule can be tested · "
         f"State: {direction or 'either'} · Metric: {metric}"
         "\nDots: rule-bearing FOVs · Diamonds: stage medians"
     )
@@ -814,48 +808,6 @@ def plot_rule_metric(metrics, eligibility, metadata, spec, stages, metric="Lift"
     fig.text(0.5, 0.935, detail, ha="center", va="top", fontsize=8.3,
              color="#706E68", linespacing=1.35)
     fig.subplots_adjust(top=0.72, bottom=0.19, left=0.12, right=0.98)
-    _finish(fig, save)
-
-
-def plot_cell_counts(cells, metadata, cell_type, organ, group_col, stages,
-                     threshold, heading, save=None, stage_colors=None):
-    """Per-unit cell counts with the rule-eligibility threshold shown explicitly."""
-    counts = cells.loc[cells["cell type"] == cell_type].groupby("fov").size()
-    data = metadata.loc[metadata["Organ"] == organ, ["FOV", group_col]].copy()
-    data["count"] = data["FOV"].map(counts).fillna(0)
-    data = data[data[group_col].isin(stages)]
-    colors = stage_colors or _STAGE_COLORS
-
-    fig, ax = plt.subplots(figsize=(9.8, 4.9))
-    sns.boxplot(data=data, x=group_col, y="count", order=stages, color="#F4F2EC",
-                width=0.48, fliersize=0, linewidth=1.1, ax=ax)
-    sns.stripplot(data=data, x=group_col, y="count", order=stages,
-                  palette=colors, size=5.2, alpha=0.72, edgecolor="white",
-                  linewidth=0.7, jitter=0.22, ax=ax)
-    ax.axhline(threshold, color="#665C9A", lw=1.5, linestyle=(0, (5, 3)))
-    ax.annotate(f"eligibility threshold = {threshold}", xy=(0.01, threshold),
-                xycoords=("axes fraction", "data"), xytext=(0, 6),
-                textcoords="offset points", ha="left", va="bottom", fontsize=9,
-                color="#574F83")
-
-    upper = max(float(data["count"].max()), threshold) * 1.16 + 1
-    for position, stage in enumerate(stages):
-        values = data.loc[data[group_col] == stage, "count"]
-        enough = int((values >= threshold).sum())
-        ax.text(position, upper * 0.97, f"{enough}/{len(values)} reach threshold",
-                ha="center", va="top", fontsize=8.5, fontweight="bold")
-
-    ax.set_ylim(0, upper)
-    ax.set_xlabel("")
-    ax.set_ylabel(f"{cell_type} cells per FOV")
-    ax.set_title(heading, fontsize=14, pad=31)
-    ax.text(0.5, 1.02,
-            (f"Unit: FOV · Organ: {organ} · Score: {group_col.replace(' score', '').lower()} · "
-             f"Stages: {' / '.join(stages)} · Cell type: {cell_type} · "
-             f"Eligibility threshold: ≥{threshold} cells"),
-            transform=ax.transAxes, ha="center", va="bottom", fontsize=8.6,
-            color="#66645F")
-    tidy_axes(ax, grid="y", hide=("top", "right"))
     _finish(fig, save)
 
 
@@ -939,7 +891,7 @@ def plot_temporal_screen(result, scope=None, fdr_threshold=0.05, name_top=8, sav
     ax.text(
         0, 1.015,
         ("Analysis: pairwise rules · Unit: biopsy · Groups: <30 / 30–100 / >100 days\n"
-         f"Eligibility: cell-count controlled · Tested rules: {len(result)}"),
+         f"Eligibility: rule can be tested · Tested rules: {len(result)}"),
         transform=ax.transAxes, ha="left", va="bottom", fontsize=8.5,
         color="#706E68", linespacing=1.4,
     )
@@ -1207,13 +1159,12 @@ def plot_rule_summary(states, eligibility, cells, metrics, metadata, spec, stage
     stages, so full width each is readable where a quarter of the width is not.
     """
     rule, organ, group_col = spec["rule"], spec["organ"], spec["score"]
-    threshold = eligibility.attrs.get("min_cells")
     test_unit = spec.get("test_unit", "FOV")
     detail = (
         f"Plots: FOV · Tests: {test_unit} · Organ: {organ} · "
         f"Score: {group_col.replace(' score', '').lower()} · "
         f"Stages: {' / '.join(stages)} · "
-        f"Eligibility: {f'≥{threshold} cells/type' if threshold else 'controlled'} · "
+        "Eligibility: rule can be tested · "
         "n = eligible FOVs"
     )
     # Built at the width LaTeX gives it, so nothing shrinks on the page.
@@ -1294,7 +1245,7 @@ def show_rule(spec, states, eligibility, cells, rules, metadata, stages, metric=
     )
     cr.plot_rule_fovs(
         examples, stages, cells, metadata, spec["organ"], spec["score"],
-        min_cells=eligibility.attrs["min_cells"], save=rule_file(spec, "fovs", prefix),
+        save=rule_file(spec, "fovs", prefix),
     )
 
 
@@ -1307,7 +1258,6 @@ def plot_organ_rule_context(states, eligibility, cells, metadata, rule, group_co
                                ["Organ", group_col])
     organ_colors = {"Colon": "#2878D0", "Duodenum": "#D97832"}
     cell_colors = {antecedent: "#D97832", consequent: "#169873"}
-    threshold = eligibility.attrs.get("min_cells")
 
     fig = plt.figure(figsize=(12.2, 8.0))
     grid = fig.add_gridspec(2, 2, height_ratios=(1.18, 1), hspace=0.56, wspace=0.25)
@@ -1373,13 +1323,12 @@ def plot_organ_rule_context(states, eligibility, cells, metadata, rule, group_co
         tidy_axes(ax, grid="y", hide=("top", "right"))
         ax.tick_params(length=0)
 
-    threshold_text = f"eligibility ≥{threshold} cells/type" if threshold else "eligibility-controlled"
     fig.suptitle(heading, fontsize=14, y=0.99)
     fig.text(0.5, 0.950,
              (f"Analysis: pairwise rule states · Unit: FOV · Organs: {' / '.join(organs)} · "
               f"Score: {group_col.replace(' score', '').lower()} · "
-              f"Stages: {' / '.join(stages)} · Eligibility: "
-              f"{threshold_text.replace('eligibility ', '')} · Rule and abundance: same FOVs"),
+              f"Stages: {' / '.join(stages)} · Eligibility: rule can be tested · "
+              "Rule and abundance: same FOVs"),
              ha="center", va="top", fontsize=8.5, color="#706E68")
     fig.subplots_adjust(top=0.82, left=0.09, right=0.98, bottom=0.08)
     _finish(fig, save)

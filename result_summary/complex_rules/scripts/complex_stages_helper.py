@@ -5,7 +5,7 @@ import ast
 import numpy as np
 import pandas as pd
 
-from data_helper import base_items, check_rule_overlap, clean_items, eligible_fovs
+from data_helper import base_items, check_rule_overlap, clean_items
 
 
 COMPLEX_TYPES = ["ant-complex", "con-complex", "both-complex"]
@@ -72,15 +72,6 @@ def select_complex_rules(rules, max_fdr, new_only=False, min_strength=1.3,
     else:
         selected = selected[selected["Complex_Class"] != "new"]
     return selected
-
-
-def rule_eligibility(complex_rules, cells, min_cells):
-    definitions = complex_rules.drop_duplicates("name").set_index("name")
-    rule_cells = {
-        name: sorted(set(row.ant_t + row.con_t))
-        for name, row in definitions.iterrows()
-    }
-    return eligible_fovs(rule_cells, cells, min_cells)
 
 
 def _parent_names(rows):

@@ -27,23 +27,24 @@ def show_selected(index, selected, data, cells):
         return
     spec = selected.iloc[index].to_dict()
     print(f'[{index}] {spec["organ"]}: {spec["parent"]}  vs  {spec["rule"]}')
-    print('Same complex-rule eligibility; net = attraction share − avoidance share.')
+    print('FOVs testable for both rules; net = attraction share − avoidance share.')
     table = ci.stage_counts(data, spec['organ'], spec['rule'], spec['parent'])
     display(table[['stage', 'role', 'attraction', 'avoidance', 'eligible',
                    'patients', 'rule_patients', 'net']])
     civ.parent_vs_complex(table, spec['organ'], spec['rule'], spec['parent'],
                           filename(spec, 'summary'))
     common = data['eligible'].loc[[spec['rule'], spec['parent']]].copy()
-    common.loc[spec['parent']] = common.loc[spec['rule']].to_numpy()
+    common.loc[:, :] = common.all(axis=0).to_numpy()
+    fields = data['fields']
     for role, name in [('parent', spec['parent']), ('complex', spec['rule'])]:
         examples = ds.representative_fovs(
             data['rows'], common, data['metadata'], name, spec['organ'],
             data['config'].score, ci.STAGES, 'Lift',
         )
-        examples = rm.explain_missing(examples, cells)
+        examples = rm.explain_missing(examples, cells, fields=fields)
         cr.plot_rule_fovs(
             examples, ci.STAGES, cells, data['metadata'], spec['organ'],
-            data['config'].score, min_cells=data['config'].min_cells,
+            data['config'].score,
             max_fdr=data['config'].mining_fdr,
-            save=filename(spec, role + '_fovs'),
+            save=filename(spec, role + '_fovs'), fields=fields,
         )

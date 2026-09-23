@@ -73,7 +73,8 @@ def direction_audit(specs, analysis, rules, cells, metadata):
     """
     config = analysis['config']
     raw = ci.investigation_rows(rules,config,informative=False)
-    raw_states,_ = ci.matrices(rules,raw,cells,metadata,config,extra_definitions(specs))
+    raw_states,_ = ci.matrices(rules,raw,cells,metadata,config,extra_definitions(specs),
+                               fields=analysis['fields'])
     results=[]
     for (niche,organ,family), group in specs.groupby(['niche','organ','family'],sort=False):
         for a,b in combinations(group.rule,2):

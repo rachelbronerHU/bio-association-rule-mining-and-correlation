@@ -117,9 +117,9 @@ def view_of(examples, label, stages, max_fdr, shorter=False):
                 rm.items_of(first["consequent_items"]), shorter)
 
 
-def _scope(score, stages, min_cells):
+def _scope(score, stages):
     return (f"Unit: FOV · Score: {score.replace(' score', '').lower()} · "
-            f"Stages: {' / '.join(stages)} · Eligibility: ≥{min_cells} cells/type")
+            f"Stages: {' / '.join(stages)} · Eligibility: rule can be tested")
 
 
 def _target(save, *parts):
@@ -197,9 +197,9 @@ def _rule_panel(ax, fov, cells, metadata, cell_colors, view, stage, named):
                  color=holds if view.passing.get(stage) else _NOT_PASSING)
 
 
-def _check_panel(ax, fov, cells, metadata, view, named):
+def _check_panel(ax, fov, cells, metadata, view, named, fields):
     """The same field again, with only the cells the rule was counted on."""
-    counted = rm.counted_cells(view.antecedent_items, view.consequent_items, cells, fov)
+    counted = fields.counted_cells(view.antecedent_items, view.consequent_items, fov)
     parts = rm.rule_parts(view.antecedent_items, view.consequent_items)
     plot_counted_cells(ax, fov, cells, metadata, counted, parts, _CELL_SIZE)
     line = (f"{len(counted.centers)} centers · "
@@ -247,7 +247,7 @@ def _frame(fig, box, organ, rule, subtitle, scope, keys, save, figure_dir):
 
 
 def _state_figure(examples, state, view, stages, cells, metadata, organ, score,
-                  min_cells, save, figure_dir, eligible_n, subtitle):
+                  save, figure_dir, eligible_n, subtitle, fields):
     """One rule: stages down the rows, the field, the rule, and what it counted."""
     rows = examples.set_index("stage")
     cell_colors = resolve_cell_colors(list(view.cells))
@@ -280,18 +280,18 @@ def _state_figure(examples, state, view, stages, cells, metadata, organ, score,
                         f"full FOV\n{where}" if row == 0 else where)
             _rule_panel(axes[row, 1], fov, cells, metadata, cell_colors, view, stage,
                         row == 0)
-            _check_panel(axes[row, 2], fov, cells, metadata, view, row == 0)
+            _check_panel(axes[row, 2], fov, cells, metadata, view, row == 0, fields)
             for ax in axes[row]:
                 _bare(ax)
         axes[row, 0].set_ylabel(stage, fontsize=10, fontweight="bold", labelpad=8)
 
     return _frame(fig, box, organ, examples["rule"].iat[0],
-                  subtitle or _SUBTITLES[state], _scope(score, stages, min_cells),
+                  subtitle or _SUBTITLES[state], _scope(score, stages),
                   _key(view.cells, cell_colors, [view]), save, figure_dir)
 
 
 def _stage_figure(examples, state, stage, views, stages, cells, metadata, organ,
-                  score, min_cells, save, figure_dir, subtitle):
+                  score, save, figure_dir, subtitle, fields):
     """One stage: the field and each rule above, what each rule counted below."""
     item = _row_of(examples.set_index("stage"), stage)
     if item is None:
@@ -310,20 +310,20 @@ def _stage_figure(examples, state, stage, views, stages, cells, metadata, organ,
     _full_panel(axes[0, 0], fov, cells, metadata, cell_colors, f"full FOV\n{_where(item)}")
     for column, view in enumerate(views, start=1):
         _rule_panel(axes[0, column], fov, cells, metadata, cell_colors, view, stage, True)
-        _check_panel(axes[1, column], fov, cells, metadata, view, True)
+        _check_panel(axes[1, column], fov, cells, metadata, view, True, fields)
     for ax in axes.ravel():
         _bare(ax)
     axes[1, 0].set_visible(False)
 
     return _frame(fig, box, organ, examples["rule"].iat[0],
                   f"{subtitle or _SUBTITLES[state]} · {stage}",
-                  _scope(score, stages, min_cells),
+                  _scope(score, stages),
                   _key(shown_cells, cell_colors, views), save, figure_dir)
 
 
 def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
-                   min_cells=20, max_fdr=0.05, save=None, figure_dir=None, others=(),
-                   subtitle=None, stages_per_figure=None):
+                   max_fdr=0.05, save=None, figure_dir=None, others=(),
+                   subtitle=None, stages_per_figure=None, fields=None):
     """One figure per state, or per state and stage when there is a rule to compare.
 
     `others` : (label, frame) pairs covering the same fields — a shorter rule, say.
@@ -338,8 +338,8 @@ def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
         print("No representative FOVs to plot.")
         return []
 
+    fields = rm.Fields(cells) if fields is None else fields
     if "why" not in examples.columns:
-        fields = rm.Fields(cells)
         examples = rm.explain_missing(examples, cells, fields=fields, max_fdr=max_fdr)
         others = [(label, rm.explain_missing(pd.DataFrame(frame), cells, fields=fields,
                                              max_fdr=max_fdr))
@@ -369,14 +369,14 @@ def plot_rule_fovs(examples, stages, cells, metadata, organ, score,
                 tail = [f"part{number}"] if len(parts) > 1 else []
                 figures.append(_state_figure(
                     subset, state, views[0], shown, cells, metadata, organ, score,
-                    min_cells, _target(save, _STATE_SLUGS[state], *tail), figure_dir,
-                    eligible_n, subtitle))
+                    _target(save, _STATE_SLUGS[state], *tail), figure_dir,
+                    eligible_n, subtitle, fields))
             continue
         for stage in stages:
             figure = _stage_figure(
                 subset, state, stage, views, stages, cells, metadata, organ, score,
-                min_cells, _target(save, _STATE_SLUGS[state], stage), figure_dir,
-                subtitle)
+                _target(save, _STATE_SLUGS[state], stage), figure_dir,
+                subtitle, fields)
             if figure is not None:
                 figures.append(figure)
     return figures

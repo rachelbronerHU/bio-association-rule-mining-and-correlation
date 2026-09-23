@@ -125,22 +125,17 @@ Plasma\_CD38 $\rightarrow$ Plasma stays strongly attractive, providing a check u
 \subsection{Known biological pairs tested in both directions}
 
 Six literature-selected pairs are checked retrospectively; the notebook shows both
-directions, whole-organ prevalence, stage-specific results and typical tissue examples.
+directions with the shared rule summary by stage, whole-organ counts and typical tissue
+examples.
 
 SMV $\rightarrow$ Endothelial attracts in 26/37 eligible colon fields,
 recovering an expected vessel-wall relationship \cite{hellstrom1999}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Colon_SMV_to_Endothelial_summary.pdf}
-  \caption{Both directions use the same FOVs with at least 20 cells of each type.
-  All pools the organ's fields; the other columns split those same fields by clinical stage.
-  Top: attraction and avoidance counts divided by eligible FOVs; counts below are
-  attract $|$ avoid $|$ eligible, omitting an all-zero state.
-  Middle: raw mined Lift in passing, eligible FOVs; dots are FOVs, diamonds medians,
-  and Lift 1 is the independence baseline. Missing rules have no plotted Lift.
-  Bottom: all FOVs, separated into attraction, avoidance, eligible without a rule,
-  and insufficient cells.
+  \includegraphics[width=\textwidth]{biology_Colon_clinical_SMV_to_Endothelial_summary.pdf}
+  \caption{\summaryref{} Both directions use the same FOVs with at least 20 cells of each
+  type. Whole-organ counts below pool the stages.
   Patient $q$ values below compare the two arrows by a two-sided sign test after averaging
   FOVs within biopsies and biopsies within patients; FDR uses the notebook's joint
   119-test family.
@@ -153,7 +148,7 @@ The highlighted vascular cells show where the recurrent colon rule sits within w
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Colon_SMV_to_Endothelial_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth]{biology_Colon_clinical_SMV_to_Endothelial_fovs_attraction.pdf}
   \caption{Each column shows a clinical stage, with the full FOV above and the same FOV
   highlighting only the two rule types below. One rule state is shown per figure. Maps are
   illustrative fields; highlighted cells are not individual detected interactions.
@@ -166,7 +161,7 @@ extending the anatomical check beyond colon.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Duodenum_SMV_to_Endothelial_summary.pdf}
+  \includegraphics[width=\textwidth]{biology_Duodenum_clinical_SMV_to_Endothelial_summary.pdf}
   \caption{\biologyref{} Attraction occurs in 47/104 eligible FOVs and 27/42 eligible patients,
   versus 30/104 fields and 17/42 patients in reverse. The recurrence across organs and
   patients makes this useful as a method check; the patient-level arrow comparison has
@@ -178,7 +173,7 @@ The duodenal highlights show the same vessel-wall pairing in a second organ.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Duodenum_SMV_to_Endothelial_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth]{biology_Duodenum_clinical_SMV_to_Endothelial_fovs_attraction.pdf}
   \caption{Maps and selection follow Figure~\ref{fig:biology-fovs}.}
 \end{figure}
 
@@ -187,7 +182,7 @@ consistent with a restricted epithelial niche \cite{sato2011}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Duodenum_Paneth_to_Epithelial_summary.pdf}
+  \includegraphics[width=\textwidth]{biology_Duodenum_clinical_Paneth_to_Epithelial_summary.pdf}
   \caption{\biologyref{} Attraction occurs in 46/81 fields versus 8/81 in reverse,
   across 28/36 versus 7/36 eligible patients (patient comparison $q<0.001$).
   This recovers an asymmetric spatial rule,
@@ -200,7 +195,7 @@ The highlights place Paneth cells among epithelial structures in typical attract
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Duodenum_Paneth_to_Epithelial_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth]{biology_Duodenum_clinical_Paneth_to_Epithelial_fovs_attraction.pdf}
   \caption{Maps and selection follow Figure~\ref{fig:biology-fovs}.}
 \end{figure}
 
@@ -209,7 +204,7 @@ linking the mined rule to a known neuroimmune partnership \cite{muller2014}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Colon_Neuron_to_Macrophage_summary.pdf}
+  \includegraphics[width=\textwidth]{biology_Colon_clinical_Neuron_to_Macrophage_summary.pdf}
   \caption{\biologyref{} Attraction occurs in 18/60 fields versus 6/60 in reverse
   (patient comparison $q=0.0053$).
   The reference describes reciprocal BMP2/CSF1 signaling; these broad labels and spatial
@@ -221,7 +216,7 @@ The highlighted neuron and macrophage cells give a tissue view of this asymmetri
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Colon_Neuron_to_Macrophage_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth]{biology_Colon_clinical_Neuron_to_Macrophage_fovs_attraction.pdf}
   \caption{Maps and selection follow Figure~\ref{fig:biology-fovs}.}
 \end{figure}
 
@@ -230,7 +225,7 @@ giving a localized example of a literature-motivated partnership \cite{kvedarait
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Duodenum_Macrophage_to_Fibroblast_summary.pdf}
+  \includegraphics[width=\textwidth]{biology_Duodenum_clinical_Macrophage_to_Fibroblast_summary.pdf}
   \caption{\biologyref{} Attraction occurs in 27/170 eligible fields across 19/49 patients,
   versus 25/170 fields across 20/49 patients in reverse. Lift is modest; this is recurrent
   attraction in a minority of fields,
@@ -243,7 +238,7 @@ The highlights locate macrophages and fibroblasts in fields behind this minority
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{biology_Duodenum_Macrophage_to_Fibroblast_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth]{biology_Duodenum_clinical_Macrophage_to_Fibroblast_fovs_attraction.pdf}
   \caption{Maps and selection follow Figure~\ref{fig:biology-fovs}.
   Typical attracting fields are shown, not the many eligible fields without a passing rule.}
 \end{figure}

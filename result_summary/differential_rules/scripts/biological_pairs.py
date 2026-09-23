@@ -9,14 +9,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree
 from scipy.stats import binomtest, hypergeom
 from statsmodels.stats.multitest import multipletests
 
 import data_helper as dh
 import differential_vis as dv
-import compare_rules as cr
 
 
 def load_pairs():
@@ -186,63 +184,18 @@ def directional_specs(specs):
             for left, right in ((spec["a"], spec["b"]), (spec["b"], spec["a"]))]
 
 
-def plot_known_rule(spec, rules, states, eligible, metadata, evidence, stages,
-                    score="Clinical score", save=None):
-    """Familiar prevalence, Lift and state panels, pooled and by stage."""
-    groups = ["All", *stages]
-    # Duplicate metadata only for display; pooled values still count each FOV once.
-    shown = pd.concat([metadata.assign(**{score: "All"}), metadata], ignore_index=True)
-    plot_spec = dict(spec, score=score)
-    with plt.rc_context(dv._PANEL_FONTS):
-        fig, axes = plt.subplots(3, 1, figsize=(dv._TEXT_WIDTH, 6.6),
-                                 gridspec_kw={"height_ratios": [1, 1.1, 1], "hspace": 0.70})
-        dv._prevalence_panel(axes[0], states, eligible, shown, plot_spec, groups, bars=True)
-        dv._metric_panel(axes[1], rules, eligible, shown, plot_spec, groups, connect=False)
-        counts = dv._stage_state_counts(states, eligible, shown, spec["rule"],
-                                        spec["organ"], score, groups)
-        dv._draw_state_bars(axes[2], *counts, groups, show_net=False)
-        for ax, title in zip(axes, ("how common is the rule?", "how strong is it? (Lift)",
-                                   "every FOV, including ineligible fields")):
-            ax.set_title(title, loc="left", color="#5F5D58", pad=6)
-            ax.axvline(0.5, color="#B7B4AE", lw=0.8, ls=":")
-        axes[1].set_xlabel("rule-bearing / eligible FOVs · dots = FOVs · diamonds = medians",
-                          fontsize=7.5, labelpad=3)
-        handles = [dv.Line2D([0], [0], marker="s", linestyle="none", markersize=6,
-                             color=dv._STATE_COLORS[name], label=name)
-                   for name in dv._STATE_ORDER]
-        axes[2].legend(handles=handles, ncol=1, frameon=False, loc="center left",
-                       bbox_to_anchor=(1.01, 0.5), fontsize=7)
-        fig.suptitle(f"{spec['organ']} · {spec['rule'].replace(' -> ', ' → ')}",
-                     fontsize=11.5, y=0.995)
-        threshold = eligible.attrs.get("min_cells", 20)
-        fig.text(0.5, 0.959,
-                 f"All = pooled organ · {score} · ≥{threshold} cells/type",
-                 ha="center", va="top", fontsize=7.2, color="#706E68")
-        fig.align_ylabels(axes)
-        fig.subplots_adjust(top=0.88, bottom=0.10, left=0.14, right=0.76)
-        dv._finish(fig, save)
-
-
-def show_selected(index, specs, rules, states, eligible, cells, metadata, evidence,
+def show_selected(index, specs, rules, states, eligible, cells, metadata,
                   occurrences, stages, score):
     from IPython.display import Markdown, display
-    import differential_stats as ds
 
     if not 0 <= index < len(specs):
         print(f"No rule at index {index}; {len(specs)} directional checks.")
         return
-    spec = specs[index]
+    spec = dict(specs[index], score=score)
     display(Markdown(f"**[{index}] {spec['organ']} · {spec['rule']}** — {spec['expectation']}\n\n"
                      f"{spec['signaling']} [Source]({spec['source']}) "
                      f"{spec['limitation']} Spatial arrows do not establish signaling direction."))
     rows = occurrences[(occurrences.rule == spec["rule"]) & (occurrences.organ == spec["organ"])]
     display(rows[["stage", "eligible", "ineligible", "patients", "attraction", "avoidance",
                   "attraction_patients"]].rename(columns={"patients": "eligible_patients"}))
-    stem = f"biology_{spec['organ']}_{spec['rule'].replace(' -> ', '_to_')}"
-    plot_known_rule(spec, rules, states, eligible, metadata, evidence, stages, score, stem + "_summary.pdf")
-    examples = ds.representative_fovs(rules, eligible, metadata, spec["rule"], spec["organ"],
-                                      score, stages, "Lift")
-    cr.plot_rule_fovs(examples, stages, cells, metadata, spec["organ"], score,
-                      min_cells=eligible.attrs.get("min_cells", 20),
-                      save=stem + "_fovs.pdf")
-    return examples
+    dv.show_rule(spec, states, eligible, cells, rules, metadata, stages, prefix="biology_")

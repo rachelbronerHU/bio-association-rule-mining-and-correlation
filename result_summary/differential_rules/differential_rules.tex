@@ -37,7 +37,8 @@ all-zero direction omitted. \textbf{What it is made of:} dots are the two cell-t
 inside each eligible FOV and diamonds are stage means; this is an abundance control, not a
 finding. \textbf{How strong:} dots are Lift in rule-bearing FOVs and diamonds are medians;
 Lift 1 is chance. \textbf{Every FOV:} bars include attraction, no rule, avoidance, and
-insufficient-cell fields, with net score above. \netdef}
+insufficient-cell fields, with net score above. These FOV percentages are descriptive;
+fields from one patient are clustered. \netdef}
 
 \newcommand{\summaryref}{Read as in Figure~\ref{fig:summary-guide}.}
 
@@ -59,37 +60,37 @@ comparison fields.}
 \vspace{0.2cm}\hrule\vspace{0.4cm}
 
 \colorbox{soft}{\parbox{0.97\textwidth}{
-525 directional pair rules; 267 FOVs; clinical severity groups.
+525 directional pair rules; 267 FOVs; 262 with a clinical severity score.
 Arrows describe conditional association, not causation.
 
-Automatic severity selection ranks Control--Severe attraction and avoidance gaps separately.
-It requires at least 10 eligible FOVs at both endpoints and a visible change of at least
-20 percentage points. Statistics remain available in notebook tables but do not gate this
-visual catalogue.
+Automatic severity selection ranks Control--Severe attraction and avoidance gaps separately,
+requiring at least 10 eligible FOVs at both endpoints and a change of at least 20 percentage
+points. A second screen ranks biopsy-tested effects and large visible effects separately.
+Findings without adjusted biopsy evidence are labelled exploratory.
 Abundance appears only as a control.
 }}
 
 % =============================================================================
 \section{Method proof}
 
-Recurring anatomical relationships lead the ranking, providing a first check of the method.
+Epithelial--goblet and vascular rules recur across stages, as expected for familiar anatomy.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.98\textwidth]{overview_prevalence_clinical_FOV_bothorgans_prevalence.pdf}
-  \caption{Rows are automatically ranked directional rules. Each cell gives the number and
-  percentage of FOVs where the rule was mined, split by clinical stage and organ. This is an
-  occurrence overview without the 20-cell eligibility control. It counts the 262 FOVs that carry a
-  clinical score, not all 267.}
+  \caption{Rows are the most frequent mined attraction rules. Heatmap cells give rule-bearing
+  FOVs over all FOVs in each stage; the bars at left give the two cell-type fractions in
+  rule-bearing FOVs. This overview has no 20-cell eligibility filter and uses the 262 FOVs
+  with a clinical score.}
 \end{figure}
 
-The leading relationships also recur across patients, showing that they extend beyond a single biopsy.
+The same anatomical rules appear in many patients, beyond individual tissue fields.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.98\textwidth]{overview_prevalence_clinical_PatientID_bothorgans_prevalence.pdf}
-  \caption{The calculation follows the preceding figure, but a rule counts once per patient
-  when it appears in any of that patient's FOVs.}
+  \caption{As above, with one count per patient if any of their FOVs contains the rule.
+  Patient counts show recurrence; they are not tests of a stage difference.}
 \end{figure}
 
 Epithelial $\rightarrow$ Goblet stays attractive in eligible fields, consistent with their
@@ -98,7 +99,8 @@ shared intestinal architecture \cite{nystrom2021}.
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{gap_metric_attraction_Colon_clinical_Epithelial_to_Goblet_summary.pdf}
-  \caption{This is the first shared rule summary. \summaryvalues}
+  \caption{This is the first shared rule summary. \summaryvalues{} The biopsy-level
+  gap screen does not support a severity change in Lift here (FDR $q=0.660$).}
   \label{fig:summary-guide}
 \end{figure}
 
@@ -107,7 +109,8 @@ SMV $\rightarrow$ Endothelial stays attractive across stages, recovering a vascu
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{gap_metric_attraction_Colon_clinical_SMV_to_Endothelial_summary.pdf}
-  \caption{\summaryref}
+  \caption{\summaryref{} This anatomical rule is recurrent, while its biopsy-level
+  Lift difference by stage is not supported (FDR $q=0.370$).}
 \end{figure}
 
 Plasma\_CD38 $\rightarrow$ Plasma stays strongly attractive, providing a check using related plasma-cell phenotypes.
@@ -115,7 +118,8 @@ Plasma\_CD38 $\rightarrow$ Plasma stays strongly attractive, providing a check u
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{gap_metric_attraction_Duodenum_clinical_Plasma_CD38_to_Plasma_summary.pdf}
-  \caption{\summaryref}
+  \caption{\summaryref{} The biopsy-level Lift screen gives FDR $q=0.224$ for
+  stage change; this figure is a related-phenotype method check.}
 \end{figure}
 
 \subsection{Known biological pairs tested in both directions}
@@ -123,7 +127,7 @@ Plasma\_CD38 $\rightarrow$ Plasma stays strongly attractive, providing a check u
 Six literature-selected pairs are checked retrospectively; the notebook shows both
 directions, whole-organ prevalence, stage-specific results and typical tissue examples.
 
-SMV $\rightarrow$ Endothelial occurs in about 70\% of eligible colon fields,
+SMV $\rightarrow$ Endothelial attracts in 26/37 eligible colon fields,
 recovering an expected vessel-wall relationship \cite{hellstrom1999}.
 
 \begin{figure}[H]
@@ -137,12 +141,15 @@ recovering an expected vessel-wall relationship \cite{hellstrom1999}.
   and Lift 1 is the independence baseline. Missing rules have no plotted Lift.
   Bottom: all FOVs, separated into attraction, avoidance, eligible without a rule,
   and insufficient cells.
-  Counts below the top panel are attraction $|$ avoidance $|$ eligible FOVs.
-  Here attraction occurs in 26/37 fields versus 12/37 in reverse.}
+  Patient $q$ values below compare the two arrows by a two-sided sign test after averaging
+  FOVs within biopsies and biopsies within patients; FDR uses the notebook's joint
+  119-test family.
+  The same eligibility filter is applied to the reverse arrow. Here attraction occurs in
+  26/37 fields versus 12/37 in reverse; the patient sign test gives FDR $q=0.0021$.}
   \label{fig:biology-guide}
 \end{figure}
 
-The highlighted cells place the mined vascular relationship back into the tissue.
+The highlighted vascular cells show where the recurrent colon rule sits within whole fields.
 
 \begin{figure}[H]
   \centering
@@ -162,11 +169,12 @@ extending the anatomical check beyond colon.
   \includegraphics[width=\textwidth]{biology_Duodenum_SMV_to_Endothelial_summary.pdf}
   \caption{\biologyref{} Attraction occurs in 47/104 eligible FOVs and 27/42 eligible patients,
   versus 30/104 fields and 17/42 patients in reverse. The recurrence across organs and
-  patients makes this useful as a method check. Endothelial-to-mural developmental signaling
+  patients makes this useful as a method check; the patient-level arrow comparison has
+  $q=0.080$. Endothelial-to-mural developmental signaling
   \cite{hellstrom1999} does not predict the stronger spatial arrow.}
 \end{figure}
 
-The duodenal examples show where this recurring vascular rule is found.
+The duodenal highlights show the same vessel-wall pairing in a second organ.
 
 \begin{figure}[H]
   \centering
@@ -181,13 +189,14 @@ consistent with a restricted epithelial niche \cite{sato2011}.
   \centering
   \includegraphics[width=\textwidth]{biology_Duodenum_Paneth_to_Epithelial_summary.pdf}
   \caption{\biologyref{} Attraction occurs in 46/81 fields versus 8/81 in reverse,
-  across 28/36 versus 7/36 eligible patients. This recovers an asymmetric spatial rule,
+  across 28/36 versus 7/36 eligible patients (patient comparison $q<0.001$).
+  This recovers an asymmetric spatial rule,
   not Paneth-to-stem-cell signaling: the broad Epithelial label does not identify stem cells.
   The separate all-center benchmark in the notebook gives little positive Paneth-centered
   excess; its null and sampling differ from mining.}
 \end{figure}
 
-The examples show Paneth cells beside epithelial structures where the rule was mined.
+The highlights place Paneth cells among epithelial structures in typical attractive fields.
 
 \begin{figure}[H]
   \centering
@@ -201,13 +210,14 @@ linking the mined rule to a known neuroimmune partnership \cite{muller2014}.
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{biology_Colon_Neuron_to_Macrophage_summary.pdf}
-  \caption{\biologyref{} Attraction occurs in 18/60 fields versus 6/60 in reverse.
+  \caption{\biologyref{} Attraction occurs in 18/60 fields versus 6/60 in reverse
+  (patient comparison $q=0.0053$).
   The reference describes reciprocal BMP2/CSF1 signaling; these broad labels and spatial
   rules cannot identify its molecular direction. The notebook's separate spatial-excess
   check favors the other arrow, reinforcing that distinction.}
 \end{figure}
 
-The highlighted fields show the macrophage--neuron relationship behind the occurrence counts.
+The highlighted neuron and macrophage cells give a tissue view of this asymmetric rule.
 
 \begin{figure}[H]
   \centering
@@ -224,11 +234,12 @@ giving a localized example of a literature-motivated partnership \cite{kvedarait
   \caption{\biologyref{} Attraction occurs in 27/170 eligible fields across 19/49 patients,
   versus 25/170 fields across 20/49 patients in reverse. Lift is modest; this is recurrent
   attraction in a minority of fields,
-  not a preferred arrow or a universal niche. The reference concerns specific intestinal
+  not a preferred arrow or a universal niche (patient comparison $q=1.0$).
+  The reference concerns specific intestinal
   subsets, whereas these labels are broad. The result does not establish GM-CSF signaling.}
 \end{figure}
 
-The representative fields show where macrophages and fibroblasts form these local arrangements.
+The highlights locate macrophages and fibroblasts in fields behind this minority rule.
 
 \begin{figure}[H]
   \centering
@@ -241,63 +252,104 @@ The representative fields show where macrophages and fibroblasts form these loca
 \clearpage
 \section{Paper alignment}
 
-These rules were chosen from biological relationships highlighted by the spatial atlas
-\cite{azulay2025}, not because they ranked highly in our data.
+These rules were chosen from claims in the spatial atlas \cite{azulay2025}
+before checking our rule rankings. Stage comparisons here use biopsy-level tests where available.
 
-Duodenal epithelial $\rightarrow$ goblet attraction is common in every stage, recovering a stable epithelial relationship.
+The atlas describes altered crypt architecture; the preselected Epithelial
+$\rightarrow$ Goblet rule remains common in eligible duodenal fields \cite{azulay2025}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Duodenum_clinical_Epithelial_to_Goblet_summary.pdf}
-  \caption{\summaryref}
+  \includegraphics[width=\textwidth]{paper_Duodenum_clinical_Epithelial_to_Goblet_summary.pdf}
+  \caption{\summaryref{} Attraction appears in 29/30 Control and 21/23 Severe eligible FOVs.}
 \end{figure}
 
-The maps show rule-bearing tissue.
+The highlighted cells place this common rule along epithelial and goblet-cell structures.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Duodenum_clinical_Epithelial_to_Goblet_fovs_attraction.pdf}
-  \caption{This is the first expanded FOV view. \fovvalues}
+  \includegraphics[width=\textwidth]{paper_Duodenum_clinical_Epithelial_to_Goblet_fovs_attraction.pdf}
+  \caption{\fovvalues}
   \label{fig:fov-guide}
 \end{figure}
 
-Eligible fields where this relationship was not mined give the contrast.
+The eligible no-rule fields show how the same cell types appear when this rule is not mined.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Duodenum_clinical_Epithelial_to_Goblet_fovs_no_rule.pdf}
+  \includegraphics[width=\textwidth,height=0.68\textheight,keepaspectratio]{paper_Duodenum_clinical_Epithelial_to_Goblet_fovs_no_rule.pdf}
   \caption{\fovref}
 \end{figure}
 
-Paneth $\rightarrow$ Epithelial becomes less frequent but remains attractive, matching its restricted crypt niche \cite{sato2011}.
+The reverse Goblet $\rightarrow$ Epithelial rule is less common, showing that the
+two conditional arrows describe different patterns in the same fields.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{gap_metric_attraction_Duodenum_clinical_Paneth_to_Epithelial_summary.pdf}
-  \caption{\summaryref{} The strength row contains attraction occurrences only.}
+  \includegraphics[width=\textwidth]{paper_Duodenum_clinical_Goblet_to_Epithelial_summary.pdf}
+  \caption{\summaryref{} Attraction appears in 21/30 Control and 13/23 Severe eligible
+  fields, compared with 29/30 and 21/23 in the forward arrow. The separate biopsy-level
+  ordered Lift test gives FDR $q=0.032$; this direction was preselected from the atlas pair.}
+\end{figure}
+
+The atlas reports Paneth-cell depletion and crypt injury; among eligible surviving fields,
+Paneth $\rightarrow$ Epithelial stays attractive and its Lift rises across stages
+\cite{azulay2025,sato2011}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{paper_Duodenum_clinical_Paneth_to_Epithelial_summary.pdf}
+  \caption{\summaryref{} The ordered biopsy-level attraction-Lift test gives FDR
+  $q=0.0196$ in the separate gap screen. Only 13 FOVs are eligible in each endpoint
+  stage, so the apparent prevalence drop is exploratory.}
 \end{figure}
 
 The examples place Paneth cells beside epithelial structures, making the mined relationship visible.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{gap_metric_attraction_Duodenum_clinical_Paneth_to_Epithelial_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth]{paper_Duodenum_clinical_Paneth_to_Epithelial_fovs_attraction.pdf}
   \caption{\fovref}
 \end{figure}
 
-Goblet $\rightarrow$ CD8T avoidance rises with severity, revealing a spatial change in the atlas-motivated epithelial--immune pair.
+The atlas reports altered crypts and CD8 T-cell enrichment in some patients;
+the preselected Goblet $\rightarrow$ CD8T avoidance rises from 13/28 to 14/17
+eligible duodenal fields \cite{azulay2025}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Duodenum_clinical_Goblet_to_CD8T_summary.pdf}
-  \caption{\summaryref}
+  \includegraphics[width=\textwidth]{paper_Duodenum_clinical_Goblet_to_CD8T_summary.pdf}
+  \caption{\summaryref{} This is an exploratory stage difference; 17 Severe FOVs are
+  eligible. The reverse CD8T $\rightarrow$ Goblet arrow also gains avoidance, from
+  6/28 to 9/17 fields.}
 \end{figure}
 
-The representative fields make the changing epithelial--immune arrangement visible.
+The highlighted goblet and CD8 T cells show the separated arrangement behind the avoidance counts.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Duodenum_clinical_Goblet_to_CD8T_fovs_avoidance.pdf}
+  \includegraphics[width=\textwidth]{paper_Duodenum_clinical_Goblet_to_CD8T_fovs_avoidance.pdf}
+  \caption{\fovref}
+\end{figure}
+
+The atlas reports disrupted immune organization and fewer IgA plasma cells;
+the preselected colonic CD4T $\rightarrow$ Plasma attraction falls from 14/25
+Control to 1/24 Severe eligible fields \cite{azulay2025}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{paper_Colon_clinical_CD4T_to_Plasma_summary.pdf}
+  \caption{\summaryref{} This atlas-selected relationship also entered the automatic
+  visible-effect screen, but its biopsy-level FDR is $q=0.323$. Only 3 Mild fields are
+  eligible; the Control--Severe comparison is exploratory, and the abundance row shows
+  fewer Plasma cells within eligible Severe FOVs.}
+\end{figure}
+
+The Control maps show the colonic CD4 T-cell and plasma-cell arrangement where attraction fires.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{paper_Colon_clinical_CD4T_to_Plasma_fovs_attraction.pdf}
   \caption{\fovref}
 \end{figure}
 
@@ -305,48 +357,29 @@ The representative fields make the changing epithelial--immune arrangement visib
 \clearpage
 \section{New findings}
 
-These candidates were selected automatically by the largest Control--Severe prevalence
-gaps, with attraction and avoidance ranked separately. Mild-only peaks are excluded.
+Automatic severity and time screens ranked both rule directions. The visually clear
+results below are exploratory FOV comparisons, without patient-level significance claims.
+The statistical-stream result, Paneth $\rightarrow$ Epithelial Lift, is in Paper alignment.
 
-\subsection{Colonic immune relationships weaken with severity}
+\subsection{Goblet and muscle compartments become less separated in colon}
 
-CD4T $\rightarrow$ Plasma attraction falls from 14/25 Control fields to 1/24 Severe fields.
+Colon Goblet $\rightarrow$ Muscle avoidance falls from 19/20 Control to 13/23 Severe
+eligible fields, and the reverse arrow changes in the same direction.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Colon_clinical_CD4T_to_Plasma_summary.pdf}
-  \caption{\summaryref{} Selection uses the 52-point Control--Severe attraction gap.}
+  \includegraphics[width=\textwidth,height=0.62\textheight,keepaspectratio]{Colon_clinical_Goblet_to_Muscle_summary.pdf}
+  \caption{\summaryref{} The reverse Muscle $\rightarrow$ Goblet avoidance falls from
+  20/20 to 15/23 eligible fields. The forward rule occurs in 4/4 eligible Control
+  patients and 7/10 Severe patients. Four Control patients limit independent inference;
+  the paired FOV pattern remains exploratory.}
 \end{figure}
 
-The tissue examples show the attraction.
+The highlighted fields show goblet cells and muscle where their avoidance rule is mined.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Colon_clinical_CD4T_to_Plasma_fovs_attraction.pdf}
-  \caption{\fovref}
-\end{figure}
-
-Eligible fields where the rule is absent give the contrast.
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{Colon_clinical_CD4T_to_Plasma_fovs_no_rule.pdf}
-  \caption{\fovref}
-\end{figure}
-
-Goblet $\rightarrow$ ImmuneOther avoidance falls from 10/11 to 7/16 eligible fields, although the immune label is broad.
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{Colon_clinical_Goblet_to_ImmuneOther_summary.pdf}
-  \caption{\summaryref{} Selection uses the 47-point Control--Severe avoidance gap.}
-\end{figure}
-
-The maps show the epithelial and immune compartments behind this reduced separation.
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{Colon_clinical_Goblet_to_ImmuneOther_fovs_avoidance.pdf}
+  \includegraphics[width=\textwidth]{Colon_clinical_Goblet_to_Muscle_fovs_avoidance.pdf}
   \caption{\fovref}
 \end{figure}
 
@@ -357,10 +390,12 @@ CD4T $\rightarrow$ Goblet avoidance falls from 23/30 Control fields to 4/21 Seve
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{Duodenum_clinical_CD4T_to_Goblet_summary.pdf}
-  \caption{\summaryref{} Selection uses the 58-point Control--Severe avoidance gap.}
+  \caption{\summaryref{} The Control--Severe avoidance gap is 58 percentage points.
+  The rule occurs in 9/10 versus 4/7 eligible patients; these are descriptive counts,
+  not a patient-level significance test.}
 \end{figure}
 
-The maps show the CD4T and goblet-cell positions underlying this change.
+The highlighted CD4 T and goblet cells show the separated arrangement seen in avoiding fields.
 
 \begin{figure}[H]
   \centering
@@ -373,10 +408,12 @@ Muscle $\rightarrow$ CD4T avoidance rises from 4/18 to 17/25 eligible fields, sh
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{Duodenum_clinical_Muscle_to_CD4T_summary.pdf}
-  \caption{\summaryref{} Selection uses the 46-point Control--Severe avoidance gap.}
+  \caption{\summaryref{} The Control--Severe avoidance gap is 46 percentage points;
+  the rule occurs in 3/8 versus 7/9 eligible patients. This and the next CD8T result
+  remain exploratory.}
 \end{figure}
 
-The representative fields show the growing avoidance.
+The highlighted fields place CD4 T cells away from muscle-rich regions where avoidance is mined.
 
 \begin{figure}[H]
   \centering
@@ -384,35 +421,60 @@ The representative fields show the growing avoidance.
   \caption{\fovref}
 \end{figure}
 
-The less common attraction state is shown separately.
+Muscle $\rightarrow$ CD8T avoidance also rises, from 6/17 Control to 16/22 Severe
+eligible fields, extending the immune--wall pattern to a second T-cell class.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Duodenum_clinical_Muscle_to_CD4T_fovs_attraction.pdf}
-  \caption{\fovref}
+  \includegraphics[width=\textwidth]{Duodenum_clinical_Muscle_to_CD8T_summary.pdf}
+  \caption{\summaryref{} CD8T share among eligible fields is similar at both endpoints.
+  The rule occurs in 6/7 versus 6/8 eligible patients, so the FOV increase does not
+  correspond to more patients with any occurrence.}
 \end{figure}
 
-Eligible no-rule fields complete the comparison.
+The highlighted fields show the muscle and CD8 T-cell positions behind this avoidance.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{Duodenum_clinical_Muscle_to_CD4T_fovs_no_rule.pdf}
+  \includegraphics[width=\textwidth]{Duodenum_clinical_Muscle_to_CD8T_fovs_avoidance.pdf}
   \caption{\fovref}
 \end{figure}
 
-\subsection{A stromal and muscular rearrangement}
+\subsection{Fibroblast--muscle separation changes in opposite directions by organ}
 
-Fibroblast $\rightarrow$ Muscle avoidance rises from 6\% to 22\% to 61\%, suggesting progressive stromal separation.
+In colon, Fibroblast $\rightarrow$ Muscle avoidance falls from 13/20 Control to
+9/28 Severe eligible fields.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{Colon_clinical_Fibroblast_to_Muscle_summary.pdf}
+  \caption{\summaryref{} The 33-point Control--Severe decrease contrasts with the
+  increase in duodenum below. The rule occurs in 4/4 Control versus 5/11 Severe
+  eligible patients. Four Control patients and only 6 eligible Mild FOVs limit inference.}
+\end{figure}
+
+The colon examples show where fibroblasts and muscle produce the avoidance rule.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{Colon_clinical_Fibroblast_to_Muscle_fovs_avoidance.pdf}
+  \caption{\fovref}
+\end{figure}
+
+In duodenum, Fibroblast $\rightarrow$ Muscle avoidance instead rises from 1/18
+Control to 17/28 Severe eligible fields, a 55-point increase.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{Duodenum_clinical_Fibroblast_to_Muscle_summary.pdf}
-  \caption{\summaryref{} Selection uses the 55-point Control--Severe avoidance gap.
+  \caption{\summaryref{} The rule occurs in 1/8 Control versus 7/9 Severe eligible
+  patients. The same automatic FOV screen found the opposite colon pattern; both
+  comparisons remain exploratory.
   Human intestinal GVHD has documented myofibroblast engraftment
   \cite{brittan2002}; this provides context, not confirmation of this spatial trend.}
 \end{figure}
 
-The examples show the fibroblast and muscle compartments underlying the increasing avoidance.
+The highlighted fibroblasts and muscle show the compartments behind duodenal avoidance.
 
 \begin{figure}[H]
   \centering
@@ -422,53 +484,60 @@ The examples show the fibroblast and muscle compartments underlying the increasi
 
 \subsection{Pair rules also change over time after transplantation}
 
-The atlas motivates the time windows through immune-cell kinetics, while this analysis asks a different question: whether pair-rule prevalence changes across those windows \cite{azulay2025}.
+The atlas motivates the time windows through immune-cell kinetics \cite{azulay2025}.
+The post-transplant screen compares rule prevalence in three windows, with Control shown
+only as context. Time and disease severity can vary together, so these patterns are exploratory.
 
-Colon Macrophage $\rightarrow$ CD4T attraction falls from 7/16 fields before day 30 to 0/11 after day 100.
+Colon Macrophage $\rightarrow$ CD4T attraction falls from 7/16 eligible fields
+before day 30 to 0/11 after day 100.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{time_Colon_attraction_Macrophage_to_CD4T_summary.pdf}
-  \caption{The four rows follow Figure~\ref{fig:summary-guide}, with time windows replacing clinical stages. Selection compares the three post-transplant windows; Control is context only.}
+  \caption{The four rows follow Figure~\ref{fig:summary-guide}, with time windows
+  replacing clinical stages. The rule appears in 4/5 eligible early patients and
+  0/4 eligible late patients; the 44-point FOV gap has no adjusted patient-level test.}
 \end{figure}
 
-The maps show representative attraction across the same windows.
+The early highlighted fields show where Macrophage $\rightarrow$ CD4T attraction fires.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{time_Colon_attraction_Macrophage_to_CD4T_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth,height=0.72\textheight,keepaspectratio]{time_Colon_attraction_Macrophage_to_CD4T_fovs_attraction.pdf}
   \caption{\fovref}
 \end{figure}
 
-Eligible no-rule fields from the same windows give the contrast.
+Later eligible fields without the rule show the contrast to those early examples.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{time_Colon_attraction_Macrophage_to_CD4T_fovs_no_rule.pdf}
+  \includegraphics[width=\textwidth,height=0.72\textheight,keepaspectratio]{time_Colon_attraction_Macrophage_to_CD4T_fovs_no_rule.pdf}
   \caption{\fovref}
 \end{figure}
 
-Duodenal Plasma\_CD38 $\rightarrow$ Fibroblast attraction rises from 3/60 fields before day 30 to 11/25 after day 100, with useful denominators throughout.
+Duodenal Plasma\_CD38 $\rightarrow$ Fibroblast attraction rises from 3/60
+eligible fields before day 30 to 11/25 after day 100.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{time_Duodenum_attraction_Plasma_CD38_to_Fibroblast_summary.pdf}
-  \caption{Read as in the preceding time figure; selection uses the 39-point post-transplant gap.}
+  \caption{Read as in the preceding time figure. The rule appears in 3/21 eligible
+  early patients and 5/8 eligible late patients; the 39-point FOV gap remains exploratory.}
 \end{figure}
 
-The tissue examples show the increasingly common rule.
+The highlighted tissue examples show where the later Plasma\_CD38--fibroblast rule fires.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{time_Duodenum_attraction_Plasma_CD38_to_Fibroblast_fovs_attraction.pdf}
+  \includegraphics[width=\textwidth,height=0.72\textheight,keepaspectratio]{time_Duodenum_attraction_Plasma_CD38_to_Fibroblast_fovs_attraction.pdf}
   \caption{\fovref}
 \end{figure}
 
-Eligible no-rule fields give the contrast.
+Eligible fields without the rule show how these cell types appear outside that arrangement.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{time_Duodenum_attraction_Plasma_CD38_to_Fibroblast_fovs_no_rule.pdf}
+  \includegraphics[width=\textwidth,height=0.72\textheight,keepaspectratio]{time_Duodenum_attraction_Plasma_CD38_to_Fibroblast_fovs_no_rule.pdf}
   \caption{\fovref}
 \end{figure}
 

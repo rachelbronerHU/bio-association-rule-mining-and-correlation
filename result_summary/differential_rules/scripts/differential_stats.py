@@ -356,6 +356,19 @@ def control_severe_prevalence(states, eligibility, metadata, organ, group_col,
     ).reset_index(drop=True)
 
 
+def rule_spec(states, eligibility, metadata, organ, group_col, antecedents,
+              consequents, direction="attraction"):
+    """One chosen rule in the same form as a screen pick, e.g. (["Paneth"], ["Epithelial"])."""
+    rule = f"{', '.join(sorted(antecedents))} -> {', '.join(sorted(consequents))}"
+    if rule not in states.index:
+        raise KeyError(f"rule not found: {rule}")
+    screen = control_severe_prevalence(
+        states.loc[[rule]], eligibility, metadata, organ, group_col, min_fovs=1)
+    row = screen[screen["direction"].eq(direction)].iloc[0].to_dict()
+    return {**row, "organ": organ, "score": group_col,
+            "state": 1 if direction == "attraction" else -1, "selection": "chosen"}
+
+
 def prevalence_range(states, eligibility, metadata, organ, group_col, groups,
                      min_fovs=10):
     """Largest prevalence gap across named groups for attraction and avoidance."""

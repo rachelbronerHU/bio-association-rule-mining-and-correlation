@@ -11,6 +11,8 @@ from pathlib import Path
 from matplotlib.colors import to_rgba
 from matplotlib.lines import Line2D
 
+import compare_rules as cr
+import differential_stats as ds
 from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, spread_labels,
                         plot_fov, set_cell_colors,
                         NEUTRAL as _NEUTRAL, HAIRLINE as _HAIRLINE,
@@ -1267,6 +1269,32 @@ def plot_rule_prevalence_all_fovs(states, metadata, spec, stages, save=None):
         fig.text(0.5, 0.9, detail, ha="center", va="top", fontsize=7, color="#706E68")
         fig.subplots_adjust(top=0.72, bottom=0.25, left=0.14, right=0.76)
         _finish(fig, save)
+
+
+def rule_file(spec, kind, prefix=""):
+    """File name for one rule's figure, e.g. Duodenum_clinical_Paneth_to_Epithelial_summary.pdf."""
+    rule = spec["rule"].replace(" -> ", "_to_").replace(" ", "")
+    score = spec["score"].split()[0].lower()
+    return f"{prefix}{spec['organ']}_{score}_{rule}_{kind}.pdf"
+
+
+def show_rule(spec, states, eligibility, cells, rules, metadata, stages, metric="Lift",
+              reference=1, trend_results=None, pair_results=None, prefix=""):
+    """One rule: the four-panel summary, then representative FOVs."""
+    plot_rule_summary(
+        states, eligibility, cells, rules, metadata, spec, stages,
+        metric=metric, reference=reference, state=spec.get("state"),
+        trend_results=trend_results, pair_results=pair_results,
+        save=rule_file(spec, "summary", prefix),
+    )
+    examples = ds.representative_fovs(
+        rules, eligibility, metadata, spec["rule"], spec["organ"], spec["score"],
+        stages, metric,
+    )
+    cr.plot_rule_fovs(
+        examples, stages, cells, metadata, spec["organ"], spec["score"],
+        min_cells=eligibility.attrs["min_cells"], save=rule_file(spec, "fovs", prefix),
+    )
 
 
 def plot_organ_rule_context(states, eligibility, cells, metadata, rule, group_col,

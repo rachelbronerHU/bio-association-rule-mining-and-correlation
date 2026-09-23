@@ -1113,7 +1113,8 @@ def _eligible_by_stage(eligibility, metadata, spec, stages):
         yield stage, can_test.index[can_test]
 
 
-def _prevalence_panel(ax, states, eligibility, metadata, spec, stages, bars=False):
+def _prevalence_panel(ax, states, eligibility, metadata, spec, stages, bars=False,
+                      fov_label="eligible FOVs"):
     """How often the rule attracts and how often it avoids, as two separate lines."""
     attraction, avoidance = [], []
     attraction_n, avoidance_n, eligible_n = [], [], []
@@ -1151,9 +1152,9 @@ def _prevalence_panel(ax, states, eligibility, metadata, spec, stages, bars=Fals
     ]
     ax.set_ylim(0, 100)
     ax.set_xticks(range(len(stages)), labels)
-    ax.set_xlabel(" | ".join([short for short, _ in shown] + ["eligible FOVs"]),
+    ax.set_xlabel(" | ".join([short for short, _ in shown] + [fov_label]),
                   fontsize=7.5, labelpad=2)
-    ax.set_ylabel("eligible FOVs\nwith rule (%)", labelpad=8)
+    ax.set_ylabel(f"{fov_label}\nwith rule (%)", labelpad=8)
     if shown:
         ax.legend(frameon=False, fontsize=8.2, loc="center left",
                   bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
@@ -1245,6 +1246,26 @@ def plot_rule_summary(states, eligibility, cells, metrics, metadata, spec, stage
                  color="#706E68", linespacing=1.4)
         fig.align_ylabels(axes)
         fig.subplots_adjust(top=0.91, bottom=0.05, left=0.14, right=0.76)
+        _finish(fig, save)
+
+
+def plot_rule_prevalence_all_fovs(states, metadata, spec, stages, save=None):
+    """The summary's "how often it fires" panel, counted over every FOV of the stage."""
+    detail = (
+        f"Plots: FOV · Organ: {spec['organ']} · "
+        f"Score: {spec['score'].replace(' score', '').lower()} · "
+        f"Stages: {' / '.join(stages)} · n = all FOVs (no eligibility filter)"
+    )
+    every_fov = states.astype(bool) | True
+    with plt.rc_context(_PANEL_FONTS):
+        fig, ax = plt.subplots(figsize=(_TEXT_WIDTH, 2.6))
+        _prevalence_panel(ax, states, every_fov, metadata, spec, stages,
+                          fov_label="all FOVs")
+        ax.set_title("how often it fires", fontsize=8.4, color="#5F5D58", loc="left", pad=5)
+        fig.suptitle(f"{spec['organ']} · {spec['rule'].replace(' -> ', ' → ')}",
+                     fontsize=11.5, y=0.98)
+        fig.text(0.5, 0.9, detail, ha="center", va="top", fontsize=7, color="#706E68")
+        fig.subplots_adjust(top=0.72, bottom=0.25, left=0.14, right=0.76)
         _finish(fig, save)
 
 

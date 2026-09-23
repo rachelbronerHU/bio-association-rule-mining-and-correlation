@@ -4,17 +4,11 @@
 \usepackage[top=2cm, bottom=2cm, left=2cm, right=2cm]{geometry}
 \usepackage{graphicx} % For images
 \usepackage{amsmath}  % For math/equations
-\usepackage{hyperref} % For clickable links
 \usepackage{caption}  % For styling captions
 \usepackage{titlesec} % For controlling section title sizes
 \usepackage{float}
 \usepackage{xcolor} % Required for defining and using colors
-\usepackage{hyperref} % Keep this as your last \usepackage
-\usepackage{color}
-\usepackage{soul}
-
-% ברירת המחדל של המרקור היא צהוב. אם תרצי לשנות למשל לטורקיז/תכלת, הוסיפי גם את השורה הזו:
-% \sethlcolor{cyan}
+\usepackage{hyperref} % For clickable links
 
 \hypersetup{
     colorlinks=true, % Removes the default boxes and colors the text instead
@@ -33,17 +27,18 @@
 \titleformat{\subsection}
   {\normalsize\bfseries}{\thesubsection}{1em}{}
 
-\usepackage{fancyhdr}
-\pagestyle{fancy}
-\fancyhf{} % מנקה את הגדרות ברירת המחדל
-\fancyhead[L]{\footnotesize Weekly Summary \#6 \today} % יופיע למעלה בשמאל
-\fancyhead[R]{\footnotesize Rachel Broner $\vert$ Miri Adler's Lab} % יופיע למעלה בימין
-\fancyfoot[C]{\thepage} % מספר עמוד למטה באמצע
+\makeatletter
+\def\ps@report{%
+  \def\@oddhead{\footnotesize Weekly Summary \#6 \today\hfil Rachel Broner $\vert$ Miri Adler's Lab}%
+  \let\@evenhead\@oddhead
+  \def\@oddfoot{\hfil\thepage\hfil}%
+  \let\@evenfoot\@oddfoot}
+\makeatother
+\pagestyle{report}
 
 % \usepackage{mathptmx}
 
-\usepackage{setspace}
-\onehalfspacing % For 1.5 line spacing
+\linespread{1.25}
 
 
 \begin{document}

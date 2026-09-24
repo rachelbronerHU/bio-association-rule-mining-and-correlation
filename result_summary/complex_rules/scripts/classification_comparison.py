@@ -32,6 +32,7 @@ ACROSS_LABELS = {'occasions': {'attracts': 'support of the longer rule',
                  'kept_share': {'attracts': "share of the shorter rule's support that is kept",
                                 'avoids': "share of the shorter rule's expected support that is kept"}}
 OCCASIONS = {'attracts': 'Support', 'avoids': 'Expected_support'}
+STRONGER_SIDE = {'attracts': 'above 0: attracts more', 'avoids': 'below 0: avoids more'}
 
 LEAST = 10          # a band is widened to this many rules before anything is chosen
 
@@ -52,10 +53,15 @@ OLD = ('Complex_Class', CLASS_COLORS, OLD_LABELS, 'Min improvement - lift x1.1')
 NEW = ('Complex_Class_2', NEW_COLORS, {}, 'Conviction improvement')
 WEBB = ('Complex_Class_2', NEW_COLORS, {}, "Webb's test")
 WEBB_AND_LIFT = ('Complex_Class_3', NEW_COLORS, {}, "Webb's test + min improvement - lift x1.1")
-# The verdict whose kept rules the example fields are taken from.
-PICKED_FROM = {rc.ANT: 'Complex_Class_3', rc.CON: 'Complex_Class_2'}
-
-LEGEND_HEIGHT = .76     # inches under the panels for each classification's key
+TOO_LITTLE_SUPPORT = 'too_little_support'
+LIFT_AND_SUPPORT = ('Complex_Class_4', {TOO_LITTLE_SUPPORT: '#d9a441', **CLASS_COLORS},
+                    {**OLD_LABELS, TOO_LITTLE_SUPPORT: 'too little support'},
+                    'Min improvement - lift x1.1 + enough support')
+# The verdicts decided on lift, whatever the others read.
+ON_LIFT = (OLD[0], LIFT_AND_SUPPORT[0])
+# The verdict whose kept rules the example fields are taken from, and its kept value.
+PICKED_FROM = {rc.ANT: ('Complex_Class_4', 'stronger_effect'),
+               rc.CON: ('Complex_Class_2', rc.STRONGER)}
 
 
 def load(config):
@@ -79,11 +85,17 @@ def dots(rules, config, gain):
             .join(on_lift[['gain', 'kept_share']].add_suffix('_lift')))
 
 
+def with_support(rows, min_support):
+    """Adds Complex_Class_4: kept by lift x1.1, and met on at least min_support of the patches."""
+    too_rare = rows.Complex_Class.eq('stronger_effect') & rows.occasions.lt(min_support)
+    return rows.assign(Complex_Class_4=rows.Complex_Class.mask(too_rare, TOO_LITTLE_SUPPORT))
+
+
 def _against_shorter(rows, rules, max_fdr, gain):
     """Each rule next to the one shorter rule that judged it, the hardest one to beat.
 
-    The gain is read on the metric `gain` names for the rule's shape; avoidance counts
-    the other way round, where the smaller value is the stronger one.
+    The gain is the longer rule's value minus the shorter one's, on the metric `gain` names
+    for the rule's shape: above zero attracts more, below zero avoids more.
     The kept share is the longer rule's occasions over that same shorter rule's, so it can
     never pass 1. Shorter rules that missed the FDR bar judge nothing, and are used only
     when no other one was measured.
@@ -102,7 +114,7 @@ def _against_shorter(rows, rules, max_fdr, gain):
         hardest = (max if row.Kind == 'attracts' else min)(judging, key=lambda k: values[k])
         improvement = getattr(row, gain[row.Rule_Type]) - values[hardest]
         occasions = measured[OCCASIONS[row.Kind]][hardest]
-        found.append(dict(gain=improvement if row.Kind == 'attracts' else -improvement,
+        found.append(dict(gain=improvement,
                           kept_share=row.occasions / occasions if occasions else np.nan,
                           shorter=hardest[1], shorter_occasions=occasions,
                           shorter_value=values[hardest]))
@@ -113,31 +125,37 @@ def _against_shorter(rows, rules, max_fdr, gain):
     return table
 
 
-def examples(rows, rule_type, kind, places, band, flattest_too=True):
+def examples(rows, rule_type, kind, places, band, flattest_too=True, best=0):
     """The rules to look at as fields, taken from the ones PICKED_FROM keeps.
 
     `places` even steps along the kept share, from its left end to its right, each giving
     the strongest gain within `band` of it, and the flattest one as well when asked.
+    Then the `best` rules overall by gain times support (expected support when avoiding).
     """
+    column, kept = PICKED_FROM[rule_type]
     here = rows[rows.Rule_Type.eq(rule_type) & rows.Kind.eq(kind)
-                & rows[PICKED_FROM[rule_type]].eq(rc.STRONGER) & rows.kept_share.notna()]
-    picks, taken = [], set()
+                & rows[column].eq(kept) & rows.kept_share.notna()]
+    strength = here.gain if kind == 'attracts' else -here.gain
+    wanted = []
     for place in np.linspace(0, 1, places):
-        around = _band(here, place, band)
-        wanted = [('strongest', around.gain.sort_values(ascending=False))]
+        around = strength[_band(here, place, band).index]
+        wanted.append((f'{place:.0%} along', 'strongest', around.sort_values(ascending=False)))
         if flattest_too:
-            wanted.append(('flattest', around.gain.sort_values()))
-        for what, ranked in wanted:
-            # Bands overlap where the rules bunch up, so each step takes the best left.
-            position = next((one for one in ranked.index if one not in taken), None)
-            if position is None:
-                continue
-            taken.add(position)
-            row = here.loc[position]
-            picks.append({'where': f'{place:.0%} along', 'pick': what, 'position': position,
-                          'field': row.FOV, 'rule': row.Clean_Rule,
-                          'shorter rule': row.shorter, 'share kept': row.kept_share,
-                          'gain': row.gain, 'occasions': row.occasions})
+            wanted.append((f'{place:.0%} along', 'flattest', around.sort_values()))
+    overall = (strength * here.occasions).sort_values(ascending=False)
+    wanted += [('overall', 'best gain x support', overall)] * best
+    picks, taken = [], set()
+    for where, what, ranked in wanted:
+        # Bands overlap where the rules bunch up, so each step takes the best left.
+        position = next((one for one in ranked.index if one not in taken), None)
+        if position is None:
+            continue
+        taken.add(position)
+        row = here.loc[position]
+        picks.append({'where': where, 'pick': what, 'position': position,
+                      'field': row.FOV, 'rule': row.Clean_Rule,
+                      'shorter rule': row.shorter, 'share kept': row.kept_share,
+                      'gain': row.gain, 'occasions': row.occasions})
     return pd.DataFrame(picks, index=range(1, len(picks) + 1))
 
 
@@ -239,45 +257,41 @@ def _cell_key(fig, types, colours, parts):
 
 
 def show(rows, rule_type, kind, prefix, gain, across='occasions', mark=None):
-    """One rule shape and one direction: the min-improvement verdicts above, the new ones below.
+    """One rule shape and one direction: one panel per classification, its key on the right.
 
-    Multiple antecedents get a third panel: Webb's test and the lift margin together.
+    Multiple antecedents get two more panels: Webb's test with the lift margin, and the
+    lift margin with enough support.
     """
     here = rows[rows.Rule_Type.eq(rule_type) & rows.Kind.eq(kind)]
-    classes = [OLD, WEBB, WEBB_AND_LIFT] if rule_type == rc.ANT else [OLD, NEW]
-    height = 7.6 if len(classes) == 2 else 9.0
-    fig, axes = plt.subplots(len(classes), 1, figsize=(dv._TEXT_WIDTH, height),
+    classes = [OLD, WEBB, WEBB_AND_LIFT, LIFT_AND_SUPPORT] if rule_type == rc.ANT else [OLD, NEW]
+    fig, axes = plt.subplots(len(classes), 1, figsize=(dv._TEXT_WIDTH, .8 + 2.2 * len(classes)),
                              sharex=True, sharey=gain[rule_type] == 'Lift')
     for ax, (column, colors, labels, when) in zip(axes, classes):
-        # Min improvement is decided on lift, so its panel reads lift whatever the others read.
-        value, suffix = ('Lift', '_lift') if column == OLD[0] else (gain[rule_type], '')
+        value, suffix = ('Lift', '_lift') if column in ON_LIFT else (gain[rule_type], '')
         x = across + suffix if across == 'kept_share' else across
-        _panel(ax, here, column, colors, when, x, 'gain' + suffix, value.lower())
-        if column == PICKED_FROM[rule_type]:   # only the verdict the picks come from is marked
+        _panel(ax, here, column, colors, labels, when, x, 'gain' + suffix, value.lower(), kind)
+        if column == PICKED_FROM[rule_type][0]:   # only the verdict the picks come from is marked
             _mark(ax, mark, across)
     axes[-1].set_xlabel(ACROSS_LABELS[across][kind])
-
-    missing = here[[across, 'gain']].isna().any(axis=1).sum()
-    fig.suptitle(f'{TYPE_LABELS[rule_type]} · {kind}: {len(here) - missing} occurrences\n'
-                 f'{missing} more cannot be placed: no shorter rule was measured, or it never met',
-                 fontsize=10)
-    fig.tight_layout(rect=(0, len(classes) * LEGEND_HEIGHT / height, 1, 1 - .456 / height))
-    for number, (column, colors, labels, when) in enumerate(classes):
-        _legend(fig, colors, labels, when,
-                ((len(classes) - number) * LEGEND_HEIGHT - .08) / height)
+    fig.suptitle(f'{TYPE_LABELS[rule_type]} · {kind}: {len(here):,} occurrences', fontsize=10)
+    fig.tight_layout()
     name = f'{prefix}_{rule_type}_{kind}' + ('' if across == 'occasions' else '_kept')
     dv._finish(fig, str(ci.ROOT / 'summary_downloads' / f'{name}.pdf'))
 
 
-def _panel(ax, here, column, colors, title, x, y, value):
+def _panel(ax, here, column, colors, labels, title, x, y, value, kind):
+    """One classification's dots, with the rules it cannot place counted in its title."""
+    placed = here[[x, y]].notna().all(axis=1)
     for name in colors:
-        group = here[here[column].eq(name)]
+        group = here[placed & here[column].eq(name)]
         ax.scatter(group[x], group[y], s=7, linewidth=0, alpha=.6,
                    color=colors[name])
     ax.axhline(0, color='#999999', linewidth=.8, zorder=0)
-    ax.set_title(title, fontsize=9)
-    ax.set_ylabel(f'gain in {value}', fontsize=8)
+    ax.set_title(f'{title}\n{placed.sum():,} placed · {(~placed).sum():,} cannot be: '
+                 'no shorter rule was measured, or it never met', fontsize=8)
+    ax.set_ylabel(f'{value}: longer − shorter\n{STRONGER_SIDE[kind]}', fontsize=7.5)
     tidy_axes(ax, grid='y')
+    _legend(ax, colors, labels)
 
 
 def _mark(ax, picks, across):
@@ -291,19 +305,19 @@ def _mark(ax, picks, across):
         ax.annotate(str(number), place, textcoords='offset points', xytext=(6, 4), fontsize=7)
 
 
-def _legend(fig, colors, labels, when, height):
-    """One key per classification, both under the panels."""
+def _legend(ax, colors, labels):
+    """The panel's key, to its right."""
     keys = [Line2D([], [], marker='o', linestyle='', markersize=5, color=color,
                    label=labels.get(name, name)) for name, color in colors.items()]
-    fig.legend(handles=keys, title=when, loc='upper center', ncol=3, frameon=False,
-               fontsize=7, title_fontsize=7.5, bbox_to_anchor=(.5, height),
-               columnspacing=1.2, handletextpad=.4)
+    ax.legend(handles=keys, loc='center left', bbox_to_anchor=(1.01, .5), frameon=False,
+              fontsize=7, handletextpad=.4)
 
 
 # Who keeps a rule, per rule shape: the name on the figure, the verdict column, its kept value.
 KEPT_BY = {rc.ANT: [('Min improvement\nlift x1.1', 'Complex_Class', 'stronger_effect'),
                     ("Webb's test", 'Complex_Class_2', rc.STRONGER),
-                    ("Webb's test +\nlift x1.1", 'Complex_Class_3', rc.STRONGER)],
+                    ("Webb's test +\nlift x1.1", 'Complex_Class_3', rc.STRONGER),
+                    ('Lift x1.1 +\nenough support', 'Complex_Class_4', 'stronger_effect')],
            rc.CON: [('Min improvement\nlift x1.1', 'Complex_Class', 'stronger_effect'),
                     ('Conviction\nimprovement', 'Complex_Class_2', rc.STRONGER)]}
 KEPT_COLORS = {'all': CLASS_COLORS['stronger_effect'], 'some': '#8fb3bd', 'none': '#d9d3c7'}
@@ -314,7 +328,7 @@ def show_overlap(rows, prefix):
     """Which classifications keep the same rule, one panel per rule shape and direction.
 
     Each column is one exact set of classifications that keep a rule, as the linked dots
-    below it say; each dot above is one rule in one field, at its gain in lift.
+    below it say; each dot above is one rule in one field, at its lift minus the shorter rule's.
     """
     fig = plt.figure(figsize=(dv._TEXT_WIDTH, 7.0), facecolor='white')
     outer = fig.add_gridspec(2, 2, hspace=.28, wspace=.42, left=.15, right=.99,
@@ -364,7 +378,7 @@ def _overlap_panel(fig, spec, rows, rule_type, kind):
     top.set_ylim(low - .1, high + 1.0)
     top.set_yticks(range(int(np.ceil(low)), int(high) + 1))
     top.set_title(f'{TYPE_LABELS[rule_type]} · {kind}\n{len(here):,} rules', fontsize=8.2, pad=2)
-    top.set_ylabel('gain in lift', fontsize=7)
+    top.set_ylabel(f'lift: longer − shorter\n{STRONGER_SIDE[kind]}', fontsize=6.5)
     top.tick_params(labelsize=6.5)
     for side in ('top', 'right', 'bottom'):
         top.spines[side].set_visible(False)

@@ -260,12 +260,9 @@ def plot_pca_scatter(df_pca, explained_variance, color_by, subtitle=None,
             tone = (label_colors or {}).get(fov, "black")
             ax.scatter([row[x]], [row[y]], s=110, facecolors="none",
                        edgecolor=tone, linewidth=1.3, zorder=5)
-            # Set off the dot from the start: adjustText is not always installed, and
-            # a name printed on top of its own ring is the harder one to read.
-            texts.append(ax.annotate(str(fov), (row[x], row[y]), xytext=(13, 7),
-                                     textcoords="offset points", fontsize=8, zorder=6,
-                                     ha="left", va="center", color=tone,
-                                     fontweight="bold" if label_colors else "normal"))
+            texts.append(ax.text(row[x], row[y], f"  {fov}", fontsize=8, zorder=6,
+                                 ha="left", va="center", color=tone,
+                                 fontweight="bold" if label_colors else "normal"))
         if texts:
             try:
                 from adjustText import adjust_text

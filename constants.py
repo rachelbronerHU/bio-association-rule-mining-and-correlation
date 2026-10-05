@@ -77,10 +77,10 @@ SETTINGS = Settings(
 )
 
 # --- Significance ---
-# Passed to the calls that use them. Nothing here corrects or cuts: p-values come out
-# raw, and you correct at the point you make a claim (see the library README).
+# The library returns p-values and FDR values; selection happens in the analysis.
 N_SHUFFLES = 5 if DEBUG else 1000
+N_CONDITIONAL_SHUFFLES = N_SHUFFLES  # None disables the extra conditional tests
 RANDOM_SEED = 42                     # each FOV derives its own seed from this
-MIN_LIFT_GAIN = 1.1                  # a longer rule must beat its shorter version by this much
+MIN_LIFT_GAIN = 1.1                  # lift ratio required for complex antecedents
+MIN_CONSEQUENT_CONVICTION_GAIN = 1.1 # conviction ratio required for complex consequents
 MAX_INDIVIDUAL_FDR = 0.05            # a sub-rule needs FDR this low to make a complex rule redundant
-

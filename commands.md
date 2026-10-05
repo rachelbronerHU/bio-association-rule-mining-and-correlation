@@ -14,8 +14,13 @@ The first line takes the mining from PyPI; the second points it at the working c
 ### Configuration
 
 Everything lives in `constants.py`: `SETTINGS` (how to mine) and the plain constants below
-it (`N_SHUFFLES`, `RANDOM_SEED`, `LABELS_KEPT_FIXED`, `MAX_FDR`, `MIN_LIFT_GAIN`,
-`KEEP_TOP_RULES`, `WORKERS`). `DEBUG=True` there switches to `debug_run` on a few FOVs.
+it (`N_SHUFFLES`, `N_CONDITIONAL_SHUFFLES`, `RANDOM_SEED`, `LABELS_KEPT_FIXED`,
+`MAX_INDIVIDUAL_FDR`, `MIN_LIFT_GAIN`, `MIN_CONSEQUENT_CONVICTION_GAIN`, `WORKERS`).
+`DEBUG=True` there switches to `debug_run` on a few FOVs.
+
+Conditional tests use `N_CONDITIONAL_SHUFFLES` shuffles per distinct fixed-type batch,
+so they can take substantially longer than the individual tests. Set it to `None` to
+disable them. Both FDR calculations use the library defaults.
 
 Four of these can be overridden per run without editing the file:
 
@@ -46,10 +51,19 @@ python run_association_mining.py > run.log 2>&1
 
 ```
 results/<run_type>/<weighting>_<method>_<n>_items/
-  run_config.json                      every setting the run used
-  data/results_<METHOD>.csv            final rules, joined to the biopsy metadata
-  data/results_<METHOD>_RAW.csv        the same before the MAX_FDR cut (SAVE_RAW_RULES=True)
+  run_config.json                         every setting the run used
+  data/results_<METHOD>.csv               classified rules with p-values and FDR values
+  data/results_<METHOD>_RAW.csv           rules before final mining filters, without p-values
+  data/results_<METHOD>_comparisons.csv   individual conditional comparisons
 ```
+
+All three CSVs retain every returned column and include FOV and biopsy metadata;
+empty tables are saved with headers. Existing column names such as `FOV`, `Lift`, and
+`Individual_FDR` stay the same; additional columns keep their library names.
+Join comparisons to classified rules on `["FOV", "rule_idx"]`, and to their simpler
+rules on `["FOV", "simpler_idx"]` matched to `["FOV", "rule_idx"]`.
+Raw rules still reflect earlier search pruning; they are not every possible rule.
+The classified CSV is not cut by FDR or `Adds_Information`; selection happens in analysis.
 
 ### Steps
 

@@ -14,7 +14,9 @@ from constants import (
     MAX_INDIVIDUAL_FDR,
     METHOD,
     MIBI_GUT_DIR_PATH,
+    MIN_CONSEQUENT_CONVICTION_GAIN,
     MIN_LIFT_GAIN,
+    N_CONDITIONAL_SHUFFLES,
     N_SHUFFLES,
     RANDOM_SEED,
     RESULTS_ALGO_DIR,
@@ -191,29 +193,29 @@ def _as_text(items):
 
 
 def save_results(rules, df_biopsy, df_fovs, suffix):
-    """Flatten one frame of rules to the results CSV, joined to the biopsy metadata."""
+    """Save a library table with all columns and the existing CSV names and metadata."""
     logger.info(f"Saving Results ({suffix})...")
-    if rules.empty:
-        return
-
-    df_flat = pd.DataFrame({
-        "FOV": rules["sample_id"],
-        "Antecedents": rules["antecedents"].apply(_as_text),
-        "Consequents": rules["consequents"].apply(_as_text),
-        "Kind": rules["kind"],          # "attracts" or "avoids"
-        "Lift": rules["lift"],
-        "Leverage": rules["leverage"],
-        "Confidence": rules["confidence"],
-        "Conviction": rules["conviction"],
-        "Support": rules["support"],
-        "Rule_Type": rules["rule_type"],
-        "Complex_Class": rules["complex_class"],
-        "Adds_Information": rules["adds_information"],
-        "Simpler_Rules": rules["simpler_rules"].apply(_as_text),
+    df_flat = rules.copy()
+    for column in ("antecedents", "consequents", "simpler_rules", "fixed_types"):
+        if column in df_flat:
+            df_flat[column] = df_flat[column].apply(_as_text)
+    df_flat = df_flat.rename(columns={
+        "sample_id": "FOV",
+        "antecedents": "Antecedents",
+        "consequents": "Consequents",
+        "kind": "Kind",
+        "lift": "Lift",
+        "leverage": "Leverage",
+        "confidence": "Confidence",
+        "conviction": "Conviction",
+        "support": "Support",
+        "rule_type": "Rule_Type",
+        "complex_class": "Complex_Class",
+        "adds_information": "Adds_Information",
+        "simpler_rules": "Simpler_Rules",
+        "p_value": "P_Value",
+        "individual_fdr": "Individual_FDR",
     })
-    if "p_value" in rules.columns:
-        df_flat["P_Value"] = rules["p_value"]
-        df_flat["Individual_FDR"] = rules["individual_fdr"]
 
     # Delegate Metadata Enrichment
     df_merged = _enrich_with_metadata(df_flat, df_biopsy, df_fovs)
@@ -263,12 +265,24 @@ def run_pipeline():
         random_seed=RANDOM_SEED,
         labels_kept_fixed=LABELS_KEPT_FIXED,
         min_lift_gain=MIN_LIFT_GAIN,
+        min_consequent_conviction_gain=MIN_CONSEQUENT_CONVICTION_GAIN,
         max_individual_fdr=MAX_INDIVIDUAL_FDR,
+        n_conditional_shuffles=N_CONDITIONAL_SHUFFLES,
         workers=WORKERS,
         output_path=RESULTS_ALGO_DIR,
     )
 
-    save_results(report.rules(), df_biopsy, df_fovs, suffix=METHOD)
+    for table, suffix in (
+        ("rules", METHOD),
+        ("raw_rules", f"{METHOD}_RAW"),
+        ("comparisons", f"{METHOD}_comparisons"),
+    ):
+        # Include empty sample tables so even an empty CSV keeps its column headers.
+        frame = pd.concat([
+            getattr(result, table).assign(sample_id=result.sample_id)
+            for result in report.results
+        ], ignore_index=True)
+        save_results(frame, df_biopsy, df_fovs, suffix=suffix)
 
     elapsed = time.time() - start_time
     h, rem = divmod(int(elapsed), 3600)

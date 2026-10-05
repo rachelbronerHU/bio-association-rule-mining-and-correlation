@@ -615,6 +615,15 @@ NEUTRAL = "#b8b7b1"       # measured, but not worth colouring in
 HAIRLINE = "#c3c2b7"      # cutoff lines
 ZERO = "#8d8c85"          # the line a value is read against
 GRID = "#e1e0d9"
+RISING = "#D03B3B"
+FALLING = "#2a78d6"
+
+# A4 minus the summary's 1.8 cm margins: the width a full-width figure is given.
+TEXT_WIDTH = 6.85
+PANEL_FONTS = {
+    "font.size": 8.2, "axes.titlesize": 8.4, "axes.labelsize": 8.0,
+    "xtick.labelsize": 7.8, "ytick.labelsize": 7.8, "legend.fontsize": 7.8,
+}
 
 
 def spread_labels(values, min_gap, lo, hi):
@@ -643,6 +652,29 @@ def tidy_axes(ax, grid=None, hide=("top", "right")):
         ax.set_axisbelow(True)
     if hide:
         ax.spines[list(hide)].set_visible(False)
+
+
+def draw_row_trends(ax, values, skipped=None, top=100):
+    """One small line per row of `values`, across its columns: 0 at the bottom of the row,
+    `top` at the top. Red when the last column is above the first, blue when below.
+    The `skipped` column is drawn as an open point and left out of that comparison.
+    Rows run top to bottom, as on a heatmap."""
+    x = np.arange(values.shape[1])
+    compared = [column for column in values.columns if column != skipped]
+    for row, (_, line) in enumerate(values.iterrows()):
+        y = row + 0.85 - 0.7 * line.to_numpy(dtype=float) / top
+        color = RISING if line[compared[-1]] >= line[compared[0]] else FALLING
+        ax.plot(x, y, color=color, lw=1.2, marker="o", markersize=2.5)
+        if skipped in values.columns:
+            at = values.columns.get_loc(skipped)
+            ax.plot(x[at], y[at], "o", markersize=3.5, color=color, markerfacecolor="white")
+        ax.axhline(row + 1, color=GRID, lw=0.6)
+    ax.set_xlim(-0.4, len(x) - 0.6)
+    ax.set_ylim(len(values), 0)
+    ax.set_xticks([])
+    ax.set_yticks(np.arange(len(values)) + 0.5, values.index)
+    ax.tick_params(length=0)
+    ax.spines[:].set_visible(False)
 
 
 # Filled once by set_cell_colors(); every FOV map then uses the same colors.

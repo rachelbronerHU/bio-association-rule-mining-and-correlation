@@ -72,6 +72,7 @@ def _get_organ(row):
 # Biopsy columns the notebooks can split rules by, on top of the two scores.
 METADATA_COLS = ["Days after Transplant grouped", "Donor type",
                  "Cortico Response", "Survival at follow-up"]
+STAGE_COLS = ["Pathological stage", "GI stage"]
 
 
 def _control_label(fov):
@@ -103,11 +104,12 @@ def load_spatial_data(data_dir=None):
     df_biopsy = pd.read_csv(os.path.join(data_dir, "biopsy_metadata.csv"))
 
     # Attach the biopsy's scores, location and metadata to each FOV.
-    label_cols = ["Pathological score", "Clinical score"] + METADATA_COLS
+    label_cols = ["Pathological score", "Clinical score"] + STAGE_COLS + METADATA_COLS
     df_fovs = df_fovs.merge(
         df_biopsy[["Biopsy_ID", "Localization"] + label_cols],
         left_on="Patient", right_on="Biopsy_ID", how="left",
     )
+    df_fovs[STAGE_COLS] = df_fovs[STAGE_COLS].astype("Int64")
     df_fovs["Organ"] = df_fovs.apply(_get_organ, axis=1)
 
     # A FOV with no biopsy row is a control, and gets that label in every column. A FOV

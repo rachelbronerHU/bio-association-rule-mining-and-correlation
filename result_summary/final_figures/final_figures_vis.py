@@ -53,9 +53,15 @@ def plot_rule_change_heatmap(found, tested, title, organ=None, subtitle=None, pa
     found / tested : rule x group counts, with 'Total' as the last column.
     skipped        : a group shown but not used to rank the rules, drawn as an open point.
     fdr            : optional value per rule, written in its own column before 'Total'.
-    classes        : optional class per rule (see `rule_class`), drawn as a soft band behind its row.
+    classes        : optional class per rule (see `rule_class`), drawn as a soft band behind its row;
+                     rows are then grouped by class, in the key's order.
     line_color     : optional single colour for the trend lines, which then end in an up or down arrow.
     """
+    if classes is not None:
+        rank = {name: i for i, name in enumerate(CLASS_COLORS)}
+        classes = classes.reindex(found.index)
+        order = classes.map(rank).sort_values(kind="stable").index
+        found, tested, classes = found.loc[order], tested.loc[order], classes.loc[order]
     share = 100 * found / tested.replace(0, np.nan)
     text = (share.map(lambda v: "-" if np.isnan(v) else f"{v:.0f}%")
             + "\n" + found.astype(str) + "/" + tested.astype(str))
@@ -87,6 +93,6 @@ def plot_rule_change_heatmap(found, tested, title, organ=None, subtitle=None, pa
             axes_top = _class_key(fig, axes_top)
         fig.subplots_adjust(left=0.25, right=0.99, bottom=0.02, top=axes_top)
         if classes is not None:
-            _class_bands(fig, ax_trend, classes.reindex(share.index))
+            _class_bands(fig, ax_trend, classes)
     save_figure(fig, save, figure_dir=_FIGURE_DIR)
     plt.show()

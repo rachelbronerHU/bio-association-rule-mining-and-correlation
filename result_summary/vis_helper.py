@@ -619,6 +619,8 @@ RISING = "#D03B3B"
 FALLING = "#2a78d6"
 ATTRACTION = "#2878D0"
 AVOIDANCE = "#E66A4E"
+UP_ARROW = "#2E9E5B"
+DOWN_ARROW = "#8E5BB5"
 
 # A4 minus the summary's 1.8 cm margins: the width a full-width figure is given.
 TEXT_WIDTH = 6.85
@@ -659,7 +661,7 @@ def tidy_axes(ax, grid=None, hide=("top", "right")):
 def draw_row_trends(ax, values, skipped=None, top=100, color=None):
     """One small line per row of `values`, across its columns: 0 at the bottom of the row,
     `top` at the top. Red when the last column is above the first, blue when below.
-    With `color`, every line takes that colour and ends in an up or down arrow instead.
+    With `color`, every line takes that colour and ends in a green up or purple down arrow instead.
     The `skipped` column is drawn as an open point and left out of that comparison.
     Rows run top to bottom, as on a heatmap."""
     x = np.arange(values.shape[1])
@@ -670,7 +672,8 @@ def draw_row_trends(ax, values, skipped=None, top=100, color=None):
         line_color = color or (RISING if rising else FALLING)
         ax.plot(x, y, color=line_color, lw=1.2, marker="o", markersize=2.5)
         if color:
-            ax.plot(x[-1] + 0.25, y[-1], "^" if rising else "v", markersize=4, color=color)
+            ax.plot(x[-1] + 0.25, y[-1], "^" if rising else "v", markersize=4,
+                    color=UP_ARROW if rising else DOWN_ARROW)
         if skipped in values.columns:
             at = values.columns.get_loc(skipped)
             ax.plot(x[at], y[at], "o", markersize=3.5, color=line_color, markerfacecolor="white")

@@ -617,6 +617,8 @@ ZERO = "#8d8c85"          # the line a value is read against
 GRID = "#e1e0d9"
 RISING = "#D03B3B"
 FALLING = "#2a78d6"
+ATTRACTION = "#2878D0"
+AVOIDANCE = "#E66A4E"
 
 # A4 minus the summary's 1.8 cm margins: the width a full-width figure is given.
 TEXT_WIDTH = 6.85
@@ -654,20 +656,24 @@ def tidy_axes(ax, grid=None, hide=("top", "right")):
         ax.spines[list(hide)].set_visible(False)
 
 
-def draw_row_trends(ax, values, skipped=None, top=100):
+def draw_row_trends(ax, values, skipped=None, top=100, color=None):
     """One small line per row of `values`, across its columns: 0 at the bottom of the row,
     `top` at the top. Red when the last column is above the first, blue when below.
+    With `color`, every line takes that colour and ends in an up or down arrow instead.
     The `skipped` column is drawn as an open point and left out of that comparison.
     Rows run top to bottom, as on a heatmap."""
     x = np.arange(values.shape[1])
     compared = [column for column in values.columns if column != skipped]
     for row, (_, line) in enumerate(values.iterrows()):
         y = row + 0.85 - 0.7 * line.to_numpy(dtype=float) / top
-        color = RISING if line[compared[-1]] >= line[compared[0]] else FALLING
-        ax.plot(x, y, color=color, lw=1.2, marker="o", markersize=2.5)
+        rising = line[compared[-1]] >= line[compared[0]]
+        line_color = color or (RISING if rising else FALLING)
+        ax.plot(x, y, color=line_color, lw=1.2, marker="o", markersize=2.5)
+        if color:
+            ax.plot(x[-1] + 0.25, y[-1], "^" if rising else "v", markersize=4, color=color)
         if skipped in values.columns:
             at = values.columns.get_loc(skipped)
-            ax.plot(x[at], y[at], "o", markersize=3.5, color=color, markerfacecolor="white")
+            ax.plot(x[at], y[at], "o", markersize=3.5, color=line_color, markerfacecolor="white")
         ax.axhline(row + 1, color=GRID, lw=0.6)
     ax.set_xlim(-0.4, len(x) - 0.6)
     ax.set_ylim(len(values), 0)

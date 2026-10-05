@@ -313,3 +313,19 @@ def prepare_rules(results, no_self=True):
         default=np.where(rules["Lift"] > 1, 1, -1),
     )
     return rules
+
+
+MISSING_POPULATION = {"Muscle": "Stroma", "BrunnerGland": "Epithel"}
+
+
+def rule_class(rules, df_cells):
+    """Which tissue parts each rule joins, from the population of its cell types:
+    Immune–Immune, Immune–Epithel, Immune–Stroma, or Tissue structure (no immune cells)."""
+    population = (df_cells.groupby("cell type")["population"].first()
+                  .fillna(pd.Series(MISSING_POPULATION)))
+    def one(rule):
+        parts = set(population[rule.replace(" -> ", ", ").split(", ")])
+        if "Immune" not in parts:
+            return "Tissue structure"
+        return "Immune–" + ("–".join(sorted(parts - {"Immune"})) or "Immune")
+    return pd.Series([one(rule) for rule in rules], index=rules)

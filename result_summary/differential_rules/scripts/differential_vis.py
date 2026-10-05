@@ -16,7 +16,7 @@ import differential_stats as ds
 from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, spread_labels,
                         plot_fov, set_cell_colors, TEXT_WIDTH, PANEL_FONTS,
                         NEUTRAL as _NEUTRAL, HAIRLINE as _HAIRLINE,
-                        ZERO as _ZERO, INK as _INK)
+                        ZERO as _ZERO, INK as _INK, ATTRACTION, AVOIDANCE)
 
 
 _FIGURE_DIR = Path(__file__).resolve().parent.parent / "summary_downloads"
@@ -487,7 +487,7 @@ def plot_state_breakdown(states, selected, fovs_by_stage, stages, scope=None, sa
         print("No eligible trends passed the cutoff.")
         return
 
-    colors = {"Attract": "#2a78d6", "No rule": "#dddcd5", "Avoid": "#eb6834"}
+    colors = {"Attract": ATTRACTION, "No rule": "#dddcd5", "Avoid": AVOIDANCE}
     ncols = 2 if len(selected) > 1 else 1
     nrows = int(np.ceil(len(selected) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(11, 2.65 * nrows + 1),
@@ -546,9 +546,9 @@ def plot_state_breakdown(states, selected, fovs_by_stage, stages, scope=None, sa
 # ---------------------------------------------------------------------------
 
 _STATE_COLORS = {
-    "Attraction": "#2878D0",
+    "Attraction": ATTRACTION,
     "No rule": "#E8E7E2",
-    "Avoidance": "#E66A4E",
+    "Avoidance": AVOIDANCE,
     "Rule not testable": "#B8B4C7",
 }
 
@@ -1080,8 +1080,8 @@ def _prevalence_panel(ax, states, eligibility, metadata, spec, stages, bars=Fals
 
     shown = []
     for label, short, values, counts, color in (
-            ("Attraction", "attract", attraction, attraction_n, "#2878D0"),
-            ("Avoidance", "avoid", avoidance, avoidance_n, "#D85D62")):
+            ("Attraction", "attract", attraction, attraction_n, ATTRACTION),
+            ("Avoidance", "avoid", avoidance, avoidance_n, AVOIDANCE)):
         if not any(counts):
             continue
         if bars:

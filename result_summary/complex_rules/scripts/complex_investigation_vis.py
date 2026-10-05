@@ -11,6 +11,7 @@ import differential_stats as ds
 import differential_vis as dv
 import compare_rules as cr
 import rule_metrics as rm
+from vis_helper import ATTRACTION, AVOIDANCE
 import complex_investigation as ci
 
 
@@ -201,7 +202,7 @@ def parent_in_same_fields(all_rules, examples, parent):
 
 
 _PARENT_GREY = '#777777'
-_FIELD_COLORS = {'attraction': '#2878D0', 'avoidance': '#E66A4E'}
+_FIELD_COLORS = {'attraction': ATTRACTION, 'avoidance': AVOIDANCE}
 _FIELD_LABELS = {'attraction': 'Attraction (%)', 'avoidance': 'Avoidance (%)'}
 _COUNT_WORDS = {'attraction': 'attracted', 'avoidance': 'avoided', 'eligible': 'eligible'}
 

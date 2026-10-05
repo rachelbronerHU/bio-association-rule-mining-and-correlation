@@ -11,7 +11,7 @@ results/*
 results/debug_run
 result_summary/*/summary_downloads/
 result_summary/*/param_runs/
-
+result_summary/known_biology/*
 
 
 visualization/notebooks/reports

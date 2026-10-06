@@ -1,16 +1,17 @@
-"""Can the rules predict a biopsy label, such as steroid response (TARGET below)?
+"""Can the rules predict a biopsy label, such as steroid response?
 
-Every setting in the grid below is one run, done twice: one row per patient, and one row
-per FOV. Either way each patient is left out in turn and predicted by a model trained on
-all the other patients. Each target and unit gets its own runs, weights and plot files in
-output/.
+The pieces run_predictions.py puts together: the tables (one row per patient or per FOV),
+the models, one leave-one-out run, and the saved runs, weights and plot.
 
-    python response_search.py          # run the grid, then plot
-    python response_search.py --plot   # plot the saved runs again without rerunning
+A prediction is a dict:
+    target   : the biopsy column to predict
+    value    : None for the column's two values; a value for it vs everything else
+    positive : with value None, the "+" side (weights above 0 push toward it)
+    only_patients_with_muscle_and_epithelium : Azulay et al.'s filter for their NRM model
 """
 import os
+import re
 import sys
-import time
 import itertools
 
 import matplotlib.pyplot as plt
@@ -32,12 +33,8 @@ import vis_helper as vh
 
 ORGAN = "Duodenum"
 OUT_DIR = os.path.join(HERE, "output")
-TARGET = "Cortico Response"   # the biopsy column to predict
-VALUE = None                  # None: the column's two values. A value: it vs everything else.
-POSITIVE = "Responder"        # with VALUE None, the "+" side (weights above 0 push toward it)
-ONLY_PATIENTS_WITH_MUSCLE_AND_EPITHELIUM = False   # Azulay et al.'s filter for their NRM model
-MIN_EPITHELIAL_CELLS = 50     # with the filter on, a patient needs more than this many
-UNITS = {"patient": "Biopsy", "FOV": "FOV"}
+MIN_EPITHELIAL_CELLS = 50     # with the muscle filter on, a patient needs more than this many
+UNIT_COLUMNS = {"patient": "Biopsy", "FOV": "FOV"}
 
 # name: (kinds of rule, pairwise only)
 RULE_SETS = {
@@ -73,6 +70,70 @@ MODELS = {
 }
 MODEL_COLORS = {"Ridge logistic regression": "#33658A", "Lasso logistic regression": "#86BBD8",
                 "Random forest": "#E0A33B", AZULAY: "#8E5BB5"}
+
+
+# ---------------------------------------------------------------------------
+# Data and patients
+# ---------------------------------------------------------------------------
+
+def load_data():
+    """Cells, FOVs and rules of this organ's transplanted patients, each FOV with every
+    biopsy column. The slow part: once."""
+    cells, fovs, biopsies = dh.load_spatial_data()
+    fovs = fovs[(fovs["Organ"] == ORGAN) & fovs["Biopsy_ID"].notna()]
+    missing = [column for column in biopsies if column not in fovs]
+    fovs = fovs.merge(biopsies[["Biopsy_ID"] + missing], on="Biopsy_ID", how="left")
+    rules = dh.load_results(rule_max_items=4, kind=None)
+    rules = rules[rules["FOV"].isin(fovs["FOV"])]
+    rules["Rule"] = rules["Antecedents"] + " -> " + rules["Consequents"] + " " + rules["Kind"]
+    finite = rules["Conviction"].replace(np.inf, np.nan)
+    rules["Conviction"] = finite.fillna(finite.max())
+    return cells, fovs, rules
+
+
+def sides(prediction, fovs):
+    """The names of the "+" and "-" sides, and each FOV's side: 1, 0, or empty when its
+    patient has no answer. With a value set, an empty answer counts as "not value"."""
+    target, value, positive = prediction["target"], prediction["value"], prediction["positive"]
+    column = fovs[target]
+    if value is not None:
+        return value, f"not {value}", column.eq(value).astype(int)
+    values = sorted(column.dropna().unique())
+    if len(values) != 2 or positive not in values:
+        raise ValueError(f"{target} has the values {values}: set value to one of them, "
+                         f"or positive to one of two")
+    negative = next(v for v in values if v != positive)
+    return positive, negative, column.eq(positive).astype(int).where(column.notna())
+
+
+def with_muscle_and_epithelium(cells, fovs):
+    """The patients with muscle in at least one FOV and more than MIN_EPITHELIAL_CELLS
+    epithelial cells over all their FOVs."""
+    cells = cells[cells["fov"].isin(fovs["FOV"])]
+    patient = cells["fov"].map(fovs.set_index("FOV")["Biopsy"])
+    per_patient = (cells.assign(muscle=cells["in_Muscle"].astype(bool),
+                                epithelial=cells["population"].eq("Epithel"))
+                   .groupby(patient).agg(muscle=("muscle", "any"), epithelial=("epithelial", "sum")))
+    kept = per_patient["muscle"] & (per_patient["epithelial"] > MIN_EPITHELIAL_CELLS)
+    return per_patient.index[kept]
+
+
+def patients_of(prediction, cells, fovs):
+    """The FOVs of the patients this prediction uses, each with its side."""
+    positive, negative, side = sides(prediction, fovs)
+    fovs = fovs.assign(side=side, positive=positive, negative=negative).dropna(subset=["side"])
+    if prediction["only_patients_with_muscle_and_epithelium"]:
+        kept = with_muscle_and_epithelium(cells, fovs)
+        print(f"{name_of(prediction)}: kept {len(kept)} of {fovs['Biopsy'].nunique()} patients "
+              f"with muscle and more than {MIN_EPITHELIAL_CELLS} epithelial cells.")
+        fovs = fovs[fovs["Biopsy"].isin(kept)]
+    return fovs
+
+
+def labels(fovs, unit):
+    """Per row of the unit: its side (1 or 0) and its patient."""
+    by_unit = fovs.groupby(UNIT_COLUMNS[unit])
+    return by_unit["side"].first().astype(int), by_unit["Biopsy"].first()
 
 
 # ---------------------------------------------------------------------------
@@ -113,21 +174,23 @@ def severity_table(fovs, unit, column):
 
 
 def all_tables(rules, cells, fovs, unit):
-    """(rule set, feature, min patients, table) for every setting in the grid. The first
-    rows are references with no rules: cell composition and each severity score alone."""
-    yield COMPOSITION, "", np.nan, composition_table(cells, fovs, unit)
+    """((rule set, feature, min patients), table) for every setting in the grid. The first
+    are references with no rules: cell composition and each severity score alone."""
+    unit = UNIT_COLUMNS[unit]
+    rules = rules[rules["FOV"].isin(fovs["FOV"])]
+    yield (COMPOSITION, "", np.nan), composition_table(cells, fovs, unit)
     for column in SEVERITY:
-        yield f"{column} only", "", np.nan, severity_table(fovs, unit, column)
+        yield (f"{column} only", "", np.nan), severity_table(fovs, unit, column)
     for (name, (kinds, pairwise)), feature, share in itertools.product(
             RULE_SETS.items(), FEATURES, MIN_PATIENTS):
         chosen = rules["Kind"].isin(kinds)
         if pairwise:
             chosen &= rules["Rule_Type"] == "pairwise"
-        yield name, feature, share, rule_table(rules[chosen], fovs, unit, feature, share)
+        yield (name, feature, share), rule_table(rules[chosen], fovs, unit, feature, share)
 
 
 # ---------------------------------------------------------------------------
-# Runs
+# One run
 # ---------------------------------------------------------------------------
 
 def models_for(table):
@@ -137,7 +200,7 @@ def models_for(table):
 
 def score(table, is_positive, patient_of, model):
     """Predict each patient's rows from all the other patients, and count how many were
-    right. The left-out patients run side by side, one per CPU core.
+    right.
 
     Each row gets a lean: above 0 means "+". It is the chance of "+" minus 0.5, or for
     the SVM its signed distance from the line."""
@@ -145,8 +208,7 @@ def score(table, is_positive, patient_of, model):
     estimator = MODELS[model]()
     method = "predict_proba" if hasattr(estimator, "predict_proba") else "decision_function"
     found = cross_val_predict(estimator, table.to_numpy(), y, cv=LeaveOneGroupOut(),
-                              groups=patient_of.loc[table.index].to_numpy(),
-                              method=method, n_jobs=-1)
+                              groups=patient_of.loc[table.index].to_numpy(), method=method)
     lean = found[:, 1] - 0.5 if method == "predict_proba" else found
     predicted = (lean > 0).astype(int)
     return {
@@ -159,109 +221,59 @@ def score(table, is_positive, patient_of, model):
     }
 
 
-def sides(fovs):
-    """The names of the "+" and "-" sides, and each FOV's side: 1, 0, or empty when its
-    patient has no answer. With VALUE set, an empty answer counts as "not VALUE"."""
-    column = fovs[TARGET]
-    if VALUE is not None:
-        return VALUE, f"not {VALUE}", column.eq(VALUE).astype(int)
-    values = sorted(column.dropna().unique())
-    if len(values) != 2 or POSITIVE not in values:
-        raise ValueError(f"{TARGET} has the values {values}: set VALUE to one of them, "
-                         f"or POSITIVE to one of two")
-    negative = next(v for v in values if v != POSITIVE)
-    return POSITIVE, negative, column.eq(POSITIVE).astype(int).where(column.notna())
-
-
-def with_muscle_and_epithelium(cells, fovs):
-    """The patients with muscle in at least one FOV and more than MIN_EPITHELIAL_CELLS
-    epithelial cells over all their FOVs."""
-    cells = cells[cells["fov"].isin(fovs["FOV"])]
-    patient = cells["fov"].map(fovs.set_index("FOV")["Biopsy"])
-    per_patient = (cells.assign(muscle=cells["in_Muscle"].astype(bool),
-                                epithelial=cells["population"].eq("Epithel"))
-                   .groupby(patient).agg(muscle=("muscle", "any"), epithelial=("epithelial", "sum")))
-    kept = per_patient["muscle"] & (per_patient["epithelial"] > MIN_EPITHELIAL_CELLS)
-    return per_patient.index[kept]
-
-
-def load():
-    """Rules, cells and FOVs of this organ's transplanted patients that have an answer."""
-    cells, fovs, _ = dh.load_spatial_data()
-    fovs = fovs[(fovs["Organ"] == ORGAN) & fovs["Biopsy_ID"].notna()]
-    positive, negative, side = sides(fovs)
-    fovs = fovs.assign(side=side, positive=positive, negative=negative).dropna(subset=["side"])
-    if ONLY_PATIENTS_WITH_MUSCLE_AND_EPITHELIUM:
-        kept = with_muscle_and_epithelium(cells, fovs)
-        print(f"Kept {len(kept)} of {fovs['Biopsy'].nunique()} patients with muscle and more "
-              f"than {MIN_EPITHELIAL_CELLS} epithelial cells.")
-        fovs = fovs[fovs["Biopsy"].isin(kept)]
-    rules = dh.load_results(rule_max_items=4, kind=None)
-    rules = rules[rules["FOV"].isin(fovs["FOV"])]
-    rules["Rule"] = rules["Antecedents"] + " -> " + rules["Consequents"] + " " + rules["Kind"]
-    finite = rules["Conviction"].replace(np.inf, np.nan)
-    rules["Conviction"] = finite.fillna(finite.max())
-    return rules, cells, fovs
-
-
-def output_path(kind, unit, ext="csv"):
-    """output/<kind>_<target>_<unit>.<ext>, e.g. runs_cortico_response_patient.csv.
-    With the muscle filter on, the target ends in _muscle."""
-    muscle = "muscle" if ONLY_PATIENTS_WITH_MUSCLE_AND_EPITHELIUM else None
-    target = "_".join(str(part) for part in (TARGET, VALUE, muscle) if part is not None)
-    return os.path.join(OUT_DIR, f"{kind}_{target.lower().replace(' ', '_')}_{unit}.{ext}")
-
-
 def weights_of(table, is_positive, model):
     """The model's weight for each rule, fitted once on all rows."""
     fitted = MODELS[model]().fit(table.to_numpy(), is_positive.loc[table.index].to_numpy())
     return pd.Series(fitted[-1].coef_[0], index=table.columns, name="weight")
 
 
-def run_unit(rules, cells, fovs, unit):
-    by_unit = fovs.groupby(UNITS[unit])
-    is_positive = by_unit["side"].first().astype(int)
-    patient_of = by_unit["Biopsy"].first()
-    positive, negative = fovs["positive"].iloc[0], fovs["negative"].iloc[0]
-    rows, weights = [], {}
-    tables = list(all_tables(rules, cells, fovs, UNITS[unit]))
-    total = sum(len(models_for(table)) for *_, table in tables)
-    start = time.time()
-    for name, feature, share, table in tables:
-        for model in models_for(table):
-            row = {"organ": ORGAN, "target": TARGET, "positive": positive, "negative": negative,
-                   "unit": unit, "rule_set": name, "feature": feature,
-                   "min_patients": share, "model": model, "n_features": table.shape[1],
-                   **score(table, is_positive, patient_of, model)}
-            if "logistic" in model:
-                weights[len(rows)] = weights_of(table, is_positive, model)
-            rows.append(row)
-            minutes, seconds = divmod(int(time.time() - start), 60)
-            print(f"[{len(rows):>3}/{total}  {minutes:>3}:{seconds:02}]  {unit:8} {name:34} "
-                  f"{feature:16} {share:>4} {model:26} {row['n_features']:>6} features  "
-                  f"{row['balanced_accuracy']:5.1f}%  ({positive} {row['positive_right']:3.0f}%, "
-                  f"{negative} {row['negative_right']:3.0f}%)  AUC {row['auc']:3.0f}")
-    runs = pd.DataFrame(rows).round(1)
+def run_one(table, is_positive, patient_of, model):
+    """One run: its scores, and for a logistic model its weights (else None)."""
+    weights = weights_of(table, is_positive, model) if "logistic" in model else None
+    return score(table, is_positive, patient_of, model), weights
+
+
+# ---------------------------------------------------------------------------
+# Saving
+# ---------------------------------------------------------------------------
+
+def name_of(prediction):
+    """e.g. cortico_response, or cause_of_death_nrm_muscle with a value and the filter.
+    Safe for a file name: '<30' becomes 'under30', '>100' becomes 'over100'."""
+    muscle = "muscle" if prediction["only_patients_with_muscle_and_epithelium"] else None
+    parts = (prediction["target"], prediction["value"], muscle)
+    name = "_".join(str(part) for part in parts if part is not None).lower()
+    name = name.replace("<", "under").replace(">", "over")
+    return re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+
+
+def output_path(prediction, kind, unit, ext="csv"):
+    """output/<kind>_<prediction>_<unit>.<ext>, e.g. runs_cortico_response_patient.csv."""
+    return os.path.join(OUT_DIR, f"{kind}_{name_of(prediction)}_{unit}.{ext}")
+
+
+def save(prediction, unit, runs, weights):
+    """The runs CSV, the best logistic run's weights, and the plot."""
     os.makedirs(OUT_DIR, exist_ok=True)
-    runs.to_csv(output_path("runs", unit), index=False)
-    print(f"saved {output_path('runs', unit)}")
-    save_best_weights(runs, weights, unit)
-    return runs
+    runs.to_csv(output_path(prediction, "runs", unit), index=False)
+    print(f"saved {output_path(prediction, 'runs', unit)}")
+    save_best_weights(prediction, unit, runs, weights)
+    plot_runs(prediction, unit, runs)
 
 
-def save_best_weights(runs, weights, unit):
+def save_best_weights(prediction, unit, runs, weights):
     """The weights of the best-scoring logistic run, biggest pull first, zeros left out."""
     best = runs.loc[list(weights)]["balanced_accuracy"].idxmax()
     chosen = weights[best]
     chosen = chosen[chosen != 0].sort_values(key=abs, ascending=False)
-    path = output_path("weights", unit)
+    path = output_path(prediction, "weights", unit)
     setting = runs.loc[best, ["rule_set", "feature", "min_patients", "model", "balanced_accuracy", "auc"]]
     chosen.rename_axis("rule").reset_index().assign(**setting).to_csv(path, index=False)
     print(f"saved {path}  ({', '.join(map(str, setting))})")
 
 
 # ---------------------------------------------------------------------------
-# Plots
+# Plot
 # ---------------------------------------------------------------------------
 
 def setting_label(row):
@@ -270,13 +282,12 @@ def setting_label(row):
     return f"{row['rule_set']}  ·  {row['feature']}  ·  in ≥{row['min_patients']:.0%} of patients"
 
 
-def plot_runs(runs):
+def plot_runs(prediction, unit, runs):
     """One row per setting, one bar per model: % predicted right, 50% = guessing."""
     runs = runs.assign(setting=[setting_label(r) for _, r in runs.iterrows()])
     settings = list(dict.fromkeys(runs["setting"]))
     first = runs.iloc[0]
-    unit = first["unit"]
-    height = 1.2 + 0.42 * len(settings)
+    height = 1.8 + 0.42 * len(settings)
 
     with plt.rc_context(vh.PANEL_FONTS):
         fig, ax = plt.subplots(figsize=(vh.TEXT_WIDTH, height))
@@ -298,18 +309,12 @@ def plot_runs(runs):
         ax.set_xlabel(f"{unit[0].upper() + unit[1:]}s predicted right "
                       f"(%, average of {first['positive']} and {first['negative']})")
         vh.tidy_axes(ax, grid="x")
-        ax.legend(loc="lower right", frameon=False)
+        fig.subplots_adjust(bottom=0.95 / height)
+        fig.legend(*ax.get_legend_handles_labels(), loc="lower center", ncol=2, frameon=False)
         vh.figure_titles(
             fig, f"Predicting {first['target']}, one row per {unit}", organ=ORGAN,
             subtitle=(f"{first['n_positive']} {first['positive']} {unit}s, {first['n_negative']} "
                       f"{first['negative']} {unit}s; each patient left out in turn"),
         )
-        vh.save_figure(fig, output_path("plot", unit, "pdf"), figure_dir=OUT_DIR)
+        vh.save_figure(fig, output_path(prediction, "plot", unit, "pdf"), figure_dir=OUT_DIR)
         plt.close(fig)
-
-
-if __name__ == "__main__":
-    data = None if "--plot" in sys.argv else load()
-    for unit in UNITS:
-        plot_runs(pd.read_csv(output_path("runs", unit)) if data is None
-                  else run_unit(*data, unit))

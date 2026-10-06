@@ -43,6 +43,7 @@ RULE_SETS = {
     "Attraction + avoidance, all sizes": (["attracts", "avoids"], False),
 }
 COMPOSITION = "Cell composition"
+SEVERITY = ["Pathological score", "Clinical score"]
 FEATURES = {"share of FOVs": None, "mean lift": "Lift", "mean conviction": "Conviction"}
 MIN_PATIENTS = [0, 0.1, 0.2, 0.3]
 
@@ -99,9 +100,17 @@ def composition_table(cells, fovs, unit):
     return counts.div(counts.sum(axis=1), axis=0)
 
 
+def severity_table(fovs, unit, column):
+    """Unit x one column: 1 when the biopsy's score is Severe, 0 when Mild."""
+    return fovs.groupby(unit)[column].first().eq("Severe").astype(int).to_frame(column)
+
+
 def all_tables(rules, cells, fovs, unit):
-    """(rule set, feature, min patients, table) for every setting in the grid."""
+    """(rule set, feature, min patients, table) for every setting in the grid. The first
+    rows are references with no rules: cell composition and each severity score alone."""
     yield COMPOSITION, "", np.nan, composition_table(cells, fovs, unit)
+    for column in SEVERITY:
+        yield f"{column} only", "", np.nan, severity_table(fovs, unit, column)
     for (name, (kinds, pairwise)), feature, share in itertools.product(
             RULE_SETS.items(), FEATURES, MIN_PATIENTS):
         chosen = rules["Kind"].isin(kinds)
@@ -178,7 +187,7 @@ def run_unit(rules, cells, fovs, unit):
     patient_of = by_unit["Biopsy"].first()
     positive, negative = fovs["positive"].iloc[0], fovs["negative"].iloc[0]
     rows, weights = [], {}
-    total = (1 + len(RULE_SETS) * len(FEATURES) * len(MIN_PATIENTS)) * len(MODELS)
+    total = (1 + len(SEVERITY) + len(RULE_SETS) * len(FEATURES) * len(MIN_PATIENTS)) * len(MODELS)
     start = time.time()
     for name, feature, share, table in all_tables(rules, cells, fovs, UNITS[unit]):
         for model in MODELS:
@@ -218,7 +227,7 @@ def save_best_weights(runs, weights, unit):
 # ---------------------------------------------------------------------------
 
 def setting_label(row):
-    if row["rule_set"] == COMPOSITION:
+    if pd.isna(row["min_patients"]):
         return row["rule_set"]
     return f"{row['rule_set']}  ·  {row['feature']}  ·  in ≥{row['min_patients']:.0%} of patients"
 

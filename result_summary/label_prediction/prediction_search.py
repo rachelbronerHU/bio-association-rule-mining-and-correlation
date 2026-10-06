@@ -16,12 +16,14 @@ import itertools
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 from sklearn.model_selection import LeaveOneGroupOut, StratifiedKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -60,14 +62,17 @@ def logistic(l1_ratio):
                              use_legacy_attributes=False))
 
 
+AZULAY = "Azulay: 2 PCA + linear SVM"
 MODELS = {
     "Ridge logistic regression": logistic(0),
     "Lasso logistic regression": logistic(1),
     "Random forest": lambda: RandomForestClassifier(
         n_estimators=500, class_weight="balanced", random_state=0, n_jobs=1),
+    AZULAY: lambda: make_pipeline(
+        StandardScaler(), PCA(n_components=2), SVC(kernel="linear", class_weight="balanced")),
 }
 MODEL_COLORS = {"Ridge logistic regression": "#33658A", "Lasso logistic regression": "#86BBD8",
-                "Random forest": "#E0A33B"}
+                "Random forest": "#E0A33B", AZULAY: "#8E5BB5"}
 
 
 # ---------------------------------------------------------------------------
@@ -125,17 +130,28 @@ def all_tables(rules, cells, fovs, unit):
 # Runs
 # ---------------------------------------------------------------------------
 
+def models_for(table):
+    """Every model, but Azulay's only when the table has at least 2 columns to reduce to 2."""
+    return [model for model in MODELS if model != AZULAY or table.shape[1] >= 2]
+
+
 def score(table, is_positive, patient_of, model):
     """Predict each patient's rows from all the other patients, and count how many were
-    right. The left-out patients run side by side, one per CPU core."""
+    right. The left-out patients run side by side, one per CPU core.
+
+    Each row gets a lean: above 0 means "+". It is the chance of "+" minus 0.5, or for
+    the SVM its signed distance from the line."""
     y = is_positive.loc[table.index].to_numpy()
-    chance = cross_val_predict(MODELS[model](), table.to_numpy(), y, cv=LeaveOneGroupOut(),
-                               groups=patient_of.loc[table.index].to_numpy(),
-                               method="predict_proba", n_jobs=-1)
-    predicted = chance.argmax(axis=1)
+    estimator = MODELS[model]()
+    method = "predict_proba" if hasattr(estimator, "predict_proba") else "decision_function"
+    found = cross_val_predict(estimator, table.to_numpy(), y, cv=LeaveOneGroupOut(),
+                              groups=patient_of.loc[table.index].to_numpy(),
+                              method=method, n_jobs=-1)
+    lean = found[:, 1] - 0.5 if method == "predict_proba" else found
+    predicted = (lean > 0).astype(int)
     return {
         "balanced_accuracy": 100 * balanced_accuracy_score(y, predicted),
-        "auc": 100 * roc_auc_score(y, chance[:, 1]),
+        "auc": 100 * roc_auc_score(y, lean),
         "positive_right": 100 * (predicted[y == 1] == 1).mean(),
         "negative_right": 100 * (predicted[y == 0] == 0).mean(),
         "n_positive": int(y.sum()),
@@ -208,10 +224,11 @@ def run_unit(rules, cells, fovs, unit):
     patient_of = by_unit["Biopsy"].first()
     positive, negative = fovs["positive"].iloc[0], fovs["negative"].iloc[0]
     rows, weights = [], {}
-    total = (1 + len(SEVERITY) + len(RULE_SETS) * len(FEATURES) * len(MIN_PATIENTS)) * len(MODELS)
+    tables = list(all_tables(rules, cells, fovs, UNITS[unit]))
+    total = sum(len(models_for(table)) for *_, table in tables)
     start = time.time()
-    for name, feature, share, table in all_tables(rules, cells, fovs, UNITS[unit]):
-        for model in MODELS:
+    for name, feature, share, table in tables:
+        for model in models_for(table):
             row = {"organ": ORGAN, "target": TARGET, "positive": positive, "negative": negative,
                    "unit": unit, "rule_set": name, "feature": feature,
                    "min_patients": share, "model": model, "n_features": table.shape[1],
@@ -270,7 +287,8 @@ def plot_runs(runs):
             ax.barh(y, values.reindex(settings), height=bar * 0.92,
                     color=MODEL_COLORS[model], label=model)
             for yy, v in zip(y, values.reindex(settings)):
-                ax.text(v + 0.8, yy, f"{v:.0f}", va="center", fontsize=6.5, color=vh.INK)
+                if pd.notna(v):
+                    ax.text(v + 0.8, yy, f"{v:.0f}", va="center", fontsize=6.5, color=vh.INK)
 
         ax.axvline(50, color=vh.ZERO, lw=0.9, ls="--")
         ax.text(50, -0.75, "guessing", ha="center", va="bottom", fontsize=6.5, color=vh.ZERO)

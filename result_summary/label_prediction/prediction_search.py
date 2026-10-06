@@ -33,6 +33,8 @@ OUT_DIR = os.path.join(HERE, "output")
 TARGET = "Cortico Response"   # the biopsy column to predict
 VALUE = None                  # None: the column's two values. A value: it vs everything else.
 POSITIVE = "Responder"        # with VALUE None, the "+" side (weights above 0 push toward it)
+ONLY_PATIENTS_WITH_MUSCLE_AND_EPITHELIUM = False   # Azulay et al.'s filter for their NRM model
+MIN_EPITHELIAL_CELLS = 50     # with the filter on, a patient needs more than this many
 UNITS = {"patient": "Biopsy", "FOV": "FOV"}
 
 # name: (kinds of rule, pairwise only)
@@ -155,12 +157,29 @@ def sides(fovs):
     return POSITIVE, negative, column.eq(POSITIVE).astype(int).where(column.notna())
 
 
+def with_muscle_and_epithelium(cells, fovs):
+    """The patients with muscle in at least one FOV and more than MIN_EPITHELIAL_CELLS
+    epithelial cells over all their FOVs."""
+    cells = cells[cells["fov"].isin(fovs["FOV"])]
+    patient = cells["fov"].map(fovs.set_index("FOV")["Biopsy"])
+    per_patient = (cells.assign(muscle=cells["in_Muscle"].astype(bool),
+                                epithelial=cells["population"].eq("Epithel"))
+                   .groupby(patient).agg(muscle=("muscle", "any"), epithelial=("epithelial", "sum")))
+    kept = per_patient["muscle"] & (per_patient["epithelial"] > MIN_EPITHELIAL_CELLS)
+    return per_patient.index[kept]
+
+
 def load():
     """Rules, cells and FOVs of this organ's transplanted patients that have an answer."""
     cells, fovs, _ = dh.load_spatial_data()
     fovs = fovs[(fovs["Organ"] == ORGAN) & fovs["Biopsy_ID"].notna()]
     positive, negative, side = sides(fovs)
     fovs = fovs.assign(side=side, positive=positive, negative=negative).dropna(subset=["side"])
+    if ONLY_PATIENTS_WITH_MUSCLE_AND_EPITHELIUM:
+        kept = with_muscle_and_epithelium(cells, fovs)
+        print(f"Kept {len(kept)} of {fovs['Biopsy'].nunique()} patients with muscle and more "
+              f"than {MIN_EPITHELIAL_CELLS} epithelial cells.")
+        fovs = fovs[fovs["Biopsy"].isin(kept)]
     rules = dh.load_results(rule_max_items=4, kind=None)
     rules = rules[rules["FOV"].isin(fovs["FOV"])]
     rules["Rule"] = rules["Antecedents"] + " -> " + rules["Consequents"] + " " + rules["Kind"]
@@ -170,8 +189,10 @@ def load():
 
 
 def output_path(kind, unit, ext="csv"):
-    """output/<kind>_<target>_<unit>.<ext>, e.g. runs_cortico_response_patient.csv."""
-    target = "_".join(str(part) for part in (TARGET, VALUE) if part is not None)
+    """output/<kind>_<target>_<unit>.<ext>, e.g. runs_cortico_response_patient.csv.
+    With the muscle filter on, the target ends in _muscle."""
+    muscle = "muscle" if ONLY_PATIENTS_WITH_MUSCLE_AND_EPITHELIUM else None
+    target = "_".join(str(part) for part in (TARGET, VALUE, muscle) if part is not None)
     return os.path.join(OUT_DIR, f"{kind}_{target.lower().replace(' ', '_')}_{unit}.{ext}")
 
 

@@ -9,6 +9,7 @@ all the other patients. Each unit gets its own runs_<unit>.csv and bar plot in o
 """
 import os
 import sys
+import time
 import itertools
 
 import matplotlib.pyplot as plt
@@ -16,7 +17,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegressionCV
-from sklearn.metrics import balanced_accuracy_score
+from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 from sklearn.model_selection import LeaveOneGroupOut, StratifiedKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -58,7 +59,7 @@ MODELS = {
     "Ridge logistic regression": logistic(0),
     "Lasso logistic regression": logistic(1),
     "Random forest": lambda: RandomForestClassifier(
-        n_estimators=500, class_weight="balanced", random_state=0, n_jobs=-1),
+        n_estimators=500, class_weight="balanced", random_state=0, n_jobs=1),
 }
 MODEL_COLORS = {"Ridge logistic regression": "#33658A", "Lasso logistic regression": "#86BBD8",
                 "Random forest": "#E0A33B"}
@@ -113,12 +114,15 @@ def all_tables(rules, cells, fovs, unit):
 
 def score(table, is_responder, patient_of, model):
     """Predict each patient's rows from all the other patients, and count how many were
-    right."""
+    right. The left-out patients run side by side, one per CPU core."""
     y = is_responder.loc[table.index].to_numpy()
-    predicted = cross_val_predict(MODELS[model](), table.to_numpy(), y, cv=LeaveOneGroupOut(),
-                                  groups=patient_of.loc[table.index].to_numpy())
+    chance = cross_val_predict(MODELS[model](), table.to_numpy(), y, cv=LeaveOneGroupOut(),
+                               groups=patient_of.loc[table.index].to_numpy(),
+                               method="predict_proba", n_jobs=-1)
+    predicted = chance.argmax(axis=1)
     return {
         "balanced_accuracy": 100 * balanced_accuracy_score(y, predicted),
+        "auc": 100 * roc_auc_score(y, chance[:, 1]),
         "responders_right": 100 * (predicted[y == 1] == 1).mean(),
         "non_responders_right": 100 * (predicted[y == 0] == 0).mean(),
         "n_responders": int(y.sum()),
@@ -153,6 +157,8 @@ def run_unit(rules, cells, fovs, unit):
     is_responder = by_unit[LABEL].first().eq(RESPONDER).astype(int)
     patient_of = by_unit["Biopsy"].first()
     rows, weights = [], {}
+    total = (1 + len(RULE_SETS) * len(FEATURES) * len(MIN_PATIENTS)) * len(MODELS)
+    start = time.time()
     for name, feature, share, table in all_tables(rules, cells, fovs, UNITS[unit]):
         for model in MODELS:
             row = {"organ": ORGAN, "unit": unit, "rule_set": name, "feature": feature,
@@ -160,9 +166,12 @@ def run_unit(rules, cells, fovs, unit):
                    **score(table, is_responder, patient_of, model)}
             if "logistic" in model:
                 weights[len(rows)] = weights_of(table, is_responder, model)
-            print(f"{unit:8} {name:34} {feature:16} {share:>4} {model:26} "
-                  f"{row['n_features']:>6} features  {row['balanced_accuracy']:5.1f}%")
             rows.append(row)
+            minutes, seconds = divmod(int(time.time() - start), 60)
+            print(f"[{len(rows):>3}/{total}  {minutes:>3}:{seconds:02}]  {unit:8} {name:34} "
+                  f"{feature:16} {share:>4} {model:26} {row['n_features']:>6} features  "
+                  f"{row['balanced_accuracy']:5.1f}%  (resp {row['responders_right']:3.0f}%, "
+                  f"non-resp {row['non_responders_right']:3.0f}%)  AUC {row['auc']:3.0f}")
     runs = pd.DataFrame(rows).round(1)
     os.makedirs(OUT_DIR, exist_ok=True)
     runs.to_csv(runs_csv(unit), index=False)
@@ -177,7 +186,7 @@ def save_best_weights(runs, weights, unit):
     chosen = weights[best]
     chosen = chosen[chosen != 0].sort_values(key=abs, ascending=False)
     path = os.path.join(OUT_DIR, f"weights_{unit}.csv")
-    setting = runs.loc[best, ["rule_set", "feature", "min_patients", "model", "balanced_accuracy"]]
+    setting = runs.loc[best, ["rule_set", "feature", "min_patients", "model", "balanced_accuracy", "auc"]]
     chosen.rename_axis("rule").reset_index().assign(**setting).to_csv(path, index=False)
     print(f"saved {path}  ({', '.join(map(str, setting))})")
 

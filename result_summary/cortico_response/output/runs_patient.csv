@@ -1,0 +1,148 @@
+organ,unit,rule_set,feature,min_patients,model,n_features,balanced_accuracy,responders_right,non_responders_right,n_responders,n_non_responders
+Duodenum,patient,Cell composition,,,Ridge logistic regression,31,48.7,64.0,33.3,25,9
+Duodenum,patient,Cell composition,,,Lasso logistic regression,31,72.9,68.0,77.8,25,9
+Duodenum,patient,Cell composition,,,Random forest,31,64.7,96.0,33.3,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.0,Ridge logistic regression,249,72.9,68.0,77.8,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.0,Lasso logistic regression,249,71.8,88.0,55.6,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.0,Random forest,249,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.1,Ridge logistic regression,87,68.9,60.0,77.8,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.1,Lasso logistic regression,87,53.8,52.0,55.6,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.1,Random forest,87,49.6,88.0,11.1,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.2,Ridge logistic regression,53,66.9,56.0,77.8,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.2,Lasso logistic regression,53,74.4,60.0,88.9,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.2,Random forest,53,55.1,88.0,22.2,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.3,Ridge logistic regression,32,70.9,64.0,77.8,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.3,Lasso logistic regression,32,82.4,76.0,88.9,25,9
+Duodenum,patient,"Attraction, pairwise",share of FOVs,0.3,Random forest,32,60.7,88.0,33.3,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.0,Ridge logistic regression,249,63.8,72.0,55.6,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.0,Lasso logistic regression,249,68.2,92.0,44.4,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.0,Random forest,249,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.1,Ridge logistic regression,87,57.3,48.0,66.7,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.1,Lasso logistic regression,87,61.3,56.0,66.7,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.1,Random forest,87,53.1,84.0,22.2,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.2,Ridge logistic regression,53,66.9,56.0,77.8,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.2,Lasso logistic regression,53,61.3,56.0,66.7,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.2,Random forest,53,55.1,88.0,22.2,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.3,Ridge logistic regression,32,76.4,64.0,88.9,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.3,Lasso logistic regression,32,57.3,48.0,66.7,25,9
+Duodenum,patient,"Attraction, pairwise",mean lift,0.3,Random forest,32,53.1,84.0,22.2,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.0,Ridge logistic regression,249,62.2,80.0,44.4,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.0,Lasso logistic regression,249,62.2,80.0,44.4,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.0,Random forest,249,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.1,Ridge logistic regression,87,57.8,60.0,55.6,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.1,Lasso logistic regression,87,54.2,64.0,44.4,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.1,Random forest,87,47.6,84.0,11.1,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.2,Ridge logistic regression,53,59.3,52.0,66.7,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.2,Lasso logistic regression,53,48.2,52.0,44.4,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.2,Random forest,53,47.6,84.0,11.1,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.3,Ridge logistic regression,32,59.8,64.0,55.6,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.3,Lasso logistic regression,32,54.2,64.0,44.4,25,9
+Duodenum,patient,"Attraction, pairwise",mean conviction,0.3,Random forest,32,47.6,84.0,11.1,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.0,Ridge logistic regression,16842,53.8,52.0,55.6,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.0,Lasso logistic regression,16842,57.1,92.0,22.2,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.0,Random forest,16842,50.0,100.0,0.0,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.1,Ridge logistic regression,868,63.3,60.0,66.7,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.1,Lasso logistic regression,868,49.3,32.0,66.7,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.1,Random forest,868,47.6,84.0,11.1,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.2,Ridge logistic regression,247,68.9,60.0,77.8,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.2,Lasso logistic regression,247,50.2,56.0,44.4,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.2,Random forest,247,60.7,88.0,33.3,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.3,Ridge logistic regression,83,76.4,64.0,88.9,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.3,Lasso logistic regression,83,61.8,68.0,55.6,25,9
+Duodenum,patient,"Attraction, all sizes",share of FOVs,0.3,Random forest,83,60.7,88.0,33.3,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.0,Ridge logistic regression,16842,57.3,48.0,66.7,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.0,Lasso logistic regression,16842,69.8,84.0,55.6,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.0,Random forest,16842,50.0,100.0,0.0,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.1,Ridge logistic regression,868,51.8,48.0,55.6,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.1,Lasso logistic regression,868,56.2,68.0,44.4,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.1,Random forest,868,57.1,92.0,22.2,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.2,Ridge logistic regression,247,74.4,60.0,88.9,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.2,Lasso logistic regression,247,46.7,60.0,33.3,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.2,Random forest,247,57.1,92.0,22.2,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.3,Ridge logistic regression,83,72.4,56.0,88.9,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.3,Lasso logistic regression,83,61.3,56.0,66.7,25,9
+Duodenum,patient,"Attraction, all sizes",mean lift,0.3,Random forest,83,57.1,92.0,22.2,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.0,Ridge logistic regression,16842,57.8,60.0,55.6,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.0,Lasso logistic regression,16842,49.1,76.0,22.2,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.0,Random forest,16842,50.0,100.0,0.0,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.1,Ridge logistic regression,868,61.8,68.0,55.6,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.1,Lasso logistic regression,868,48.2,52.0,44.4,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.1,Random forest,868,55.1,88.0,22.2,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.2,Ridge logistic regression,247,67.3,68.0,66.7,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.2,Lasso logistic regression,247,40.7,48.0,33.3,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.2,Random forest,247,52.7,72.0,33.3,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.3,Ridge logistic regression,83,65.3,64.0,66.7,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.3,Lasso logistic regression,83,55.8,56.0,55.6,25,9
+Duodenum,patient,"Attraction, all sizes",mean conviction,0.3,Random forest,83,58.7,84.0,33.3,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.0,Ridge logistic regression,515,59.8,64.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.0,Lasso logistic regression,515,66.2,88.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.0,Random forest,515,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.1,Ridge logistic regression,178,63.3,60.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.1,Lasso logistic regression,178,47.8,40.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.1,Random forest,178,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.2,Ridge logistic regression,106,63.3,60.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.2,Lasso logistic regression,106,61.3,56.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.2,Random forest,106,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.3,Ridge logistic regression,69,63.8,72.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.3,Lasso logistic regression,69,76.9,76.0,77.8,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",share of FOVs,0.3,Random forest,69,49.6,88.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.0,Ridge logistic regression,515,59.8,64.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.0,Lasso logistic regression,515,68.2,92.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.0,Random forest,515,46.0,92.0,0.0,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.1,Ridge logistic regression,178,66.9,56.0,77.8,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.1,Lasso logistic regression,178,42.2,40.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.1,Random forest,178,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.2,Ridge logistic regression,106,61.3,56.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.2,Lasso logistic regression,106,62.2,80.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.2,Random forest,106,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.3,Ridge logistic regression,69,63.3,60.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.3,Lasso logistic regression,69,59.3,52.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean lift,0.3,Random forest,69,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.0,Ridge logistic regression,515,69.8,84.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.0,Lasso logistic regression,515,60.7,88.0,33.3,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.0,Random forest,515,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.1,Ridge logistic regression,178,59.8,64.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.1,Lasso logistic regression,178,52.2,60.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.1,Random forest,178,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.2,Ridge logistic regression,106,55.8,56.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.2,Lasso logistic regression,106,40.7,48.0,33.3,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.2,Random forest,106,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.3,Ridge logistic regression,69,48.7,64.0,33.3,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.3,Lasso logistic regression,69,46.7,60.0,33.3,25,9
+Duodenum,patient,"Attraction + avoidance, pairwise",mean conviction,0.3,Random forest,69,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.0,Ridge logistic regression,24751,62.2,80.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.0,Lasso logistic regression,24751,59.1,96.0,22.2,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.0,Random forest,24751,50.0,100.0,0.0,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.1,Ridge logistic regression,1499,63.3,60.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.1,Lasso logistic regression,1499,34.7,36.0,33.3,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.1,Random forest,1499,49.6,88.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.2,Ridge logistic regression,505,67.3,68.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.2,Lasso logistic regression,505,59.8,64.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.2,Random forest,505,53.1,84.0,22.2,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.3,Ridge logistic regression,197,72.9,68.0,77.8,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.3,Lasso logistic regression,197,80.4,72.0,88.9,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",share of FOVs,0.3,Random forest,197,49.6,88.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.0,Ridge logistic regression,24751,73.3,80.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.0,Lasso logistic regression,24751,59.1,96.0,22.2,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.0,Random forest,24751,50.0,100.0,0.0,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.1,Ridge logistic regression,1499,57.8,60.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.1,Lasso logistic regression,1499,46.2,48.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.1,Random forest,1499,46.0,92.0,0.0,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.2,Ridge logistic regression,505,63.3,60.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.2,Lasso logistic regression,505,69.3,72.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.2,Random forest,505,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.3,Ridge logistic regression,197,64.9,52.0,77.8,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.3,Lasso logistic regression,197,81.3,96.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean lift,0.3,Random forest,197,51.6,92.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.0,Ridge logistic regression,24751,54.2,64.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.0,Lasso logistic regression,24751,49.1,76.0,22.2,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.0,Random forest,24751,50.0,100.0,0.0,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.1,Ridge logistic regression,1499,61.8,68.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.1,Lasso logistic regression,1499,50.2,56.0,44.4,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.1,Random forest,1499,42.0,84.0,0.0,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.2,Ridge logistic regression,505,67.3,68.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.2,Lasso logistic regression,505,57.8,60.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.2,Random forest,505,47.6,84.0,11.1,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.3,Ridge logistic regression,197,61.8,68.0,55.6,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.3,Lasso logistic regression,197,59.3,52.0,66.7,25,9
+Duodenum,patient,"Attraction + avoidance, all sizes",mean conviction,0.3,Random forest,197,49.6,88.0,11.1,25,9

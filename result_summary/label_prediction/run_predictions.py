@@ -1,16 +1,19 @@
 """Run the predictions below: every setting x model, for every unit, all on every CPU core.
 
 Each run predicts every patient from a model trained on all the other patients. Each
-prediction and unit gets its own runs, weights and plot files in output/.
+prediction and unit gets its own runs, weights and plot files in output/, saved as soon
+as its last run finishes.
 
     python run_predictions.py          # run, save and plot
     python run_predictions.py --plot   # plot the saved runs again without rerunning
 """
+import os
 import sys
 import time
+from collections import Counter
 
 import pandas as pd
-from joblib import Parallel, delayed
+from joblib import Parallel, cpu_count, delayed
 
 import prediction_search as ps
 
@@ -31,60 +34,79 @@ PREDICTIONS = [CORTICO, NRM, SURVIVAL, EARLY, LATE, DIAGNOSIS]
 UNITS = ["patient", "FOV"]
 
 
+def log(message, pid=None):
+    """One line: time, the process that did the work, the message."""
+    print(f"{time.strftime('%H:%M:%S')}  pid {pid or os.getpid():>6}  {message}", flush=True)
+
+
 def all_jobs(cells, fovs, rules):
     """(what the run is, what it needs) for every prediction x unit x setting x model."""
     jobs = []
     for prediction in PREDICTIONS:
         patients = ps.patients_of(prediction, cells, fovs)
+        positive, negative = patients["positive"].iloc[0], patients["negative"].iloc[0]
+        sides = patients.groupby("Biopsy")["side"].first()
+        log(f"--- {ps.name_of(prediction)}: {int(sides.sum())} {positive}, "
+            f"{int((sides == 0).sum())} {negative} patients ---")
         for unit in UNITS:
             is_positive, patient_of = ps.labels(patients, unit)
-            for setting, table in ps.all_tables(rules, cells, patients, unit):
+            before = len(jobs)
+            for (rule_set, feature, share), table in ps.all_tables(rules, cells, patients, unit):
                 for model in ps.models_for(table):
                     about = dict(organ=ps.ORGAN, target=prediction["target"],
-                                 positive=patients["positive"].iloc[0],
-                                 negative=patients["negative"].iloc[0], unit=unit,
-                                 rule_set=setting[0], feature=setting[1],
-                                 min_patients=setting[2], model=model,
-                                 n_features=table.shape[1])
+                                 positive=positive, negative=negative, unit=unit,
+                                 rule_set=rule_set, feature=feature, min_patients=share,
+                                 model=model, n_features=table.shape[1])
                     jobs.append(((prediction, about), (table, is_positive, patient_of, model)))
+            log(f"[{ps.name_of(prediction)} | {unit}] built {len(jobs) - before} runs")
     return jobs
 
 
+def group_of(job):
+    """The prediction x unit a job belongs to: one set of saved files."""
+    (prediction, about), _ = job
+    return ps.name_of(prediction), about["unit"]
+
+
 def run_numbered(i, args):
-    """One run, with its place in the job list so it can be put back in order."""
-    return i, ps.run_one(*args)
+    """One run, with its place in the job list and the process that ran it."""
+    return i, os.getpid(), ps.run_one(*args)
+
+
+def save_group(jobs, results, group):
+    """The runs CSV, weights and plot of one prediction x unit, rows in grid order."""
+    rows, weights = [], {}
+    for i, job in enumerate(jobs):
+        if group_of(job) == group:
+            (prediction, about), _ = job
+            scores, job_weights = results[i]
+            if job_weights is not None:
+                weights[len(rows)] = job_weights
+            rows.append({**about, **scores})
+    ps.save(prediction, about["unit"], pd.DataFrame(rows).round(1), weights)
 
 
 def run_all(jobs):
-    """Every job on every core; one line printed as each finishes. Results in job order."""
-    results = [None] * len(jobs)
-    start = time.time()
+    """Every job on every core. A line as each run finishes; a prediction x unit is saved
+    as soon as its last run is in."""
+    left = Counter(group_of(job) for job in jobs)
+    results = {}
     finished = Parallel(n_jobs=-1, return_as="generator_unordered")(
         delayed(run_numbered)(i, args) for i, (_, args) in enumerate(jobs))
-    for done, (i, result) in enumerate(finished, 1):
+    for done, (i, pid, result) in enumerate(finished, 1):
         results[i] = result
+        group = group_of(jobs[i])
         about, scores = jobs[i][0][1], result[0]
-        minutes, seconds = divmod(int(time.time() - start), 60)
-        print(f"[{done:>4}/{len(jobs)}  {minutes:>3}:{seconds:02}]  {about['target']:16} "
-              f"{about['unit']:8} {about['rule_set']:34} {about['feature']:16} "
-              f"{'' if pd.isna(about['min_patients']) else about['min_patients']:>4} {about['model']:26} {about['n_features']:>6} features  "
-              f"{scores['balanced_accuracy']:5.1f}%  ({about['positive']} "
-              f"{scores['positive_right']:3.0f}%, {about['negative']} "
-              f"{scores['negative_right']:3.0f}%)  AUC {scores['auc']:3.0f}")
-    return results
-
-
-def save_all(jobs, results):
-    """One runs CSV, weights file and plot per prediction x unit."""
-    for prediction in PREDICTIONS:
-        for unit in UNITS:
-            rows, weights = [], {}
-            for ((job_prediction, about), _), (scores, job_weights) in zip(jobs, results):
-                if job_prediction is prediction and about["unit"] == unit:
-                    if job_weights is not None:
-                        weights[len(rows)] = job_weights
-                    rows.append({**about, **scores})
-            ps.save(prediction, unit, pd.DataFrame(rows).round(1), weights)
+        share = "" if pd.isna(about["min_patients"]) else about["min_patients"]
+        log(f"[{group[0]} | {group[1]}] [{done:>4}/{len(jobs)}]  {about['rule_set']:34} "
+            f"{about['feature']:16} {share:>4} {about['model']:26} {about['n_features']:>6} "
+            f"features  {scores['balanced_accuracy']:5.1f}%  ({about['positive']} "
+            f"{scores['positive_right']:3.0f}%, {about['negative']} "
+            f"{scores['negative_right']:3.0f}%)  AUC {scores['auc']:3.0f}", pid)
+        left[group] -= 1
+        if left[group] == 0:
+            log(f"[{group[0]} | {group[1]}] all runs done, saving")
+            save_group(jobs, results, group)
 
 
 if __name__ == "__main__":
@@ -93,5 +115,13 @@ if __name__ == "__main__":
             for unit in UNITS:
                 ps.plot_runs(prediction, unit, pd.read_csv(ps.output_path(prediction, "runs", unit)))
     else:
-        jobs = all_jobs(*ps.load_data())
-        save_all(jobs, run_all(jobs))
+        log(f"=== Label prediction: {len(PREDICTIONS)} predictions x {len(UNITS)} units "
+            f"({', '.join(UNITS)}), {cpu_count()} cores ===")
+        log("loading data ...")
+        start = time.time()
+        data = ps.load_data()
+        log(f"data loaded in {time.time() - start:.0f} s")
+        jobs = all_jobs(*data)
+        log(f"=== {len(jobs)} runs, starting ===")
+        run_all(jobs)
+        log(f"=== all done in {(time.time() - start) / 60:.0f} min ===")

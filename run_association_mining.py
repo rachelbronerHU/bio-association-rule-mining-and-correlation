@@ -21,6 +21,7 @@ from constants import (
     RANDOM_SEED,
     RESULTS_ALGO_DIR,
     RESULTS_DATA_DIR,
+    SAVE_PERMUTATION_METRICS,
     SETTINGS,
     WEIGHTING,
     WORKERS,
@@ -270,6 +271,7 @@ def run_pipeline():
         n_conditional_shuffles=N_CONDITIONAL_SHUFFLES,
         workers=WORKERS,
         output_path=RESULTS_ALGO_DIR,
+        save_permutation_metrics=SAVE_PERMUTATION_METRICS,
     )
 
     for table, suffix in (

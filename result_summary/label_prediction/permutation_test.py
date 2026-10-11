@@ -6,6 +6,7 @@ Each search (real or shuffled) is one job, all on every CPU core.
 
     python permutation_test.py
 """
+import os
 import time
 
 import numpy as np
@@ -60,6 +61,7 @@ if __name__ == "__main__":
 
     results = pd.DataFrame(rows).sort_values("seed", na_position="first").round(1)
     path = ps.output_path(PREDICTION, "permutation", UNIT)
+    os.makedirs(ps.OUT_DIR, exist_ok=True)
     results.to_csv(path, index=False)
     log(f"saved {path}")
     for column in ["balanced_accuracy", "auc"]:

@@ -80,6 +80,8 @@ SETTINGS = Settings(
 # The library returns p-values and FDR values; selection happens in the analysis.
 N_SHUFFLES = 5 if DEBUG else int(_os.environ.get("N_SHUFFLES", 10000))
 N_CONDITIONAL_SHUFFLES = N_SHUFFLES  # None disables the extra conditional tests
+# Opt in per run with SAVE_PERMUTATION_METRICS=true (or 1 / yes).
+SAVE_PERMUTATION_METRICS = _os.environ.get("SAVE_PERMUTATION_METRICS", "false").strip().lower() in ("1", "true", "yes")
 RANDOM_SEED = 42                     # each FOV derives its own seed from this
 MIN_LIFT_GAIN = 1.1                  # lift ratio required for complex antecedents
 MIN_CONSEQUENT_CONVICTION_GAIN = 1.1 # conviction ratio required for complex consequents

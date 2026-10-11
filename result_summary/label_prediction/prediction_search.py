@@ -288,6 +288,13 @@ def save_best_weights(prediction, unit, runs, weights):
     print(f"saved {path}  ({', '.join(map(str, setting))})")
 
 
+def p_value(results, column):
+    """The share of searches, the real one included, whose best is at least the real best:
+    the chance that picking the best run gets this high on labels that mean nothing."""
+    real = results.loc[results["real"], column].iloc[0]
+    return (results[column] >= real).mean()
+
+
 def saved_runs(predictions, units):
     """Every saved run of these predictions and units in one table, with the prediction's
     name in a column."""

@@ -375,3 +375,39 @@ def plot_paper(runs, prediction="cause_of_death_nrm_muscle", unit="patient", sav
         )
         vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
         plt.show()
+
+
+# ---------------------------------------------------------------------------
+# Permutation test
+# ---------------------------------------------------------------------------
+
+def plot_permutation(prediction, unit="patient", save=None):
+    """The best score of each search on shuffled labels, against the best on the real ones."""
+    results = pd.read_csv(ps.output_path(prediction, "permutation", unit))
+    shuffled = results[~results["real"]]
+    metrics = {"balanced_accuracy": "Best % right", "auc": "Best AUC (%)"}
+
+    with plt.rc_context(vh.PANEL_FONTS):
+        fig, axes = plt.subplots(1, len(metrics), sharey=True, figsize=(vh.TEXT_WIDTH, 2.6))
+        for ax, (column, label) in zip(axes, metrics.items()):
+            real = results.loc[results["real"], column].iloc[0]
+            ax.hist(shuffled[column], bins=np.arange(0, 101, 2.5), color=RUN_COLOR,
+                    edgecolor="white", label="Shuffled labels")
+            ax.axvline(real, color=RULES_COLOR, lw=1.6, label="Real labels")
+            ax.text(real, ax.get_ylim()[1], f" {real:.0f}\n p = {ps.p_value(results, column):.2f}",
+                    va="top", fontsize=6.8, color=vh.INK)
+            ax.set_xlim(30, 100)
+            ax.set_xlabel(label)
+            vh.tidy_axes(ax, grid="y")
+        axes[0].set_ylabel("Searches")
+        axes[0].legend(loc="upper center", bbox_to_anchor=(1.1, -0.3), ncol=2, frameon=False)
+        vh.figure_titles(
+            fig, f"{QUESTIONS.get(ps.name_of(prediction), ps.name_of(prediction))}: "
+                 "real or luck?", organ=ps.ORGAN,
+            subtitle=(f"Best of every rule run, on the real labels and on {len(shuffled)} "
+                      f"shufflings of them; one row per {unit}"),
+            params="p = share of searches at least as good as the real one",
+        )
+        vh.save_figure(fig, save or ps.output_path(prediction, "permutation", unit, "pdf"),
+                       figure_dir=ps.OUT_DIR)
+        plt.show()

@@ -44,6 +44,7 @@ RULE_SETS = {
 }
 COMPOSITION = "Cell composition"
 SEVERITY = ["Pathological score", "Clinical score"]
+PANETH = "Paneth share of epithelium"
 FEATURES = {"share of FOVs": None, "mean lift": "Lift", "mean conviction": "Conviction"}
 MIN_PATIENTS = [0, 0.1, 0.2, 0.3]
 
@@ -58,14 +59,20 @@ def logistic(l1_ratio):
                              use_legacy_attributes=False))
 
 
+def azulay(n_columns):
+    """Azulay et al.'s model: z-score, the first 2 principal components (1 when the table
+    has a single column), linear SVM."""
+    return make_pipeline(StandardScaler(), PCA(n_components=min(2, n_columns)),
+                         SVC(kernel="linear", class_weight="balanced"))
+
+
 AZULAY = "Azulay: 2 PCA + linear SVM"
 MODELS = {
     "Ridge logistic regression": logistic(0),
     "Lasso logistic regression": logistic(1),
     "Random forest": lambda: RandomForestClassifier(
         n_estimators=500, class_weight="balanced", random_state=0, n_jobs=1),
-    AZULAY: lambda: make_pipeline(
-        StandardScaler(), PCA(n_components=2), SVC(kernel="linear", class_weight="balanced")),
+    AZULAY: azulay,
 }
 
 
@@ -170,14 +177,25 @@ def severity_table(fovs, unit, column):
     return fovs.groupby(unit)[column].first().eq("Severe").astype(int).to_frame(column)
 
 
+def paneth_table(cells, fovs, unit):
+    """Unit x one column: Paneth cells as a share of epithelial cells, Azulay et al.'s
+    simple NRM predictor (0 for a unit with no epithelial cells)."""
+    cells = cells[cells["fov"].isin(fovs["FOV"]) & cells["population"].eq("Epithel")]
+    by_unit = cells.groupby(cells["fov"].map(fovs.set_index("FOV", drop=False)[unit]))
+    share = by_unit["cell type"].apply(lambda types: types.eq("Paneth").mean())
+    return share.reindex(fovs[unit].unique(), fill_value=0).to_frame(PANETH)
+
+
 def all_tables(rules, cells, fovs, unit):
     """((rule set, feature, min patients), table) for every setting in the grid. The first
-    are references with no rules: cell composition and each severity score alone."""
+    are references with no rules: cell composition, each severity score alone, and the
+    Paneth share."""
     unit = UNIT_COLUMNS[unit]
     rules = rules[rules["FOV"].isin(fovs["FOV"])]
     yield (COMPOSITION, "", np.nan), composition_table(cells, fovs, unit)
     for column in SEVERITY:
         yield (f"{column} only", "", np.nan), severity_table(fovs, unit, column)
+    yield (PANETH, "", np.nan), paneth_table(cells, fovs, unit)
     for (name, (kinds, pairwise)), feature, share in itertools.product(
             RULE_SETS.items(), FEATURES, MIN_PATIENTS):
         chosen = rules["Kind"].isin(kinds)
@@ -190,9 +208,9 @@ def all_tables(rules, cells, fovs, unit):
 # One run
 # ---------------------------------------------------------------------------
 
-def models_for(table):
-    """Every model, but Azulay's only when the table has at least 2 columns to reduce to 2."""
-    return [model for model in MODELS if model != AZULAY or table.shape[1] >= 2]
+def new_model(model, table):
+    """A fresh, unfitted model, sized for this table."""
+    return azulay(table.shape[1]) if model == AZULAY else MODELS[model]()
 
 
 def score(table, is_positive, patient_of, model):
@@ -202,7 +220,7 @@ def score(table, is_positive, patient_of, model):
     Each row gets a lean: above 0 means "+". It is the chance of "+" minus 0.5, or for
     the SVM its signed distance from the line."""
     y = is_positive.loc[table.index].to_numpy()
-    estimator = MODELS[model]()
+    estimator = new_model(model, table)
     method = "predict_proba" if hasattr(estimator, "predict_proba") else "decision_function"
     found = cross_val_predict(estimator, table.to_numpy(), y, cv=LeaveOneGroupOut(),
                               groups=patient_of.loc[table.index].to_numpy(), method=method)
@@ -220,7 +238,7 @@ def score(table, is_positive, patient_of, model):
 
 def weights_of(table, is_positive, model):
     """The model's weight for each rule, fitted once on all rows."""
-    fitted = MODELS[model]().fit(table.to_numpy(), is_positive.loc[table.index].to_numpy())
+    fitted = new_model(model, table).fit(table.to_numpy(), is_positive.loc[table.index].to_numpy())
     return pd.Series(fitted[-1].coef_[0], index=table.columns, name="weight")
 
 

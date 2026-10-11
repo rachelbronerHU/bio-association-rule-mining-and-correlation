@@ -18,10 +18,11 @@ MODEL_COLORS = {"Ridge logistic regression": "#33658A", "Lasso logistic regressi
 
 RULES_COLOR = "#2B5C9E"
 RUN_COLOR = "#A9B6C6"
-REFERENCES = {                     # reference row in the runs: (name in the legend, color)
-    ps.COMPOSITION: ("Cell composition", "#3E9C7A"),
-    "Pathological score only": ("Pathological score", "#E3A04F"),
-    "Clinical score only": ("Clinical score", "#A8571F"),
+REFERENCES = {                     # reference row in the runs: (name in the legend, color, marker)
+    ps.COMPOSITION: ("Cell composition", "#3E9C7A", "o"),
+    "Pathological score only": ("Pathological score", "#E3A04F", "o"),
+    "Clinical score only": ("Clinical score", "#A8571F", "o"),
+    ps.PANETH: ("Paneth share (Azulay et al.)", "#E07A9B", "D"),
 }
 QUESTIONS = {                      # prediction name: how the figure says it
     "cortico_response": "Steroid response",
@@ -31,6 +32,12 @@ QUESTIONS = {                      # prediction name: how the figure says it
     "days_after_transplant_grouped_over100": "Late biopsy (>100 days)",
     "diagnosis": "Diagnosis, AML vs MDS (control)",
 }
+def reference_handles(size):
+    """Legend entries for the references, each in its color and marker."""
+    return [Line2D([], [], marker=marker, ls="", ms=size, color=color, mec="white", label=label)
+            for label, color, marker in REFERENCES.values()]
+
+
 SHORT = {                          # prediction name: a column header
     "cortico_response": "Steroid",
     "cause_of_death_nrm_muscle": "NRM",
@@ -133,9 +140,10 @@ def plot_best(runs, units=("patient", "FOV"), save=None):
                            color=RUN_COLOR, alpha=0.55, lw=0, zorder=1)
             ax.scatter(rows["rules_median"], y, s=28, facecolor="white", edgecolor=RULES_COLOR,
                        lw=1.2, zorder=2)
-            for column, (_, color) in REFERENCES.items():
-                ax.scatter(rows[column], y, s=34, color=color, edgecolor="white", lw=0.8,
-                           zorder=3)
+            for column, (_, color, marker) in REFERENCES.items():
+                if column in rows:
+                    ax.scatter(rows[column], y, s=34, color=color, marker=marker,
+                               edgecolor="white", lw=0.8, zorder=3)
             ax.scatter(rows["best_rules"], y, s=62, color=RULES_COLOR, edgecolor="white",
                        lw=0.8, zorder=4)
             for yy, value in zip(y, rows["best_rules"]):
@@ -158,8 +166,7 @@ def plot_best(runs, units=("patient", "FOV"), save=None):
                          label="Typical rule run (median)"),
                   Line2D([], [], marker="o", ls="", ms=2.5, color=RUN_COLOR,
                          label="Each rule run"),
-                  *[Line2D([], [], marker="o", ls="", ms=5.5, color=color, mec="white",
-                           label=label) for label, color in REFERENCES.values()]]
+                  *reference_handles(5.5)]
         fig.subplots_adjust(bottom=1.0 / height, wspace=0.12)
         fig.legend(handles=legend, loc="lower center", ncol=3, frameon=False)
         vh.figure_titles(
@@ -233,10 +240,10 @@ def plot_sides(runs, unit="patient", save=None):
             ax.plot([0, 100], [100, 0], color=vh.ZERO, lw=0.8, ls="--", zorder=0)
             ax.scatter(rules["positive_right"], rules["negative_right"], s=6, color=RUN_COLOR,
                        alpha=0.6, lw=0, zorder=1)
-            for column, (_, color) in REFERENCES.items():
+            for column, (_, color, marker) in REFERENCES.items():
                 reference = group[group["rule_set"] == column]
                 ax.scatter(reference["positive_right"], reference["negative_right"], s=24,
-                           color=color, edgecolor="white", lw=0.7, zorder=2)
+                           color=color, marker=marker, edgecolor="white", lw=0.7, zorder=2)
             ax.scatter(best["positive_right"], best["negative_right"], s=48, color=RULES_COLOR,
                        edgecolor="white", lw=0.8, zorder=3)
             ax.set(xlim=(-3, 103), ylim=(-3, 103), xticks=[0, 50, 100], yticks=[0, 50, 100])
@@ -251,10 +258,9 @@ def plot_sides(runs, unit="patient", save=None):
         legend = [Line2D([], [], marker="o", ls="", ms=6.5, color=RULES_COLOR, mec="white",
                          label="Best rule run"),
                   Line2D([], [], marker="o", ls="", ms=2.5, color=RUN_COLOR, label="Each rule run"),
-                  *[Line2D([], [], marker="o", ls="", ms=5, color=color, mec="white",
-                           label=label) for label, color in REFERENCES.values()]]
-        fig.subplots_adjust(hspace=0.45, wspace=0.5, bottom=0.13)
-        fig.legend(handles=legend, loc="lower center", ncol=5, frameon=False)
+                  *reference_handles(5)]
+        fig.subplots_adjust(hspace=0.45, wspace=0.5, bottom=0.15)
+        fig.legend(handles=legend, loc="lower center", ncol=3, frameon=False)
         vh.figure_titles(
             fig, f"Are both groups predicted right? One row per {unit}", organ=ps.ORGAN,
             subtitle="Top right = both right; dashed line = guessing; "
@@ -308,6 +314,64 @@ def plot_weights(prediction, unit="patient", top=100, save=None):
             subtitle=(f"{first['rule_set']} · {first['feature']} · in ≥{first['min_patients']:.0%} "
                       f"of patients · {first['model']} · {first['balanced_accuracy']:.0f}% right"),
             params=f"Top {len(shown)} of {len(weights)} rules by size of weight; one row per {unit}",
+        )
+        vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
+        plt.show()
+
+
+# ---------------------------------------------------------------------------
+# Against Azulay et al.
+# ---------------------------------------------------------------------------
+
+PAPER_AUC = {"Paper: 10 imaging features": 91, "Paper: Paneth share": 76}
+
+
+def against_paper(runs, prediction="cause_of_death_nrm_muscle", unit="patient"):
+    """Our AUCs for the paper's question, next to theirs: each reference and the best rule
+    run, with their model and with any model."""
+    runs = runs[(runs["prediction"] == prediction) & (runs["unit"] == unit)]
+    theirs = runs["model"] == ps.AZULAY
+    rules = runs["min_patients"].notna()
+    rows = [(f"{label}, their model", runs[theirs & (runs["rule_set"] == column)]["auc"].max(),
+             color, marker)
+            for column, (label, color, marker) in REFERENCES.items()]
+    rows += [("Best rule run, their model", runs[theirs & rules]["auc"].max(), RULES_COLOR, "o"),
+             ("Best rule run, any model", runs[rules]["auc"].max(), RULES_COLOR, "o")]
+    return pd.DataFrame(rows, columns=["what", "auc", "color", "marker"])
+
+
+def plot_paper(runs, prediction="cause_of_death_nrm_muscle", unit="patient", save=None):
+    """Our AUCs for NRM against the paper's two: their 10-feature model and their Paneth
+    share alone, both with their model and their patient filter."""
+    ours = against_paper(runs, prediction, unit).dropna(subset=["auc"])
+    first = runs[(runs["prediction"] == prediction) & (runs["unit"] == unit)].iloc[0]
+    height = 1.9 + 0.3 * len(ours)
+
+    with plt.rc_context(vh.PANEL_FONTS):
+        fig, ax = plt.subplots(figsize=(vh.TEXT_WIDTH, height))
+        y = np.arange(len(ours))
+        ax.hlines(y, 40, ours["auc"], color=vh.GRID, lw=0.8, zorder=0)
+        for yy, (_, row) in zip(y, ours.iterrows()):
+            ax.scatter(row["auc"], yy, s=48, color=row["color"], marker=row["marker"],
+                       edgecolor="white", lw=0.8, zorder=2)
+            ax.text(row["auc"] + 1.2, yy, f"{row['auc']:.0f}", va="center", fontsize=6.8,
+                    color=vh.INK)
+        for (label, value), shift in zip(PAPER_AUC.items(), (-0.9, -0.55)):
+            ax.axvline(value, color=vh.INK, lw=0.9, ls=":", zorder=1)
+            ax.text(value, shift, f"{label}: {value}", ha="center", va="bottom", fontsize=6.6,
+                    color=vh.INK)
+        ax.axvline(50, color=vh.ZERO, lw=0.9, ls="--", zorder=0.6)
+        ax.set_yticks(y, ours["what"])
+        ax.set_ylim(len(ours) - 0.5, -1.2)
+        ax.set_xlim(40, 100)
+        ax.set_xlabel("AUC (%), 50 = guessing")
+        vh.tidy_axes(ax, grid="x", hide=("top", "right", "left"))
+        ax.tick_params(axis="y", length=0)
+        vh.figure_titles(
+            fig, "Death not from relapse (NRM): ours against Azulay et al.", organ=ps.ORGAN,
+            subtitle=(f"{first['n_positive']} NRM, {first['n_negative']} other patients "
+                      "(their filter: muscle and more than 50 epithelial cells)"),
+            params="Each patient left out in turn; best of many runs looks better than it is",
         )
         vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
         plt.show()

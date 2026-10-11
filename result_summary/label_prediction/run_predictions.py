@@ -53,7 +53,7 @@ def all_jobs(cells, fovs, rules):
             is_positive, patient_of = ps.labels(patients, unit)
             before = len(jobs)
             for (rule_set, feature, share), table in ps.all_tables(rules, cells, patients, unit):
-                for model in ps.models_for(table):
+                for model in ps.MODELS:
                     about = dict(organ=ps.ORGAN, target=prediction["target"],
                                  positive=positive, negative=negative, unit=unit,
                                  rule_set=rule_set, feature=feature, min_patients=share,

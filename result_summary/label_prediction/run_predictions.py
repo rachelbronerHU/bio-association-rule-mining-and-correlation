@@ -16,6 +16,7 @@ import pandas as pd
 from joblib import Parallel, cpu_count, delayed
 
 import prediction_search as ps
+import prediction_vis as pv
 
 CORTICO = dict(target="Cortico Response", value=None, positive="Responder",
                only_patients_with_muscle_and_epithelium=False)
@@ -83,7 +84,9 @@ def save_group(jobs, results, group):
             if job_weights is not None:
                 weights[len(rows)] = job_weights
             rows.append({**about, **scores})
-    ps.save(prediction, about["unit"], pd.DataFrame(rows).round(1), weights)
+    runs = pd.DataFrame(rows).round(1)
+    ps.save(prediction, about["unit"], runs, weights)
+    pv.plot_runs(prediction, about["unit"], runs)
 
 
 def run_all(jobs):
@@ -113,7 +116,7 @@ if __name__ == "__main__":
     if "--plot" in sys.argv:
         for prediction in PREDICTIONS:
             for unit in UNITS:
-                ps.plot_runs(prediction, unit, pd.read_csv(ps.output_path(prediction, "runs", unit)))
+                pv.plot_runs(prediction, unit, pd.read_csv(ps.output_path(prediction, "runs", unit)))
     else:
         log(f"=== Label prediction: {len(PREDICTIONS)} predictions x {len(UNITS)} units "
             f"({', '.join(UNITS)}), {cpu_count()} cores ===")

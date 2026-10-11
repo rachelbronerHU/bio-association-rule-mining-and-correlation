@@ -1,7 +1,8 @@
 """Can the rules predict a biopsy label, such as steroid response?
 
 The pieces run_predictions.py puts together: the tables (one row per patient or per FOV),
-the models, one leave-one-out run, and the saved runs, weights and plot.
+the models, one leave-one-out run, and the saved runs and weights. Plots are in
+prediction_vis.py.
 
 A prediction is a dict:
     target   : the biopsy column to predict
@@ -14,7 +15,6 @@ import re
 import sys
 import itertools
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -29,7 +29,6 @@ from sklearn.svm import SVC
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import data_helper as dh
-import vis_helper as vh
 
 ORGAN = "Duodenum"
 OUT_DIR = os.path.join(HERE, "output")
@@ -68,8 +67,6 @@ MODELS = {
     AZULAY: lambda: make_pipeline(
         StandardScaler(), PCA(n_components=2), SVC(kernel="linear", class_weight="balanced")),
 }
-MODEL_COLORS = {"Ridge logistic regression": "#33658A", "Lasso logistic regression": "#86BBD8",
-                "Random forest": "#E0A33B", AZULAY: "#8E5BB5"}
 
 
 # ---------------------------------------------------------------------------
@@ -253,12 +250,11 @@ def output_path(prediction, kind, unit, ext="csv"):
 
 
 def save(prediction, unit, runs, weights):
-    """The runs CSV, the best logistic run's weights, and the plot."""
+    """The runs CSV and the best logistic run's weights."""
     os.makedirs(OUT_DIR, exist_ok=True)
     runs.to_csv(output_path(prediction, "runs", unit), index=False)
     print(f"saved {output_path(prediction, 'runs', unit)}")
     save_best_weights(prediction, unit, runs, weights)
-    plot_runs(prediction, unit, runs)
 
 
 def save_best_weights(prediction, unit, runs, weights):
@@ -272,49 +268,9 @@ def save_best_weights(prediction, unit, runs, weights):
     print(f"saved {path}  ({', '.join(map(str, setting))})")
 
 
-# ---------------------------------------------------------------------------
-# Plot
-# ---------------------------------------------------------------------------
-
-def setting_label(row):
-    if pd.isna(row["min_patients"]):
-        return row["rule_set"]
-    return f"{row['rule_set']}  ·  {row['feature']}  ·  in ≥{row['min_patients']:.0%} of patients"
-
-
-def plot_runs(prediction, unit, runs):
-    """One row per setting, one bar per model: % predicted right, 50% = guessing."""
-    runs = runs.assign(setting=[setting_label(r) for _, r in runs.iterrows()])
-    settings = list(dict.fromkeys(runs["setting"]))
-    first = runs.iloc[0]
-    height = 1.8 + 0.42 * len(settings)
-
-    with plt.rc_context(vh.PANEL_FONTS):
-        fig, ax = plt.subplots(figsize=(vh.TEXT_WIDTH, height))
-        bar = 0.8 / len(MODELS)
-        for i, model in enumerate(MODELS):
-            values = runs[runs["model"] == model].set_index("setting")["balanced_accuracy"]
-            y = np.arange(len(settings)) + (i - (len(MODELS) - 1) / 2) * bar
-            ax.barh(y, values.reindex(settings), height=bar * 0.92,
-                    color=MODEL_COLORS[model], label=model)
-            for yy, v in zip(y, values.reindex(settings)):
-                if pd.notna(v):
-                    ax.text(v + 0.8, yy, f"{v:.0f}", va="center", fontsize=6.5, color=vh.INK)
-
-        ax.axvline(50, color=vh.ZERO, lw=0.9, ls="--")
-        ax.text(50, -0.75, "guessing", ha="center", va="bottom", fontsize=6.5, color=vh.ZERO)
-        ax.set_yticks(range(len(settings)), settings)
-        ax.invert_yaxis()
-        ax.set_xlim(0, 100)
-        ax.set_xlabel(f"{unit[0].upper() + unit[1:]}s predicted right "
-                      f"(%, average of {first['positive']} and {first['negative']})")
-        vh.tidy_axes(ax, grid="x")
-        fig.subplots_adjust(bottom=0.95 / height)
-        fig.legend(*ax.get_legend_handles_labels(), loc="lower center", ncol=2, frameon=False)
-        vh.figure_titles(
-            fig, f"Predicting {first['target']}, one row per {unit}", organ=ORGAN,
-            subtitle=(f"{first['n_positive']} {first['positive']} {unit}s, {first['n_negative']} "
-                      f"{first['negative']} {unit}s; each patient left out in turn"),
-        )
-        vh.save_figure(fig, output_path(prediction, "plot", unit, "pdf"), figure_dir=OUT_DIR)
-        plt.close(fig)
+def saved_runs(predictions, units):
+    """Every saved run of these predictions and units in one table, with the prediction's
+    name in a column."""
+    return pd.concat([pd.read_csv(output_path(prediction, "runs", unit))
+                      .assign(prediction=name_of(prediction))
+                      for prediction in predictions for unit in units], ignore_index=True)

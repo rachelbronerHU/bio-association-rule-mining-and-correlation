@@ -258,8 +258,10 @@ def save(prediction, unit, runs, weights):
 
 
 def save_best_weights(prediction, unit, runs, weights):
-    """The weights of the best-scoring logistic run, biggest pull first, zeros left out."""
-    best = runs.loc[list(weights)]["balanced_accuracy"].idxmax()
+    """The weights of the best-scoring logistic run on rules (not a reference), biggest
+    pull first, zeros left out."""
+    logistic = runs.loc[list(weights)]
+    best = logistic[logistic["min_patients"].notna()]["balanced_accuracy"].idxmax()
     chosen = weights[best]
     chosen = chosen[chosen != 0].sort_values(key=abs, ascending=False)
     path = output_path(prediction, "weights", unit)

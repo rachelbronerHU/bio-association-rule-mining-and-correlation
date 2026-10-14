@@ -79,7 +79,7 @@ SETTINGS = Settings(
 # --- Significance ---
 # The library returns p-values and FDR values; selection happens in the analysis.
 N_SHUFFLES = 5 if DEBUG else int(_os.environ.get("N_SHUFFLES", 10000))
-N_CONDITIONAL_SHUFFLES = N_SHUFFLES  # None disables the extra conditional tests
+N_CONDITIONAL_SHUFFLES = 100000  # None disables the extra conditional tests
 # Opt in per run with SAVE_PERMUTATION_METRICS=true (or 1 / yes).
 SAVE_PERMUTATION_METRICS = _os.environ.get("SAVE_PERMUTATION_METRICS", "false").strip().lower() in ("1", "true", "yes")
 RANDOM_SEED = 42                     # each FOV derives its own seed from this

@@ -110,6 +110,8 @@ def best_per_prediction(runs):
         references = group[group["min_patients"].isna()].groupby("rule_set")["balanced_accuracy"].max()
         rows.append({"prediction": prediction, "unit": unit,
                      "best_rules": best["balanced_accuracy"],
+                     "best_positive_right": best["positive_right"],
+                     "best_negative_right": best["negative_right"],
                      "rules_median": rules["balanced_accuracy"].median(),
                      **references.to_dict(),
                      "best_reference": references.max(),
@@ -146,9 +148,11 @@ def plot_best(runs, units=("patient", "FOV"), save=None):
                                edgecolor="white", lw=0.8, zorder=3)
             ax.scatter(rows["best_rules"], y, s=62, color=RULES_COLOR, edgecolor="white",
                        lw=0.8, zorder=4)
-            for yy, value in zip(y, rows["best_rules"]):
-                ax.text(value, yy - 0.3, f"{value:.0f}", ha="center", va="bottom",
-                        fontsize=6.5, color=vh.INK)
+            for yy, (_, row) in zip(y, rows.iterrows()):
+                ax.text(row["best_rules"], yy - 0.3,
+                        f"{row['best_rules']:.0f} ({row['best_positive_right']:.0f}/"
+                        f"{row['best_negative_right']:.0f})",
+                        ha="center", va="bottom", fontsize=6.5, color=vh.INK)
 
             ax.axvline(50, color=vh.ZERO, lw=0.9, ls="--", zorder=0.6)
             ax.set_xlim(0, 100)
@@ -172,7 +176,7 @@ def plot_best(runs, units=("patient", "FOV"), save=None):
         vh.figure_titles(
             fig, "How well the rules predict each question", organ=ps.ORGAN,
             subtitle="Every rule run against cell composition and the severity scores",
-            params="% right = average of both groups; 50% = guessing; "
+            params="% right = average of both groups (in brackets); 50% = guessing; "
                    "each patient left out in turn",
         )
         vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
@@ -251,6 +255,14 @@ def plot_sides(runs, unit="patient", save=None):
             ax.set_title(QUESTIONS.get(prediction, prediction), color=vh.INK, fontsize=7.6)
             ax.set_xlabel(f"{best['positive']} right (%)", fontsize=7)
             ax.set_ylabel(f"{best['negative']} right (%)", fontsize=7)
+            right = {side: f"{round(best[f'{side}_right'] * best[f'n_{side}'] / 100)}/"
+                           f"{best[f'n_{side}']}" for side in ("positive", "negative")}
+            ax.annotate(right["positive"], xy=(1, 0.5), xycoords=ax.xaxis.label,
+                        xytext=(3, 0), textcoords="offset points", ha="left", va="center",
+                        fontsize=6.5, color=vh.ZERO)
+            ax.annotate(right["negative"], xy=(0.5, 1), xycoords=ax.yaxis.label,
+                        xytext=(0, 3), textcoords="offset points", ha="center", va="bottom",
+                        rotation=90, fontsize=6.5, color=vh.ZERO)
             vh.tidy_axes(ax, grid="both")
         for ax in list(axes.flat)[len(questions):]:
             ax.set_visible(False)
@@ -265,6 +277,77 @@ def plot_sides(runs, unit="patient", save=None):
             fig, f"Are both groups predicted right? One row per {unit}", organ=ps.ORGAN,
             subtitle="Top right = both right; dashed line = guessing; "
                      "on an edge = one group for everyone",
+        )
+        vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
+        plt.show()
+
+
+def smaller_group(runs):
+    """Each run's smaller group, its size and % right, keeping only the runs that get the
+    larger group more than half right."""
+    positive_smaller = runs["n_positive"] < runs["n_negative"]
+    larger_right = runs["negative_right"].where(positive_smaller, runs["positive_right"])
+    return runs.assign(
+        smaller=runs["positive"].where(positive_smaller, runs["negative"]),
+        smaller_n=runs[["n_positive", "n_negative"]].min(axis=1),
+        smaller_right=runs["positive_right"].where(positive_smaller, runs["negative_right"]),
+        larger_right=larger_right,
+    )[larger_right > 50]
+
+
+def plot_smaller_group(runs, units=("patient", "FOV"), save=None):
+    """One panel per unit, one row per question: the best % right of the smaller group,
+    over the runs that get the larger group more than half right."""
+    runs = smaller_group(runs)
+    questions = list(dict.fromkeys(runs["prediction"]))
+    height = 1.9 + 0.45 * len(questions)
+    spread = np.random.default_rng(0)
+
+    with plt.rc_context(vh.PANEL_FONTS):
+        fig, axes = plt.subplots(1, len(units), sharey=True, figsize=(vh.TEXT_WIDTH, height))
+        for ax, unit in zip(axes, units):
+            for y, prediction in enumerate(questions):
+                group = runs[(runs["prediction"] == prediction) & (runs["unit"] == unit)]
+                rules = group[group["min_patients"].notna()]
+                ax.scatter(rules["smaller_right"], y + spread.uniform(-0.22, 0.22, len(rules)),
+                           s=5, color=RUN_COLOR, alpha=0.55, lw=0, zorder=1)
+                for column, (_, color, marker) in REFERENCES.items():
+                    reference = group[group["rule_set"] == column]["smaller_right"]
+                    ax.scatter(reference.max(), y, s=34, color=color, marker=marker,
+                               edgecolor="white", lw=0.8, zorder=2)
+                best = rules.sort_values(["smaller_right", "balanced_accuracy"]).iloc[-1]
+                ax.scatter(best["smaller_right"], y, s=62, color=RULES_COLOR, edgecolor="white",
+                           lw=0.8, zorder=3)
+                ax.text(best["smaller_right"], y - 0.3,
+                        f"{best['balanced_accuracy']:.0f} ({best['smaller_right']:.0f}/"
+                        f"{best['larger_right']:.0f})",
+                        ha="center", va="bottom", fontsize=6.5, color=vh.INK)
+                ax.text(106, y, f"n={group['smaller_n'].iloc[0]}", va="center", fontsize=6.5,
+                        color=vh.ZERO)
+            ax.axvline(50, color=vh.ZERO, lw=0.9, ls="--", zorder=0.6)
+            ax.set_xlim(-3, 103)
+            ax.set_xticks(range(0, 101, 25))
+            ax.set_ylim(len(questions) - 0.5, -0.8)
+            ax.set_title(f"One row per {unit}", color=vh.INK)
+            ax.set_xlabel("Smaller group right (%)")
+            vh.tidy_axes(ax, grid="x", hide=("top", "right", "left"))
+            ax.tick_params(axis="y", length=0)
+        names = runs.drop_duplicates("prediction").set_index("prediction")["smaller"]
+        axes[0].set_yticks(range(len(questions)),
+                           [f"{QUESTIONS.get(q, q)}\n{names[q]}" for q in questions])
+
+        legend = [Line2D([], [], marker="o", ls="", ms=7, color=RULES_COLOR, mec="white",
+                         label="Best rule run"),
+                  Line2D([], [], marker="o", ls="", ms=2.5, color=RUN_COLOR,
+                         label="Each rule run"),
+                  *reference_handles(5.5)]
+        fig.subplots_adjust(bottom=1.0 / height, wspace=0.2)
+        fig.legend(handles=legend, loc="lower center", ncol=3, frameon=False)
+        vh.figure_titles(
+            fig, "How well the smaller group is predicted", organ=ps.ORGAN,
+            subtitle="Best % right of the smaller group, over runs that get the larger group "
+                     "more than half right",
+            params="% right = average of both groups (in brackets: smaller / larger group)",
         )
         vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
         plt.show()

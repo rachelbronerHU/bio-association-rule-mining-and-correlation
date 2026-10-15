@@ -898,6 +898,12 @@ def _add_scale_bar_50um(ax, x_max, y_max):
             ha="center", va="bottom", fontsize=10)
 
 
+def _cell_handles(cell_types, colors):
+    return [plt.Line2D([0], [0], marker="o", color="w", markeredgecolor="none",
+                       markerfacecolor=colors.get(ct, "black"),
+                       markersize=8, label=ct) for ct in cell_types]
+
+
 def plot_fov(fov_id, description, df_cells, df_fovs,
              target_ant_cells=None, target_cons_cells=None, ax=None, save=None,
              show_legend=True, cell_size=None, colors=None):
@@ -948,9 +954,7 @@ def plot_fov(fov_id, description, df_cells, df_fovs,
                        alpha=0.9, linewidths=0)
         legend_types = sorted(df_fov["cell type"].dropna().astype(str).unique())
 
-    handles = [plt.Line2D([0], [0], marker="o", color="w", markeredgecolor="none",
-                          markerfacecolor=colors.get(ct, "black"),
-                          markersize=8, label=ct) for ct in legend_types]
+    handles = _cell_handles(legend_types, colors)
 
     x_max, y_max = df_fov["x_um"].max(), df_fov["y_um"].max()
     ax.set_axisbelow(True)
@@ -1086,8 +1090,11 @@ def plot_group_profiles(values, metadata, rules, groups, group_col, unit_col,
 
 
 def plot_fov_panel(target_fovs, df_cells, df_fovs, num_cols=1, save=None,
-                   title_groups=None):
+                   title_groups=None, tags=None, one_legend=False):
     """One map per FOV, side by side, lettered A, B, C … for the write-up.
+
+    `tags` : {FOV: label} written in place of the letters.
+    `one_legend` : one cell type legend on the right, in place of one per map.
 
     `target_fovs` is the {FOV: description} dict from
     `get_representative_fovs_for_pc`, so the panel reads left-to-right along
@@ -1118,14 +1125,19 @@ def plot_fov_panel(target_fovs, df_cells, df_fovs, num_cols=1, save=None,
     letter = 0
     for row_axes, row_fovs in zip(axes, rows):
         for ax, fov in zip(row_axes, row_fovs):
-            plot_fov(fov, target_fovs[fov], df_cells, df_fovs, ax=ax)
+            plot_fov(fov, target_fovs[fov], df_cells, df_fovs, ax=ax, show_legend=not one_legend)
             color = group_colors.get((title_groups or {}).get(fov), "black")
             ax.title.set_color(color)
-            ax.text(-0.07, 1.06, chr(65 + letter), transform=ax.transAxes, color=color,
+            tag = tags[fov] if tags else chr(65 + letter)
+            ax.text(-0.07, 1.06, tag, transform=ax.transAxes, color=color,
                     fontsize=20, fontweight="bold", va="bottom", ha="right")
             letter += 1
         for ax in row_axes[len(row_fovs):]:
             ax.set_visible(False)
 
     plt.tight_layout()
+    if one_legend:
+        cell_types = df_cells.loc[df_cells["fov"].isin(fovs), "cell type"].dropna().astype(str).unique()
+        fig.legend(handles=_cell_handles(sorted(cell_types), _CELL_COLORS), title="Cell type",
+                   loc="center left", bbox_to_anchor=(1, 0.5), fontsize=9, title_fontsize=10)
     _finish(fig, save)

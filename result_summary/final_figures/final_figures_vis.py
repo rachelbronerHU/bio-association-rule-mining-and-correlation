@@ -45,6 +45,28 @@ def _class_key(fig, axes_top):
     return key_top - 42 / points
 
 
+def plot_rules_per_fov(counts, marked, colors, labels, save=None):
+    """Stacked bar of rules per FOV, one colour per column of `counts`.
+
+    counts : FOV x group, in the order drawn.
+    marked : {FOV: letter}, each drawn as a dot under its bar.
+    """
+    with plt.rc_context(PANEL_FONTS):
+        fig, ax = plt.subplots(figsize=(TEXT_WIDTH, 2.2))
+        counts.plot.bar(stacked=True, width=1, color=colors, ax=ax)
+        ax.legend(labels, frameon=False)
+        spots = [counts.index.get_loc(fov) for fov in marked]
+        ax.plot(spots, np.zeros(len(spots)), "o", color=INK, markersize=4,
+                transform=ax.get_xaxis_transform(), clip_on=False, zorder=3)
+        ax.set_xticks(spots, list(marked.values()), rotation=0)
+        ax.tick_params(axis="x", length=0, pad=6)
+        ax.set(xlabel=f"FOVs, from most rules that passed FDR to fewest ({len(counts)})",
+               ylabel="number of rules")
+        fig.tight_layout()
+    save_figure(fig, save, figure_dir=_FIGURE_DIR)
+    plt.show()
+
+
 def plot_rule_change_heatmap(found, tested, title, organ=None, subtitle=None, params=None,
                              note=None, skipped=None, fdr=None, classes=None, line_color=None,
                              save=None):

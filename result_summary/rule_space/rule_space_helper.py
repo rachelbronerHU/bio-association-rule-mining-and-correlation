@@ -426,30 +426,37 @@ def loadings(scope, save=False):
                               save=figure_name(f"{scope.prefix}_loadings_pc{i + 1}", save, min_fov=scope.min_fov))
 
 
-def spread_along(scope, component='PC1', num=5):
-    """`num` FOVs spread along one component, lowest to highest.
+def spread_along(scope, component='PC1', num=5, weight=2):
+    """`num` FOVs spread along one component, lowest to highest, on one line.
 
     Spread over the component's range, not its quantiles: the scores are skewed, so
-    quantiles would put most of them inside the crowded middle. Where a position has no
-    FOV near it the nearest unused one is taken, and each title prints that FOV's real
-    score, so a gap shows rather than hides.
+    quantiles would put most of them inside the crowded middle. The line runs through
+    the median of the other component; `weight` is how hard the picks are held to it
+    (higher means a straighter line but bigger gaps along the component). Where a
+    position has no FOV near it the nearest unused one is taken, and each title prints
+    that FOV's real scores, so a gap shows rather than hides.
     """
     coords = scope.coords
     if coords.empty:
         return {}
     names = ['low', 'mid-low', 'middle', 'mid-high', 'high']
+    other = 'PC2' if component == 'PC1' else 'PC1'
     lo, hi = coords[component].min(), coords[component].max()
+    line = coords[other].median()
+    off_line = weight * (coords[other] - line) / coords[other].std()
 
     picked = {}
     for k, frac in enumerate(np.linspace(0, 1, num)):
         target = lo + frac * (hi - lo)
-        order = (coords[component] - target).abs().sort_values().index
+        dist = ((coords[component] - target) / coords[component].std()) ** 2 + off_line ** 2
+        order = dist.sort_values().index
         i = next((i for i in order if coords.at[i, 'FOV'] not in picked), None)
         if i is None:
             break
         row = coords.loc[i]
         label = names[k] if num == len(names) else f'{frac:.0%}'
-        picked[row['FOV']] = (f"{component} {label} | {row[component]:.2f} | "
+        picked[row['FOV']] = (f"{component} {label} | {row[component]:.2f} "
+                              f"({other} {row[other]:.2f}) | "
                               f"{row.get('Organ', '?')} ({row.get(SCORE_COL, '?')})")
     return picked
 
@@ -518,9 +525,9 @@ def closest_pair(scope):
     return [a, b]
 
 
-def fov_panel(data, scope, component='PC1', num=5, save=False):
+def fov_panel(data, scope, component='PC1', num=5, weight=2, save=False):
     """The FOVs along one component, drawn side by side as maps, lettered A-E."""
-    picked = spread_along(scope, component=component, num=num)
+    picked = spread_along(scope, component=component, num=num, weight=weight)
     for fov, desc in picked.items():
         print(f"  {fov:26s} {desc}")
     vh.plot_fov_panel(picked, data.cells, data.fovs, num_cols=len(picked),

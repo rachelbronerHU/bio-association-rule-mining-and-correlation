@@ -15,6 +15,7 @@ import compare_rules as cr
 import differential_stats as ds
 from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, spread_labels,
                         plot_fov, set_cell_colors, TEXT_WIDTH, PANEL_FONTS,
+                        _cell_share_table, _eligible_by_stage, _shares_panel,
                         NEUTRAL as _NEUTRAL, HAIRLINE as _HAIRLINE,
                         ZERO as _ZERO, INK as _INK, ATTRACTION, AVOIDANCE)
 
@@ -1042,28 +1043,6 @@ def plot_pooled_time_contrasts(results, contrasts, organ, fdr_threshold=0.05,
 # Rule-state context used by the new-findings notebook
 # ---------------------------------------------------------------------------
 
-def _cell_share_table(cells, metadata, cell_types, columns):
-    """Per-FOV percentage of all cells belonging to each requested cell type."""
-    totals = cells.groupby("fov").size()
-    counts = (
-        cells.loc[cells["cell type"].isin(cell_types)]
-        .groupby(["fov", "cell type"]).size().unstack(fill_value=0)
-        .reindex(columns=cell_types, fill_value=0)
-    )
-    shares = counts.div(totals, axis=0).mul(100).rename_axis("FOV").reset_index()
-    return metadata[["FOV", *columns]].drop_duplicates().merge(shares, on="FOV", how="left")
-
-
-def _eligible_by_stage(eligibility, metadata, spec, stages):
-    """One rule's eligible FOVs, stage by stage. The panels below share it, so they
-    are always drawn on the same fields."""
-    for stage in stages:
-        mask = (metadata["Organ"] == spec["organ"]) & (metadata[spec["score"]] == stage)
-        fovs = metadata.loc[mask, "FOV"].drop_duplicates()
-        can_test = eligibility.reindex(columns=fovs).loc[spec["rule"]]
-        yield stage, can_test.index[can_test]
-
-
 def _prevalence_panel(ax, states, eligibility, metadata, spec, stages, bars=False,
                       fov_label="eligible FOVs"):
     """How often the rule attracts and how often it avoids, as two separate lines."""
@@ -1109,38 +1088,6 @@ def _prevalence_panel(ax, states, eligibility, metadata, spec, stages, bars=Fals
     if shown:
         ax.legend(frameon=False, fontsize=8.2, loc="center left",
                   bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
-    tidy_axes(ax, grid="y", hide=("top", "right"))
-    ax.tick_params(length=0)
-
-
-def _shares_panel(ax, cells, eligibility, metadata, spec, stages):
-    """Abundance of the rule's two cell types, one dot per eligible FOV."""
-    types = list(dict.fromkeys(spec["rule"].split(" -> ")))
-    colors = ["#D97832", "#169873"]
-    shares = _cell_share_table(cells, metadata, types, []).set_index("FOV")
-    spread = np.random.default_rng(0)
-    means = {cell_type: [] for cell_type in types}
-    labels = []
-
-    for position, (stage, fovs) in enumerate(
-            _eligible_by_stage(eligibility, metadata, spec, stages)):
-        values = shares.reindex(fovs)
-        for cell_type, color, offset in zip(types, colors, (-0.075, 0.075)):
-            column = values[cell_type].fillna(0)
-            means[cell_type].append(column.mean() if len(column) else np.nan)
-            ax.scatter(position + offset + spread.uniform(-0.032, 0.032, len(column)),
-                       column, s=16, alpha=0.5, linewidth=0, color=color)
-        labels.append(f"{stage}\nn={len(fovs)}")
-
-    for cell_type, color, role, offset in zip(types, colors, ("Ant", "Con"), (-0.075, 0.075)):
-        ax.plot(np.arange(len(stages)) + offset, means[cell_type], marker="D",
-                markersize=6, lw=2.2, color=color,
-                label=f"{role}: {cell_type.replace('_', ' ')}")
-    ax.set_ylim(bottom=0)
-    ax.set_xticks(range(len(stages)), labels)
-    ax.set_ylabel("cells in eligible\nFOVs (%)", labelpad=8)
-    ax.legend(frameon=False, fontsize=8.2, loc="center left",
-              bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
     tidy_axes(ax, grid="y", hide=("top", "right"))
     ax.tick_params(length=0)
 

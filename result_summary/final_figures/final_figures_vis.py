@@ -46,6 +46,16 @@ def _class_key(fig, axes_top):
     return key_top - 42 / points
 
 
+def _by_class(found, tested, classes):
+    """Rows grouped by class, in the key's order; unchanged when `classes` is None."""
+    if classes is None:
+        return found, tested, None
+    rank = {name: i for i, name in enumerate(CLASS_COLORS)}
+    classes = classes.reindex(found.index)
+    order = classes.map(rank).sort_values(kind="stable").index
+    return found.loc[order], tested.loc[order], classes.loc[order]
+
+
 def plot_rules_per_fov(counts, marked, colors, labels, save=None):
     """Stacked bar of rules per FOV, one colour per column of `counts`.
 
@@ -130,11 +140,7 @@ def plot_rule_change_heatmap(found, tested, title, organ=None, subtitle=None, pa
     cells, eligibility, metadata, score : when given, a column on the right with each rule's
                      two cell types per group, on its testable FOVs (rule x FOV `eligibility`).
     """
-    if classes is not None:
-        rank = {name: i for i, name in enumerate(CLASS_COLORS)}
-        classes = classes.reindex(found.index)
-        order = classes.map(rank).sort_values(kind="stable").index
-        found, tested, classes = found.loc[order], tested.loc[order], classes.loc[order]
+    found, tested, classes = _by_class(found, tested, classes)
     with_cells = cells is not None
     with plt.rc_context(PANEL_FONTS):
         fig, (ax_trend, ax, *ax_cells) = plt.subplots(
@@ -164,11 +170,14 @@ _TOP_WIDTHS = {"width_ratios": [1, 2.6, 1.8], "wspace": 0.03, "left": 0.25, "rig
 def _top_block(fig, grid, row, block, cells, metadata, widest, norm, key):
     """One block of `plot_top_gaps` in one grid row: trend, squares, cell shares."""
     ax_trend, ax, ax_cells = (fig.add_subplot(grid[row, column]) for column in range(3))
-    _rule_rows(ax_trend, ax, ax_cells, block["found"], block["tested"], block["fdr"],
+    found, tested, classes = _by_class(block["found"], block["tested"], block.get("classes"))
+    _rule_rows(ax_trend, ax, ax_cells, found, tested, block["fdr"],
                block["skipped"], block["line_color"], cells, block["eligibility"], metadata,
                block["organ"], block["score"], norm)
-    pad = (widest - block["found"].shape[1] - 1) / 2
+    pad = (widest - found.shape[1] - 1) / 2
     ax.set_xlim(-pad, widest - pad)
+    if classes is not None:
+        _class_bands(fig, ax_trend, classes)
     if key:
         _share_key(ax_cells)
     return ax
@@ -178,7 +187,8 @@ def plot_top_gaps(blocks, cells, metadata, title, subtitle=None, params=None, pa
     """The strongest rules of several rule change heatmaps, one block each, drawn like their rows.
 
     blocks : dicts with 'title', 'found', 'tested', 'fdr', 'skipped', 'line_color',
-             'eligibility', 'organ' and 'score', as `plot_rule_change_heatmap` takes them.
+             'eligibility', 'organ', 'score' and optionally 'classes',
+             as `plot_rule_change_heatmap` takes them.
     paper  : one figure per block, saved as save_1, save_2 …, with no titles; they are printed.
     Squares keep one width and one colour scale in every block, centred under the widest.
     """
@@ -186,23 +196,29 @@ def plot_top_gaps(blocks, cells, metadata, title, subtitle=None, params=None, pa
     rows = [len(block["found"]) for block in blocks]
     widest = max(block["found"].shape[1] for block in blocks) + 1.5
     row_inch, gap_inch = 0.32, 0.5
+    with_classes = any(block.get("classes") is not None for block in blocks)
     if paper:
         print(title, subtitle, params, sep="\n")
         for number, block in enumerate(blocks):
             print(f"\n{number + 1}. {block['title']}")
-            head_inch = 0.55 if number == 0 else 0.25
+            head_inch = (0.55 + 0.25 * with_classes) if number == 0 else 0.25
             height = head_inch + row_inch * len(block["found"]) + 0.05
             with plt.rc_context(PANEL_FONTS):
                 fig = plt.figure(figsize=(TEXT_WIDTH, height))
                 grid = fig.add_gridspec(1, 3, bottom=0.05 / height, top=1 - head_inch / height,
                                         **_TOP_WIDTHS)
                 _top_block(fig, grid, 0, block, cells, metadata, widest, norm, key=number == 0)
+                if number == 0 and with_classes:
+                    _class_key(fig, 1 - 27 / (height * 72))
             save_figure(fig, save and f"{save}_{number + 1}", figure_dir=_FIGURE_DIR)
             plt.show()
         return
     with plt.rc_context(PANEL_FONTS):
-        fig = plt.figure(figsize=(TEXT_WIDTH, 1.4 + row_inch * sum(rows) + gap_inch * len(blocks)))
+        fig = plt.figure(figsize=(TEXT_WIDTH, 1.4 + 0.2 * with_classes
+                                  + row_inch * sum(rows) + gap_inch * len(blocks)))
         axes_top = figure_titles(fig, title, subtitle=subtitle, params=params)
+        if with_classes:
+            axes_top = _class_key(fig, axes_top)
         grid = fig.add_gridspec(len(blocks), 3, height_ratios=rows,
                                 hspace=gap_inch / (row_inch * np.mean(rows)),
                                 bottom=0.02, top=axes_top, **_TOP_WIDTHS)

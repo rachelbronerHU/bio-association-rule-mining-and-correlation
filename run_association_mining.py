@@ -14,8 +14,6 @@ from constants import (
     MAX_INDIVIDUAL_FDR,
     METHOD,
     MIBI_GUT_DIR_PATH,
-    MIN_CONSEQUENT_CONVICTION_GAIN,
-    MIN_LIFT_GAIN,
     N_CONDITIONAL_SHUFFLES,
     N_SHUFFLES,
     RANDOM_SEED,
@@ -197,7 +195,7 @@ def save_results(rules, df_biopsy, df_fovs, suffix):
     """Save a library table with all columns and the existing CSV names and metadata."""
     logger.info(f"Saving Results ({suffix})...")
     df_flat = rules.copy()
-    for column in ("antecedents", "consequents", "simpler_rules", "fixed_types"):
+    for column in ("antecedents", "consequents", "fixed_types"):
         if column in df_flat:
             df_flat[column] = df_flat[column].apply(_as_text)
     df_flat = df_flat.rename(columns={
@@ -210,11 +208,7 @@ def save_results(rules, df_biopsy, df_fovs, suffix):
         "confidence": "Confidence",
         "conviction": "Conviction",
         "support": "Support",
-        "rule_type": "Rule_Type",
-        "complex_class": "Complex_Class",
-        "adds_information": "Adds_Information",
-        "simpler_rules": "Simpler_Rules",
-        "p_value": "P_Value",
+        "regular_p_value": "Regular_P_Value",
         "individual_fdr": "Individual_FDR",
     })
 
@@ -265,8 +259,6 @@ def run_pipeline():
         n_shuffles=N_SHUFFLES,
         random_seed=RANDOM_SEED,
         labels_kept_fixed=LABELS_KEPT_FIXED,
-        min_lift_gain=MIN_LIFT_GAIN,
-        min_consequent_conviction_gain=MIN_CONSEQUENT_CONVICTION_GAIN,
         max_individual_fdr=MAX_INDIVIDUAL_FDR,
         n_conditional_shuffles=N_CONDITIONAL_SHUFFLES,
         workers=WORKERS,

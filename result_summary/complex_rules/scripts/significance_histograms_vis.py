@@ -20,7 +20,7 @@ SHAPES = {'pairwise': 'Pairwise', 'complex-antecedents': 'Multiple antecedents',
           'complex-consequents': 'Multiple consequents'}
 
 
-def significance(rules, p_cut, max_fdr, p_column='P_Value', fdr_column='Individual_FDR'):
+def significance(rules, p_cut, max_fdr, p_column='Regular_P_Value', fdr_column='Individual_FDR'):
     """0 passed FDR, 1 p at or below the cut only, 2 p above the cut, -1 no p-value."""
     p = rules[p_column]
     return pd.Series(np.select([rules[fdr_column] <= max_fdr, p <= p_cut, p > p_cut], [0, 1, 2], -1),
@@ -79,7 +79,7 @@ def shuffled_counts(rules, panels, groups, tested=None, bins=METRIC_BINS, metric
     for fov, here in rules.groupby('FOV'):
         by_rule = pd.Series(code[here.index].to_numpy(), index=here.rule_idx)
         fov_folder = sample_folder(folder, fov)
-        paths = [fov_folder / 'individual.npz'] if tested is None else sorted(fov_folder.glob('conditional_*.npz'))
+        paths = [fov_folder / 'regular_p_value.npz'] if tested is None else sorted(fov_folder.glob('conditional_*.npz'))
         for path in paths:
             shuffles = np.load(path)
             ids = shuffles['rule_idx']

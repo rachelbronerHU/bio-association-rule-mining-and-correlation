@@ -21,7 +21,7 @@ import prediction_vis as pv
 CORTICO = dict(target="Cortico Response", value=None, positive="Responder",
                only_patients_with_muscle_and_epithelium=False)
 NRM = dict(target="Cause of death", value="NRM", positive=None,
-           only_patients_with_muscle_and_epithelium=True)
+           only_patients_with_muscle_and_epithelium=False)
 SURVIVAL = dict(target="Survival at follow-up", value=None, positive="Survived",
                 only_patients_with_muscle_and_epithelium=False)
 EARLY = dict(target="Days after Transplant grouped", value="<30", positive=None,
@@ -31,7 +31,9 @@ LATE = dict(target="Days after Transplant grouped", value=">100", positive=None,
 DIAGNOSIS = dict(target="Diagnosis", value=None, positive="AML",
                  only_patients_with_muscle_and_epithelium=False)
 
-PREDICTIONS = [CORTICO, NRM, SURVIVAL, EARLY, LATE, DIAGNOSIS]
+PREDICTIONS = [{**prediction, "only_patients_with_muscle_and_epithelium": muscle}
+               for prediction in (CORTICO, NRM, SURVIVAL, EARLY, LATE, DIAGNOSIS)
+               for muscle in (False, True)]
 UNITS = ["patient", "FOV"]
 
 

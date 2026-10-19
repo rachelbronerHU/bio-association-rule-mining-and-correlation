@@ -15,6 +15,7 @@ import vis_helper as vh
 P_BINS = np.logspace(-4.2, 0, 43)
 METRIC_BINS = np.logspace(-1, 1, 81)
 COLORS = [vh.RISING, '#5b7d99', '#aebfcd']
+OPPOSITE = vh.DOWN_ARROW
 SHAPES = {'pairwise': 'Pairwise', 'complex-antecedents': 'Multiple antecedents',
           'complex-consequents': 'Multiple consequents'}
 
@@ -24,6 +25,11 @@ def significance(rules, p_cut, max_fdr, p_column='P_Value', fdr_column='Individu
     p = rules[p_column]
     return pd.Series(np.select([rules[fdr_column] <= max_fdr, p <= p_cut, p > p_cut], [0, 1, 2], -1),
                      index=rules.index)
+
+
+def with_opposite(groups, opposite):
+    """significance() with a new group 0 in front: passed FDR and opposite to all its significant simpler rules."""
+    return (groups + 1).where(groups.ge(0), -1).mask(groups.eq(0) & opposite, 0)
 
 
 def group_labels(p_cut, max_fdr):
@@ -46,7 +52,7 @@ def shape_and_size(rules):
 def counts(values, panels, groups, bins):
     """One value per rule, counted into bins: {panel: counts, group x bin}."""
     return {name: np.array([np.histogram(here[groups[here.index].eq(group)], bins)[0]
-                            for group in range(3)])
+                            for group in range(groups.max() + 1)])
             for name, here in values.groupby(panels, observed=True)}
 
 
@@ -91,7 +97,7 @@ def shuffled_counts(rules, panels, groups, tested=None, bins=METRIC_BINS, metric
             for metric, total in totals.items()}
 
 
-def histograms(counts, bins, labels, xlabel, unit, save, line=None):
+def histograms(counts, bins, labels, xlabel, unit, save, line=None, colors=COLORS):
     """One stacked histogram per panel, each its own figure, saved as save_<panel>.
 
     counts: {title: counts, group x bin}. line: (x, text) for a dashed line.
@@ -99,7 +105,7 @@ def histograms(counts, bins, labels, xlabel, unit, save, line=None):
     for title, table in counts.items():
         with plt.rc_context(vh.PANEL_FONTS):
             fig, ax = plt.subplots(figsize=(vh.TEXT_WIDTH, 2.6))
-            _panel(ax, title, table, bins, labels, unit)
+            _panel(ax, title, table, bins, labels, unit, colors)
             if line:
                 ax.axvline(line[0], color=vh.HAIRLINE, lw=.8, ls='--')
                 ax.text(line[0], .98, f' {line[1]}', transform=ax.get_xaxis_transform(),
@@ -112,16 +118,33 @@ def histograms(counts, bins, labels, xlabel, unit, save, line=None):
             dv._finish(fig, str(ci.ROOT / 'summary_downloads' / f'{save}_{name}.pdf'))
 
 
-def _panel(ax, title, table, bins, labels, unit):
+def field_bars(rules, groups, labels, raw, colors=COLORS):
+    """Rules in each group per field, one stacked bar figure per rule size; 'not tested' from the raw rules."""
+    size = rules.len_ant + rules.len_con
+    in_field = pd.crosstab([size, rules.FOV], groups)
+    raw = raw[(raw.len_ant + raw.len_con).isin(size)]
+    in_field['not tested'] = raw.groupby([raw.len_ant + raw.len_con, 'FOV']).size() - in_field.sum(axis=1)
+    for items, counts in in_field.groupby(level=0):
+        counts = counts.loc[counts.sum(axis=1).sort_values(ascending=False).index]
+        counts.plot.bar(stacked=True, width=1, color=colors + [vh.GRID], figsize=(12, 3), xticks=[])
+        plt.legend(labels + ['not tested'], frameon=False)
+        plt.title('Pairwise rules' if items == 2 else f'Rules with {items} items')
+        plt.xlabel(f'fields, from most rules to fewest ({len(counts)})')
+        plt.ylabel('number of raw rules')
+        plt.tight_layout()
+        plt.show()
+
+
+def _panel(ax, title, table, bins, labels, unit, colors):
     total = table.sum()
     base = np.zeros(table.shape[1])
-    for row, color in zip(table[::-1], COLORS[::-1]):
+    for row, color in zip(table[::-1], colors[::-1]):
         ax.stairs(base + row, bins, baseline=base, fill=True, color=color)
         base = base + row
-    handles = [plt.Rectangle((0, 0), 1, 1, color=color) for color in COLORS]
-    ax.legend(handles, [f'{label}, {row.sum() / total:.0%}' for label, row in zip(labels, table)],
-              frameon=False, loc='lower left', bbox_to_anchor=(0, 1), ncol=3, borderaxespad=.2)
-    ax.set_title(f'{title} · {total:,} {unit}', loc='left', pad=16)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=color) for color in colors]
+    ax.legend(handles, [f'{label}, {row.sum():,} ({row.sum() / total:.0%})' for label, row in zip(labels, table)],
+              frameon=False, loc='lower left', bbox_to_anchor=(0, 1), ncol=2, borderaxespad=.2)
+    ax.set_title(f'{title} · {total:,} {unit}', loc='left', pad=4 + 12 * -(-len(labels) // 2))
     ax.set_ylabel(unit)
     ax.yaxis.set_major_formatter(lambda value, _: f'{value:,.0f}')
     vh.tidy_axes(ax, grid='y')

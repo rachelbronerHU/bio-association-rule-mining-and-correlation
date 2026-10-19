@@ -26,7 +26,7 @@ REFERENCES = {                     # reference row in the runs: (name in the leg
 }
 QUESTIONS = {                      # prediction name: how the figure says it
     "cortico_response": "Steroid response",
-    "cause_of_death_nrm_muscle": "Death not from relapse (NRM)",
+    "cause_of_death_nrm": "Death not from relapse (NRM)",
     "survival_at_follow_up": "Survival",
     "days_after_transplant_grouped_under30": "Early biopsy (<30 days)",
     "days_after_transplant_grouped_over100": "Late biopsy (>100 days)",
@@ -40,12 +40,19 @@ def reference_handles(size):
 
 SHORT = {                          # prediction name: a column header
     "cortico_response": "Steroid",
-    "cause_of_death_nrm_muscle": "NRM",
+    "cause_of_death_nrm": "NRM",
     "survival_at_follow_up": "Survival",
     "days_after_transplant_grouped_under30": "Early",
     "days_after_transplant_grouped_over100": "Late",
     "diagnosis": "Diagnosis",
 }
+
+
+def say(name, words=QUESTIONS):
+    """How a figure names a prediction; a muscle version gets '(with muscle)'."""
+    base = name.removesuffix("_muscle")
+    label = words.get(base, base)
+    return label if base == name else f"{label} (with muscle)"
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +169,7 @@ def plot_best(runs, units=("patient", "FOV"), save=None):
             ax.set_xlabel("Predicted right (%)")
             vh.tidy_axes(ax, grid="x", hide=("top", "right", "left"))
             ax.tick_params(axis="y", length=0)
-        axes[0].set_yticks(y, [QUESTIONS.get(name, name) for name in order])
+        axes[0].set_yticks(y, [say(name) for name in order])
 
         legend = [Line2D([], [], marker="o", ls="", ms=7, color=RULES_COLOR, mec="white",
                          label="Best rule run"),
@@ -207,7 +214,7 @@ def plot_rule_kinds(runs, units=("patient", "FOV"), save=None):
             for (i, j), value in np.ndenumerate(grid.to_numpy()):
                 ax.text(j, i, f"{value:.0f}", ha="center", va="center", fontsize=6.3,
                         color="white" if value > 78 else vh.INK)
-            ax.set_xticks(range(len(questions)), [SHORT.get(q, q) for q in questions],
+            ax.set_xticks(range(len(questions)), [say(q, SHORT) for q in questions],
                           rotation=40, ha="right")
             ax.set_title(f"One row per {unit}", color=vh.INK)
             ax.tick_params(length=0)
@@ -252,7 +259,7 @@ def plot_sides(runs, unit="patient", save=None):
                        edgecolor="white", lw=0.8, zorder=3)
             ax.set(xlim=(-3, 103), ylim=(-3, 103), xticks=[0, 50, 100], yticks=[0, 50, 100])
             ax.set_aspect("equal")
-            ax.set_title(QUESTIONS.get(prediction, prediction), color=vh.INK, fontsize=7.6)
+            ax.set_title(say(prediction), color=vh.INK, fontsize=7.6)
             ax.set_xlabel(f"{best['positive']} right (%)", fontsize=7)
             ax.set_ylabel(f"{best['negative']} right (%)", fontsize=7)
             right = {side: f"{round(best[f'{side}_right'] * best[f'n_{side}'] / 100)}/"
@@ -334,7 +341,7 @@ def plot_smaller_group(runs, units=("patient", "FOV"), save=None):
             ax.tick_params(axis="y", length=0)
         names = runs.drop_duplicates("prediction").set_index("prediction")["smaller"]
         axes[0].set_yticks(range(len(questions)),
-                           [f"{QUESTIONS.get(q, q)}\n{names[q]}" for q in questions])
+                           [f"{say(q)}\n{names[q]}" for q in questions])
 
         legend = [Line2D([], [], marker="o", ls="", ms=7, color=RULES_COLOR, mec="white",
                          label="Best rule run"),
@@ -392,7 +399,7 @@ def plot_weights(prediction, unit="patient", top=100, save=None):
                            Line2D([], [], color=vh.AVOIDANCE, lw=6, label="Avoidance")],
                   loc="lower right", bbox_to_anchor=(1, 1), ncol=2, frameon=False)
         vh.figure_titles(
-            fig, f"{QUESTIONS.get(ps.name_of(prediction), prediction['target'])}: "
+            fig, f"{say(ps.name_of(prediction))}: "
                  f"the rules the best run leans on", organ=ps.ORGAN,
             subtitle=(f"{first['rule_set']} · {first['feature']} · in ≥{first['min_patients']:.0%} "
                       f"of patients · {first['model']} · {first['balanced_accuracy']:.0f}% right"),
@@ -485,7 +492,7 @@ def plot_permutation(prediction, unit="patient", save=None):
         axes[0].set_ylabel("Searches")
         axes[0].legend(loc="upper center", bbox_to_anchor=(1.1, -0.3), ncol=2, frameon=False)
         vh.figure_titles(
-            fig, f"{QUESTIONS.get(ps.name_of(prediction), ps.name_of(prediction))}: "
+            fig, f"{say(ps.name_of(prediction))}: "
                  "real or luck?", organ=ps.ORGAN,
             subtitle=(f"Best of every rule run, on the real labels and on {len(shuffled)} "
                       f"shufflings of them; one row per {unit}"),

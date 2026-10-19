@@ -135,6 +135,20 @@ def field_bars(rules, groups, labels, raw, colors=COLORS):
         plt.show()
 
 
+def pies(table, colors, save, title=None):
+    """One pie per row of table (rows x categories), count and share on each slice."""
+    with plt.rc_context(vh.PANEL_FONTS):
+        fig, axes = plt.subplots(1, len(table), figsize=(vh.TEXT_WIDTH, 2.8))
+        fig.suptitle(title)
+        for ax, (name, row) in zip(np.atleast_1d(axes), table.iterrows()):
+            ax.pie(row, colors=colors, startangle=90, counterclock=False,
+                   autopct=lambda pct: f'{pct * row.sum() / 100:,.0f}\n({pct:.0f}%)' if pct else '')
+            ax.set_title(f'{name} · {row.sum():,} rules')
+        fig.legend(table.columns, frameon=False, loc='lower center', ncol=len(table.columns))
+        fig.tight_layout(rect=(0, .1, 1, 1))
+        dv._finish(fig, str(ci.ROOT / 'summary_downloads' / f'{save}.pdf'))
+
+
 def _panel(ax, title, table, bins, labels, unit, colors):
     total = table.sum()
     base = np.zeros(table.shape[1])

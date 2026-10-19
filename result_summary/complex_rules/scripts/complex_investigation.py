@@ -461,3 +461,22 @@ def test_labels(analysis, spec):
         q = rows.loc[(rows.unit == unit) & (rows.contrast == contrast), 'fdr']
         labels.append(f'{label}: {q.iloc[0]:.3g}' if len(q) and pd.notna(q.iloc[0]) else f'{label}: not tested')
     return contrast+' '+analysis.get('test_metric','occurrence')+' FDR · '+' · '.join(labels)
+
+
+def opposite_to_simpler(rules, comparisons):
+    """True where every significant simpler rule in the field has the other Kind; False without one."""
+    kind = rules.set_index(['FOV', 'rule_idx']).Kind
+    simpler_kind = kind.reindex(pd.MultiIndex.from_frame(comparisons[['FOV', 'simpler_idx']])).to_numpy()
+    opposite = comparisons.assign(opposite=simpler_kind != comparisons.Kind).groupby(['FOV', 'rule_idx']).opposite.all()
+    keys = pd.MultiIndex.from_frame(rules[['FOV', 'rule_idx']])
+    return pd.Series(opposite.reindex(keys, fill_value=False).to_numpy(), index=rules.index)
+
+
+def opposite_examples(passed, rules, comparisons, metadata, n):
+    """The n lowest-FDR rules of each size and shape, with one significant simpler rule each, as show_rule() reads them."""
+    picked = prepare(passed, metadata).sort_values('Individual_FDR').groupby(['n_items', 'Rule_Type']).head(n)
+    simpler = comparisons.drop_duplicates(['FOV', 'rule_idx'])[['FOV', 'rule_idx', 'simpler_rule']]
+    picks = picked.merge(simpler).rename(columns={'simpler_rule': 'shorter rule'})
+    picks = picks.sort_values(['n_items', 'Rule_Type'], ignore_index=True)
+    picks.index += 1
+    return picks.assign(position=picks.index), prepare(rules[rules.FOV.isin(picks.FOV)], metadata)

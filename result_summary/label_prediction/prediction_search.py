@@ -9,6 +9,7 @@ A prediction is a dict:
     value    : None for the column's two values; a value for it vs everything else
     positive : with value None, the "+" side (weights above 0 push toward it)
     only_patients_with_muscle_and_epithelium : Azulay et al.'s filter for their NRM model
+    without_muscle_rules : drop every rule that names Muscle
 """
 import os
 import re
@@ -134,6 +135,13 @@ def patients_of(prediction, cells, fovs):
     return fovs
 
 
+def rules_for(prediction, rules):
+    """The rules this prediction uses: all of them, or none that name Muscle."""
+    if not prediction["without_muscle_rules"]:
+        return rules
+    return rules[~rules["Rule"].str.contains("'Muscle_")]
+
+
 def labels(fovs, unit):
     """Per row of the unit: its side (1 or 0) and its patient."""
     by_unit = fovs.groupby(UNIT_COLUMNS[unit])
@@ -253,10 +261,12 @@ def run_one(table, is_positive, patient_of, model):
 # ---------------------------------------------------------------------------
 
 def name_of(prediction):
-    """e.g. cortico_response, or cause_of_death_nrm_muscle with a value and the filter.
+    """e.g. cortico_response, or cause_of_death_nrm_muscle with a value and the filter,
+    or cortico_response_no_muscle_rules.
     Safe for a file name: '<30' becomes 'under30', '>100' becomes 'over100'."""
     muscle = "muscle" if prediction["only_patients_with_muscle_and_epithelium"] else None
-    parts = (prediction["target"], prediction["value"], muscle)
+    no_muscle = "no_muscle_rules" if prediction["without_muscle_rules"] else None
+    parts = (prediction["target"], prediction["value"], muscle, no_muscle)
     name = "_".join(str(part) for part in parts if part is not None).lower()
     name = name.replace("<", "under").replace(">", "over")
     return re.sub(r"[^a-z0-9]+", "_", name).strip("_")

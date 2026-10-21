@@ -26,7 +26,8 @@ def rule_tables(cells, fovs, rules):
     """Every rule table of the search (no references), and each patient's side and name."""
     patients = ps.patients_of(PREDICTION, cells, fovs)
     is_positive, patient_of = ps.labels(patients, UNIT)
-    tables = [table for (_, _, share), table in ps.all_tables(rules, cells, patients, UNIT)
+    tables = [table for (_, _, share), table in ps.all_tables(
+                  ps.rules_for(PREDICTION, rules), cells, patients, UNIT)
               if pd.notna(share)]
     return tables, is_positive, patient_of
 

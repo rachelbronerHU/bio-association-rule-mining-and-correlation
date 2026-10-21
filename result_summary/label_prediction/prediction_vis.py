@@ -48,11 +48,16 @@ SHORT = {                          # prediction name: a column header
 }
 
 
+VERSION_LABELS = {"_muscle": "with muscle", "_no_muscle_rules": "without Muscle rules"}
+
+
 def say(name, words=QUESTIONS):
-    """How a figure names a prediction; a muscle version gets '(with muscle)'."""
-    base = name.removesuffix("_muscle")
-    label = words.get(base, base)
-    return label if base == name else f"{label} (with muscle)"
+    """How a figure names a prediction, e.g. 'Steroid response (with muscle)'."""
+    for suffix, version in VERSION_LABELS.items():
+        if name.endswith(suffix):
+            base = name.removesuffix(suffix)
+            return f"{words.get(base, base)} ({version})"
+    return words.get(name, name)
 
 
 # ---------------------------------------------------------------------------

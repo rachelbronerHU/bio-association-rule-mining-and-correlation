@@ -19,21 +19,24 @@ import prediction_search as ps
 import prediction_vis as pv
 
 CORTICO = dict(target="Cortico Response", value=None, positive="Responder",
-               only_patients_with_muscle_and_epithelium=False)
+               only_patients_with_muscle_and_epithelium=False, without_muscle_rules=False)
 NRM = dict(target="Cause of death", value="NRM", positive=None,
-           only_patients_with_muscle_and_epithelium=False)
+           only_patients_with_muscle_and_epithelium=False, without_muscle_rules=False)
 SURVIVAL = dict(target="Survival at follow-up", value=None, positive="Survived",
-                only_patients_with_muscle_and_epithelium=False)
+                only_patients_with_muscle_and_epithelium=False, without_muscle_rules=False)
 EARLY = dict(target="Days after Transplant grouped", value="<30", positive=None,
-             only_patients_with_muscle_and_epithelium=False)
+             only_patients_with_muscle_and_epithelium=False, without_muscle_rules=False)
 LATE = dict(target="Days after Transplant grouped", value=">100", positive=None,
-            only_patients_with_muscle_and_epithelium=False)
+            only_patients_with_muscle_and_epithelium=False, without_muscle_rules=False)
 DIAGNOSIS = dict(target="Diagnosis", value=None, positive="AML",
-                 only_patients_with_muscle_and_epithelium=False)
+                 only_patients_with_muscle_and_epithelium=False, without_muscle_rules=False)
 
-PREDICTIONS = [{**prediction, "only_patients_with_muscle_and_epithelium": muscle}
+VERSIONS = [{},
+            {"only_patients_with_muscle_and_epithelium": True},
+            {"without_muscle_rules": True}]
+PREDICTIONS = [{**prediction, **version}
                for prediction in (CORTICO, NRM, SURVIVAL, EARLY, LATE, DIAGNOSIS)
-               for muscle in (False, True)]
+               for version in VERSIONS]
 UNITS = ["patient", "FOV"]
 
 
@@ -54,7 +57,8 @@ def all_jobs(cells, fovs, rules):
         for unit in UNITS:
             is_positive, patient_of = ps.labels(patients, unit)
             before = len(jobs)
-            for (rule_set, feature, share), table in ps.all_tables(rules, cells, patients, unit):
+            for (rule_set, feature, share), table in ps.all_tables(
+                    ps.rules_for(prediction, rules), cells, patients, unit):
                 for model in ps.MODELS:
                     about = dict(organ=ps.ORGAN, target=prediction["target"],
                                  positive=positive, negative=negative, unit=unit,

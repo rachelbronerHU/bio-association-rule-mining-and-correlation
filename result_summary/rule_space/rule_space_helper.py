@@ -331,6 +331,7 @@ def _fit(mat, data, stages, organs, prefix, colors, save, built_from='rules',
     name = ((lambda what, pca=False: figure_name(f"{prefix}_{what}", save, pca))
             if prefix else (lambda what, pca=False: None))
     for col in colors:
+        _print_size(scope)
         rsv.plot_pca_scatter(coords, scope.variance, color_by=col, scope=scope.label,
                             subtitle=_settings(scope, col),
                             save=name(f"pca_{col.replace(' ', '_').lower()}", pca=True))
@@ -401,6 +402,8 @@ def panel(rows, color_by=None, title=None, save=None, what='panel', subtitle=Non
     second one its own `what`.
     """
     color_by = color_by or SCORE_COL
+    for scope in (s for row in rows for s in row):
+        _print_size(scope)
     tiles = [[(scope.coords, scope.variance, _tile_label(scope, color_by))
               for scope in row] for row in rows]
     name = figure_name(save or f"{rows[0][0].prefix}_{what}", save is not None,
@@ -609,6 +612,7 @@ def archetype_panel(data, scope, num=8, per_corner=1, gap=0.2, save=False):
     # The maps colour each corner's title from this same mapping, so a corner keeps one
     # colour across both figures. The palette avoids the stage colours on purpose.
     by_corner = vh.corner_colors(list(corners.values()))
+    _print_size(scope)
     rsv.plot_pca_scatter(scope.coords, scope.variance, color_by=SCORE_COL,
                         label_fovs=titles, scope=scope.label,
                         label_colors={fov: by_corner[way]
@@ -631,6 +635,7 @@ def pair(data, scope, color_by=None, save=False):
     """
     color_by = color_by or SCORE_COL
     two = closest_pair(scope)
+    _print_size(scope)
     rsv.plot_pca_scatter(scope.coords, scope.variance, color_by=color_by,
                         label_fovs=spread_along(scope), box_fovs=two,
                         scope=scope.label, subtitle=_settings(scope, color_by),
@@ -776,9 +781,15 @@ def linked_cells(data, scope, min_rho=0.5):
     return list(strongest[strongest >= min_rho].index)
 
 
+def _print_size(scope):
+    unit = 'cell types' if scope.built_from.startswith('cell counts') else 'rules'
+    print(f"{scope.label}: {scope.matrix.shape[1]} {unit}, {scope.matrix.shape[0]} FOVs")
+
+
 def scatter(scope, color_by=None, save=False):
     """Where the FOVs fall in this PCA - the picture to hold beside another one."""
     color_by = color_by or SCORE_COL
+    _print_size(scope)
     rsv.plot_pca_scatter(scope.coords, scope.variance, color_by=color_by, scope=scope.label,
                         subtitle=_settings(scope, color_by),
                         save=figure_name(

@@ -200,7 +200,7 @@ def all_tables(rules, cells, fovs, unit):
             RULE_SETS.items(), FEATURES, MIN_PATIENTS):
         chosen = rules["Kind"].isin(kinds)
         if pairwise:
-            chosen &= rules["Rule_Type"] == "pairwise"
+            chosen &= dh.n_items(rules) == dh.PAIRWISE_ITEMS
         yield (name, feature, share), rule_table(rules[chosen], fovs, unit, feature, share)
 
 

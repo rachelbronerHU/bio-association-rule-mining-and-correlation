@@ -22,11 +22,9 @@ RESULT_RUN = 'full_run/binary_CN_4_items_fixed_Epithelial' # "full_run/weighted_
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RESULT_CSV_PATH = os.path.join(_ROOT, "results", *RESULT_RUN.split("/"), "data")
 
-# A run holds its rules in one of two layouts: split in two by prepare_data.ipynb, or
-# a single file already cut down. Which one is on disk says which to read.
+# A run's rules, split in two by prepare_data.ipynb.
 PAIRWISE_FILENAME = "results_CN_pairwise.csv"
 COMPLEX_FILENAME = "results_CN_complex.csv"
-FILTERED_FILENAME = "results_CN_filtered.csv"
 
 # How significant a rule has to be to be worth looking at.
 MAX_FDR = 0.05
@@ -160,66 +158,67 @@ def fov_fractions(cells):
 # 2. Load the mined rules (same table for both notebooks)
 # ---------------------------------------------------------------------------
 
-def count_items(row):
-    """How many items the rule mentions in total (antecedent + consequent).
+PAIRWISE_ITEMS = 2
 
-    Items, not cell types: 'Paneth_CENTER + Paneth_NEIGHBOR' is two. This is the same
-    count the library uses for its own Rule_Type, so the two always agree.
+
+def n_items(rules):
+    """How many items each rule mentions in total (antecedent + consequent).
+
+    Items, not cell types: 'Paneth_CENTER + Paneth_NEIGHBOR' is two.
     """
-    ants = ast.literal_eval(str(row["Antecedents"]))
-    cons = ast.literal_eval(str(row["Consequents"]))
-    return len(ants) + len(cons)
+    return rules["len_ant"] + rules["len_con"]
+
+
+def rule_shape(rules):
+    """'pairwise', 'complex-antecedents' or 'complex-consequents' for each rule."""
+    shape = np.select([n_items(rules).eq(PAIRWISE_ITEMS), rules["len_ant"].gt(1)],
+                      ["pairwise", "complex-antecedents"], "complex-consequents")
+    return pd.Series(shape, index=rules.index)
+
+
+def _own_test(rules, regular, conditional):
+    """The regular test's column for pairwise rules, the conditional test's for complex ones."""
+    return rules[regular].where(n_items(rules).eq(PAIRWISE_ITEMS), rules[conditional])
+
+
+def rule_p_value(rules):
+    """Each rule's own p-value."""
+    return _own_test(rules, "Regular_P_Value", "conditional_p_value")
+
+
+def rule_fdr(rules):
+    """Each rule's own FDR."""
+    return _own_test(rules, "Individual_FDR", "conditional_individual_fdr")
 
 
 def _read_rules(directory, rule_max_items):
-    """The run's rules, from whichever layout this directory holds.
-
-    Split in two: read the pairwise file, and pay for the complex one only when a
-    caller asks for longer rules. A single filtered file holds both, so it is read
-    whole and narrowed afterwards.
-    """
+    """The run's rules: the pairwise file, and the complex one only when a caller asks
+    for longer rules."""
     pairwise_path = os.path.join(directory, PAIRWISE_FILENAME)
-    if os.path.exists(pairwise_path):
-        read = [PAIRWISE_FILENAME]
-        frames = [pd.read_csv(pairwise_path)]
+    if not os.path.exists(pairwise_path):
+        print(f"No rules found in {directory}. Run prepare_data.ipynb first.")
+        return pd.DataFrame()
 
-        complex_path = os.path.join(directory, COMPLEX_FILENAME)
-        if rule_max_items > 2 and os.path.exists(complex_path):
-            read.append(COMPLEX_FILENAME)
-            frames.append(pd.read_csv(complex_path))
+    read = [PAIRWISE_FILENAME]
+    frames = [pd.read_csv(pairwise_path)]
 
-        print(f"Read {' + '.join(read)}")
-        return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+    complex_path = os.path.join(directory, COMPLEX_FILENAME)
+    if rule_max_items > PAIRWISE_ITEMS and os.path.exists(complex_path):
+        read.append(COMPLEX_FILENAME)
+        frames.append(pd.read_csv(complex_path))
 
-    filtered_path = os.path.join(directory, FILTERED_FILENAME)
-    if os.path.exists(filtered_path):
-        print(f"Read {FILTERED_FILENAME}")
-        return pd.read_csv(filtered_path)
-
-    print(f"No rules found in {directory}. Run prepare_data.ipynb first.")
-    return pd.DataFrame()
+    print(f"Read {' + '.join(read)}")
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
 
 
-def _of_kind(rules, kind):
-    """Attraction rules or avoidance rules. An older run has no Kind column, and there a
-    rule attracts when its lift is above 1."""
-    if "Kind" in rules.columns:
-        return rules["Kind"] == kind
-    return rules["Lift"] > 1 if kind == "attracts" else rules["Lift"] < 1
-
-
-def load_results(result_csv_dir=None, rule_max_items=2, kind="attracts", max_fdr=None,
-                 informative_only=True):
+def load_results(result_csv_dir=None, rule_max_items=PAIRWISE_ITEMS, kind="attracts", max_fdr=None):
     """Read the run's rules and keep the ones we want to study.
 
     result_csv_dir : which run to read; RESULT_CSV_PATH above unless given.
-    rule_max_items : keep rules with at most this many items (2 = pairwise).
+    rule_max_items : keep rules with at most this many items (PAIRWISE_ITEMS = pairwise).
     kind           : 'attracts', 'avoids', or None for every rule, attracting and avoiding.
     max_fdr        : how significant a rule must be; MAX_FDR above unless given.
-                     Applied when the rules carry an Individual_FDR column.
-    informative_only : keep only the rules that add something a shorter rule did not
-                     already say. Applied when the rules carry an Adds_Information
-                     column; pairwise rules all add information, so they never change.
+                     Complex rules are held to it by their conditional test.
     """
     # Read at call time rather than as a default, so setting dh.MAX_FDR works the way
     # setting dh.RESULT_RUN does.
@@ -229,13 +228,8 @@ def load_results(result_csv_dir=None, rule_max_items=2, kind="attracts", max_fdr
         return rules
     print(f"Loaded {len(rules)} rules.")
 
-    if "Individual_FDR" in rules.columns:
-        rules = rules[rules["Individual_FDR"] <= max_fdr].copy()
-        print(f"Kept {len(rules)} rules at FDR <= {max_fdr}.")
-
-    if informative_only and "Adds_Information" in rules.columns:
-        rules = rules[rules["Adds_Information"].fillna(True).astype(bool)].copy()
-        print(f"Kept {len(rules)} rules that add information.")
+    rules = rules[rule_fdr(rules) <= max_fdr].copy()
+    print(f"Kept {len(rules)} rules at FDR <= {max_fdr}.")
 
     if DROP_CELLS:
         drop = {DROP_CELLS} if isinstance(DROP_CELLS, str) else set(DROP_CELLS)
@@ -245,9 +239,9 @@ def load_results(result_csv_dir=None, rule_max_items=2, kind="attracts", max_fdr
         rules = rules[keep].copy()
         print(f"Kept {len(rules)} rules naming no {', '.join(sorted(drop))}.")
 
-    rules = rules[rules.apply(count_items, axis=1) <= rule_max_items].copy()
+    rules = rules[n_items(rules) <= rule_max_items].copy()
     if kind is not None:
-        rules = rules[_of_kind(rules, kind)].copy()
+        rules = rules[rules["Kind"] == kind].copy()
     print(f"Kept {len(rules)} rules (max_items={rule_max_items}, kind={kind}).")
     return rules
 

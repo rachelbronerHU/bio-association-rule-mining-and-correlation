@@ -20,10 +20,10 @@ SHAPES = {'pairwise': 'Pairwise', 'complex-antecedents': 'Multiple antecedents',
           'complex-consequents': 'Multiple consequents'}
 
 
-def significance(rules, p_cut, max_fdr, p_column='Regular_P_Value', fdr_column='Individual_FDR'):
-    """0 passed FDR, 1 p at or below the cut only, 2 p above the cut, -1 no p-value."""
-    p = rules[p_column]
-    return pd.Series(np.select([rules[fdr_column] <= max_fdr, p <= p_cut, p > p_cut], [0, 1, 2], -1),
+def significance(rules, p_cut, max_fdr):
+    """By each rule's own test: 0 passed FDR, 1 p at or below the cut only, 2 p above the cut, -1 no p-value."""
+    p = dh.rule_p_value(rules)
+    return pd.Series(np.select([dh.rule_fdr(rules) <= max_fdr, p <= p_cut, p > p_cut], [0, 1, 2], -1),
                      index=rules.index)
 
 
@@ -37,14 +37,15 @@ def group_labels(p_cut, max_fdr):
 
 
 def pairwise_or_complex(rules):
-    names = np.where(rules.Rule_Type.eq('pairwise'), 'Pairwise', 'Complex')
+    names = np.where(dh.n_items(rules).eq(dh.PAIRWISE_ITEMS), 'Pairwise', 'Complex')
     return pd.Series(pd.Categorical(names, ['Pairwise', 'Complex']), index=rules.index)
 
 
 def shape_and_size(rules):
     """'Pairwise', or the complex shape and its number of items."""
-    size = ' · ' + (rules.len_ant + rules.len_con).astype(str) + ' items'
-    names = rules.Rule_Type.map(SHAPES) + size.where(rules.Rule_Type.ne('pairwise'), '')
+    size = ' · ' + dh.n_items(rules).astype(str) + ' items'
+    shape = dh.rule_shape(rules)
+    names = shape.map(SHAPES) + size.where(shape.ne('pairwise'), '')
     order = sorted(names.unique(), key=lambda name: (name != 'Pairwise', name))
     return pd.Series(pd.Categorical(names, order), index=rules.index)
 

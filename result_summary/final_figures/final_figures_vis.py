@@ -1,20 +1,25 @@
 """Drawing for the final figures. Shared pieces come from `vis_helper.py`."""
+from itertools import combinations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.colors import to_hex
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon, Rectangle
+from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import blended_transform_factory
 
-from vis_helper import (PANEL_FONTS, SHARE_COLORS, TEXT_WIDTH, _prevalence_norm, _shares_panel,
-                        draw_row_trends, figure_titles, save_figure, INK, ATTRACTION, AVOIDANCE)
+from vis_helper import (PANEL_FONTS, SHARE_COLORS, TEXT_WIDTH, _cell_handles, _prevalence_norm, _shares_panel,
+                        draw_row_trends, figure_titles, save_figure, INK, GRID, ATTRACTION, AVOIDANCE)
 
 _FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
 
 KIND_COLORS = {"attracts": ATTRACTION, "avoids": AVOIDANCE}
+EDGE_LAYER = {"avoids": 1, "attracts": 2}
+EDGE_HEADS = {"attracts": "-|>,head_length=0.6,head_width=0.4", "avoids": "-[,widthB=0.6,lengthB=0"}
 CLASS_COLORS = {
     "Immune–Immune": "#E3DCF2",
     "Immune–Epithel": "#FCE0C8",
@@ -56,25 +61,196 @@ def _by_class(found, tested, classes):
     return found.loc[order], tested.loc[order], classes.loc[order]
 
 
-def plot_rules_per_fov(counts, marked, colors, labels, save=None):
-    """Stacked bar of rules per FOV, one colour per column of `counts`.
+def _fonts(size):
+    return {"font.size": size, "xtick.labelsize": size, "ytick.labelsize": size,
+            "legend.fontsize": size, "pdf.fonttype": 42}
 
-    counts : FOV x group, in the order drawn.
-    marked : {FOV: letter}, each drawn as a dot under its bar.
+
+def _save_row(fig, axes, save, piece):
+    """Empty the folder `save` of its PDFs, then save the row in it, and each axes cut out
+    on its own as <piece>_1, <piece>_2 …"""
+    folder = _FIGURE_DIR / save
+    for old in folder.glob("*.pdf"):
+        old.unlink()
+    save_figure(fig, save, figure_dir=folder)
+    for n, ax in enumerate(axes, 1):
+        box = ax.get_tightbbox().transformed(fig.dpi_scale_trans.inverted())
+        fig.savefig(folder / f"{piece}_{n}.pdf", bbox_inches=box)
+    return folder
+
+
+def _save_key(handles, path, font_size):
+    with plt.rc_context(_fonts(font_size)):
+        fig, ax = plt.subplots(figsize=(1, 1))
+        ax.legend(handles=handles, loc="center", frameon=False)
+        ax.axis("off")
+        fig.savefig(path, bbox_inches="tight")
+    plt.show()
+
+
+def key_cells(cells, fovs, rules, n):
+    """The `n` most common cell types of each FOV in `fovs`, together, and any other type a rule
+    of those FOVs names ('center', 'neighbor'); most common first."""
+    shown = cells.loc[cells["fov"].isin(fovs) & cells["cell type"].notna(), ["fov", "cell type"]].astype(str)
+    top = shown.groupby("fov")["cell type"].value_counts().groupby(level=0).head(n)
+    named = rules.loc[rules["FOV"].isin(fovs), ["center", "neighbor"]].stack()
+    keep = set(top.index.get_level_values("cell type")) | set(named)
+    return [cell for cell in shown["cell type"].value_counts().index if cell in keep]
+
+
+def _fov_map(ax, cells, colors, dot, scale_um, scale_font):
+    size = cells["x_um"].max()
+    ax.scatter(cells["x_um"], cells["y_um"], s=dot * (400 / size) ** 2, linewidths=0,
+               c=cells["cell type"].astype(str).map(colors).tolist())
+    ax.plot([size - scale_um, size], [size, size], color=INK, lw=4, solid_capstyle="butt")
+    ax.annotate(f"{scale_um} µm", (size, size), xytext=(0, 4), textcoords="offset points",
+                ha="right", va="bottom", color=INK, fontsize=scale_font)
+    ax.set(xticks=[], yticks=[], aspect="equal")
+    ax.invert_yaxis()
+    for spine in ax.spines.values():
+        spine.set(color=GRID, linewidth=1)
+
+
+def fov_tags(n):
+    """One colour per marked FOV, dark for the first, light for the last."""
+    return [to_hex(color) for color in plt.cm.viridis(np.linspace(0, 0.9, n))]
+
+
+def _tag(ax, color):
+    """A filled triangle in the top left corner, the FOV's tag colour."""
+    ax.add_patch(Polygon([(0, 1), (0.15, 1), (0, 0.85)], closed=True, color=color, lw=0,
+                         transform=ax.transAxes, clip_on=False, zorder=4))
+
+
+def plot_rules_per_fov(counts, marked, colors, labels, width, font_size, save=None):
+    """Stacked bar of rules per FOV, one colour per column of `counts`, and under each marked FOV
+    a dot in its tag colour.
+
+    save : the figure's name; its colour key is saved beside it as <save>_key.
     """
-    with plt.rc_context(PANEL_FONTS):
-        fig, ax = plt.subplots(figsize=(TEXT_WIDTH, 2.2))
-        counts.plot.bar(stacked=True, width=1, color=colors, ax=ax)
-        ax.legend(labels, frameon=False)
-        spots = [counts.index.get_loc(fov) for fov in marked]
-        ax.plot(spots, np.zeros(len(spots)), "o", color=INK, markersize=4,
-                transform=ax.get_xaxis_transform(), clip_on=False, zorder=3)
-        ax.set_xticks(spots, list(marked.values()), rotation=0)
-        ax.tick_params(axis="x", length=0, pad=6)
-        ax.set(xlabel=f"FOVs, from most rules that passed FDR to fewest ({len(counts)})",
-               ylabel="number of rules")
-        fig.tight_layout()
+    with plt.rc_context(_fonts(font_size)):
+        fig, ax = plt.subplots(layout="constrained", figsize=(width, 0.6 * width))
+        counts.plot.bar(stacked=True, width=1, linewidth=0, color=colors, legend=False, ax=ax)
+        ax.scatter([counts.index.get_loc(fov) for fov in marked], [0] * len(marked), s=150,
+                   c=fov_tags(len(marked)), clip_on=False, zorder=3, transform=ax.get_xaxis_transform())
+        ax.set(xticks=[], xlabel="", xlim=(-0.5, len(counts) - 0.5))
+        ax.yaxis.set_major_locator(MaxNLocator(3))
+        ax.spines[["top", "right"]].set_visible(False)
     save_figure(fig, save, figure_dir=_FIGURE_DIR)
+    if save:
+        _save_key([Patch(color=c, label=l) for c, l in zip(colors, labels)],
+                  _FIGURE_DIR / f"{save}_key.pdf", font_size)
+    plt.show()
+
+
+def plot_fov_maps(cells, fovs, cell_colors, key, width, font_size, dot=10, scale_um=100,
+                  scale_font=None, save=None):
+    """A row of FOV maps, cells coloured by type, each with a `scale_um` bar.
+
+    key  : the cell types named in the cell type key, in its order.
+    dot  : cell dot area on a 400 um map; larger maps get smaller dots.
+    scale_font : font size of the scale bar's label; `font_size` when None.
+    save : a folder in summary_downloads, emptied of its PDFs, then given the row,
+           each map on its own (map_1, map_2 …) and the cell type key.
+    """
+    with plt.rc_context(_fonts(font_size)):
+        fig, axes = plt.subplots(1, len(fovs), layout="constrained", squeeze=False,
+                                 figsize=(width, width / len(fovs)))
+        for fov, ax, tag in zip(fovs, axes[0], fov_tags(len(fovs))):
+            _fov_map(ax, cells[cells["fov"].eq(fov)], cell_colors, dot, scale_um, scale_font)
+            _tag(ax, tag)
+    if save:
+        folder = _save_row(fig, axes[0], save, "map")
+        _save_key(_cell_handles(key, cell_colors), folder / "cells.pdf", font_size)
+    plt.show()
+
+
+def _crossings(order, pairs):
+    """How many lines cross when the nodes sit on a circle in `order`, one line per pair."""
+    spot = {node: i for i, node in enumerate(order)}
+    a, b = np.sort([[spot[x], spot[y]] for x, y in pairs], axis=1).T
+    inside = lambda x: (a[:, None] < x) & (x < b[:, None])
+    shared = (a[:, None] == a) | (a[:, None] == b) | (b[:, None] == a) | (b[:, None] == b)
+    return np.sum((inside(a) ^ inside(b)) & ~shared) // 2
+
+
+def _circle_order(nodes, pairs):
+    """`nodes` reordered, two at a time, while that leaves fewer crossing lines."""
+    order = sorted(nodes)
+    best = _crossings(order, pairs) if pairs else 0
+    improved = best > 0
+    while improved:
+        improved = False
+        for i, j in combinations(range(len(order)), 2):
+            order[i], order[j] = order[j], order[i]
+            count = _crossings(order, pairs)
+            if count < best:
+                best, improved = count, True
+            else:
+                order[i], order[j] = order[j], order[i]
+    return order
+
+
+def _network(ax, rules, colors, node, line, strongest):
+    """One FOV's rules on a circle of cell types: centre to neighbour, → attracts, ⊣ avoids,
+    thicker for a stronger |log2 lift|. A rule of a type with itself is a small loop."""
+    nodes = set(rules["center"]) | set(rules["neighbor"])
+    pairs = {tuple(sorted(pair)) for pair in zip(rules["center"], rules["neighbor"]) if pair[0] != pair[1]}
+    order = _circle_order(nodes, list(pairs))
+    angles = np.pi / 2 - 2 * np.pi * np.arange(len(order)) / max(len(order), 1)
+    xy = dict(zip(order, np.c_[np.cos(angles), np.sin(angles)]))
+    strength = np.log2(rules["Lift"].clip(lower=2.0 ** -strongest)).abs().clip(upper=strongest)
+    for rule, lw in zip(rules.itertuples(), line * strength):
+        color, layer = KIND_COLORS[rule.Kind], EDGE_LAYER[rule.Kind]
+        if rule.center == rule.neighbor:
+            ax.add_patch(Circle(1.1 * xy[rule.center], 0.1, fill=False, color=color, lw=lw, zorder=layer))
+        else:
+            ax.add_patch(FancyArrowPatch(xy[rule.center], xy[rule.neighbor], arrowstyle=EDGE_HEADS[rule.Kind],
+                                         connectionstyle="arc3,rad=0.2", mutation_scale=5 * line,
+                                         shrinkA=node ** 0.5, shrinkB=node ** 0.5, color=color, lw=lw,
+                                         zorder=layer))
+    if order:
+        ax.scatter(*np.array([xy[cell] for cell in order]).T, s=node, linewidths=0, zorder=3,
+                   c=[colors[cell] for cell in order])
+    ax.set(xticks=[], yticks=[], aspect="equal", xlim=(-1.25, 1.25), ylim=(-1.25, 1.25))
+    ax.spines[:].set_visible(False)
+
+
+def _save_edge_key(path, font_size, line, strongest):
+    """→ attracts and ⊣ avoids in their colours, then the line width for each |log2 lift|."""
+    rows = [(kind, KIND_COLORS[kind], EDGE_HEADS[kind], line * strongest) for kind in KIND_COLORS]
+    rows += [(f"|log2 lift| {s}", INK, "-", line * s) for s in (1, 2, strongest)]
+    with plt.rc_context(_fonts(font_size)):
+        fig, ax = plt.subplots(figsize=(4, 0.5 * len(rows)))
+        for y, (label, color, head, lw) in enumerate(rows):
+            ax.add_patch(FancyArrowPatch((0, -y), (1, -y), arrowstyle=head, mutation_scale=5 * line,
+                                         color=color, lw=lw))
+            ax.text(1.3, -y, label, va="center")
+        ax.set(xlim=(0, 1.3), ylim=(0.5 - len(rows), 0.5))
+        ax.axis("off")
+        fig.savefig(path, bbox_inches="tight")
+    plt.show()
+
+
+def plot_rule_networks(rules, fovs, cell_colors, width, font_size, node=150, line=1.5, strongest=3,
+                       save=None):
+    """A row of rule networks, one per FOV, drawn by `_network`; the nodes of each are ordered
+    on their circle so as few lines cross as can be found.
+
+    rules     : one row per rule, with 'FOV', 'center', 'neighbor', 'Kind' and 'Lift'.
+    node      : node dot area; line : line width per unit of |log2 lift|, which stops at `strongest`.
+    save      : a folder in summary_downloads, emptied of its PDFs, then given the row, each
+                network on its own (network_1 …) and the edge key.
+    """
+    with plt.rc_context(_fonts(font_size)):
+        fig, axes = plt.subplots(1, len(fovs), layout="constrained", squeeze=False,
+                                 figsize=(width, width / len(fovs)))
+        for fov, ax, tag in zip(fovs, axes[0], fov_tags(len(fovs))):
+            _network(ax, rules[rules["FOV"].eq(fov)], cell_colors, node, line, strongest)
+            _tag(ax, tag)
+    if save:
+        folder = _save_row(fig, axes[0], save, "network")
+        _save_edge_key(folder / "edges.pdf", font_size, line, strongest)
     plt.show()
 
 

@@ -53,7 +53,7 @@ python run_association_mining.py > run.log 2>&1
 ```
 results/<run_type>/<weighting>_<method>_<n>_items/
   run_config.json                         every setting the run used
-  data/results_<METHOD>.csv               classified rules with p-values and FDR values
+  data/results_<METHOD>.csv               rules with p-values and FDR values
   data/results_<METHOD>_RAW.csv           rules before final mining filters, without p-values
   data/results_<METHOD>_comparisons.csv   individual conditional comparisons
   permutations/sample_<FOV>/*.npz         optional shuffle metrics
@@ -62,15 +62,15 @@ results/<run_type>/<weighting>_<method>_<n>_items/
 All three CSVs retain every returned column and include FOV and biopsy metadata;
 empty tables are saved with headers. Existing column names such as `FOV`, `Lift`, and
 `Individual_FDR` stay the same; additional columns keep their library names.
-Join comparisons to classified rules on `["FOV", "rule_idx"]`, and to their simpler
-rules on `["FOV", "simpler_idx"]` matched to `["FOV", "rule_idx"]`.
+Join comparisons to their complex rules on `["FOV", "rule_idx"]`; `simpler_rule` names
+the shorter cell-type rule each one was compared with.
 Raw rules still reflect earlier search pruning; they are not every possible rule.
-The classified CSV is not cut by FDR or `Adds_Information`; selection happens in analysis.
+The rules CSV is not cut by FDR; selection happens in analysis.
 
 Set the environment variable `SAVE_PERMUTATION_METRICS=true` to record every shuffle's
-lift and conviction. Each FOV gets `individual.npz` and one `conditional_0001.npz`, etc.,
+lift and conviction. Each FOV gets `regular_p_value.npz` and one `conditional_0001.npz`, etc.,
 per conditional batch actually shuffled. FOV names are URL-encoded in folder names.
-Recording defaults to off and does not change the p-values or classifications.
+Recording defaults to off and does not change the p-values.
 Arrays are buffered on disk per batch, then compressed; recording needs extra disk space.
 
 Each archive contains `rule_idx`, `lift`, `conviction`, and metadata `sample_id`,

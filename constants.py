@@ -80,7 +80,8 @@ SETTINGS = Settings(
 # The library returns p-values and FDR values; selection happens in the analysis.
 N_SHUFFLES = 5 if DEBUG else int(_os.environ.get("N_SHUFFLES", 10000))
 N_CONDITIONAL_SHUFFLES = N_SHUFFLES  # None disables the conditional test of complex rules
-# Saves both tests' shuffles (regular p-value and conditional). Turn off per run with
+# Saves both tests' shuffles (regular p-value and conditional). Off unless a run sets
+# SAVE_PERMUTATION_METRICS=true (or 1 / yes).
 SAVE_PERMUTATION_METRICS = _os.environ.get("SAVE_PERMUTATION_METRICS", "false").strip().lower() in ("1", "true", "yes")
 RANDOM_SEED = 42                     # each FOV derives its own seed from this
 MAX_INDIVIDUAL_FDR = 0.05            # warns when too few shuffles can bring individual_fdr this low

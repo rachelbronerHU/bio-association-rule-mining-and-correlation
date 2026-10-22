@@ -65,16 +65,14 @@ def extra_definitions(specs):
     return dict(zip(specs.rule,specs.types))
 
 
-def direction_audit(specs, analysis, rules, cells, metadata):
-    """Paired patient sign tests: informative and all passing complex occurrences.
+def direction_audit(specs, analysis, metadata):
+    """Paired patient sign tests between the alternatives of each niche.
 
     All centered alternatives and each contextual reverse are tested. One BH family
-    covers every niche, organ, stage and both endpoints; zero differences are ties.
+    covers every niche, organ and stage; zero differences are ties.
     """
     config = analysis['config']
-    raw = ci.investigation_rows(rules,config,informative=False)
-    raw_states,_ = ci.matrices(rules,raw,cells,metadata,config,extra_definitions(specs),
-                               fields=analysis['fields'])
+    states = analysis['states']
     results=[]
     for (niche,organ,family), group in specs.groupby(['niche','organ','family'],sort=False):
         for a,b in combinations(group.rule,2):
@@ -82,17 +80,16 @@ def direction_audit(specs, analysis, rules, cells, metadata):
                 meta=metadata[metadata.Organ.eq(organ)]
                 if stage!='All':
                     meta=meta[meta[config.score].eq(stage)]
-                for endpoint,states in [('informative',analysis['states']),('all passing',raw_states)]:
-                    eligible=analysis['eligible'].loc[a] & analysis['eligible'].loc[b]
-                    delta=(states.loc[a].eq(1).astype(float)-states.loc[b].eq(1).astype(float)).where(eligible)
-                    biopsy=ds.aggregate_fovs(delta.to_frame('delta').T,meta,'Biopsy')
-                    bm=meta.drop_duplicates('Biopsy').drop(columns='FOV').rename(columns={'Biopsy':'FOV'})
-                    patients=ds.aggregate_fovs(biopsy,bm,'PatientID').loc['delta'].dropna()
-                    pos,neg=int((patients>1e-12).sum()),int((patients< -1e-12).sum())
-                    p=binomtest(pos,pos+neg,.5).pvalue if pos+neg>=5 else np.nan
-                    results.append(dict(niche=niche,organ=organ,family=family,stage=stage,endpoint=endpoint,
-                                        first=a,second=b,patients=len(patients),positive=pos,negative=neg,
-                                        mean_difference_pp=100*patients.mean(),p_value=p))
+                eligible=analysis['eligible'].loc[a] & analysis['eligible'].loc[b]
+                delta=(states.loc[a].eq(1).astype(float)-states.loc[b].eq(1).astype(float)).where(eligible)
+                biopsy=ds.aggregate_fovs(delta.to_frame('delta').T,meta,'Biopsy')
+                bm=meta.drop_duplicates('Biopsy').drop(columns='FOV').rename(columns={'Biopsy':'FOV'})
+                patients=ds.aggregate_fovs(biopsy,bm,'PatientID').loc['delta'].dropna()
+                pos,neg=int((patients>1e-12).sum()),int((patients< -1e-12).sum())
+                p=binomtest(pos,pos+neg,.5).pvalue if pos+neg>=5 else np.nan
+                results.append(dict(niche=niche,organ=organ,family=family,stage=stage,
+                                    first=a,second=b,patients=len(patients),positive=pos,negative=neg,
+                                    mean_difference_pp=100*patients.mean(),p_value=p))
     result=pd.DataFrame(results)
     result['fdr']=np.nan
     valid=result.p_value.dropna()

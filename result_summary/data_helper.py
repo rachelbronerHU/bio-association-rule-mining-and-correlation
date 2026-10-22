@@ -22,9 +22,11 @@ RESULT_RUN = 'full_run/binary_CN_4_items_fixed_Epithelial' # "full_run/weighted_
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RESULT_CSV_PATH = os.path.join(_ROOT, "results", *RESULT_RUN.split("/"), "data")
 
-# A run's rules, split in two by prepare_data.ipynb.
+# A run's rules, split in two by prepare_data.ipynb, and the conditional test's
+# comparisons of each complex rule with its simpler rules.
 PAIRWISE_FILENAME = "results_CN_pairwise.csv"
 COMPLEX_FILENAME = "results_CN_complex.csv"
+COMPARISONS_FILENAME = "results_CN_comparisons.csv"
 
 # How significant a rule has to be to be worth looking at.
 MAX_FDR = 0.05
@@ -177,8 +179,12 @@ def rule_shape(rules):
 
 
 def _own_test(rules, regular, conditional):
-    """The regular test's column for pairwise rules, the conditional test's for complex ones."""
-    return rules[regular].where(n_items(rules).eq(PAIRWISE_ITEMS), rules[conditional])
+    """The regular test's value for pairwise rules, the conditional test's for complex ones.
+    Takes a table of rules, or one rule as a row or a dict."""
+    pairwise = n_items(rules) == PAIRWISE_ITEMS
+    if isinstance(rules, pd.DataFrame):
+        return rules[regular].where(pairwise, rules[conditional])
+    return rules[regular] if pairwise else rules[conditional]
 
 
 def rule_p_value(rules):

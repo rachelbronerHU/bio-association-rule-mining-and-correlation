@@ -6,11 +6,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from IPython.display import Markdown, display
+from matplotlib.lines import Line2D
 
 import differential_stats as ds
 import differential_vis as dv
 import compare_rules as cr
+import data_helper as dh
 import rule_metrics as rm
+import vis_helper as vh
 from vis_helper import ATTRACTION, AVOIDANCE
 import complex_investigation as ci
 
@@ -80,8 +83,7 @@ def summary(analysis, metadata, spec, save=None, pooled=False, cells=None):
                        bbox_to_anchor=(1.01,.5), fontsize=7)
         title = f'{spec["organ"]} · {spec["rule"].replace(" -> ", " → ")}'
         fig.suptitle(textwrap.fill(title, 78), fontsize=11, y=.995)
-        endpoint = analysis['mode']+' informative' if analysis.get('informative',True) else 'all passing'
-        subtitle = (f'{config.score} · rule can be tested · {endpoint} occurrences\n'
+        subtitle = (f'{config.score} · rule can be tested · passing occurrences\n'
                     f'attraction support ≥{config.support:g}; avoidance expected support ≥{config.expected_support:g}')
         fig.text(.5,.927,subtitle,ha='center',va='top',fontsize=7,color='#706E68')
         fig.align_ylabels(axes)
@@ -110,7 +112,7 @@ def fixed_parent(analysis, all_rules, metadata, spec, quiet=False):
         gate = np.where(candidate.Kind.eq('attracts'),
                         (candidate.Support >= config.support) & (candidate.Confidence >= config.confidence),
                         candidate.Expected_support >= config.expected_support)
-        candidate = candidate[(candidate.Individual_FDR <= config.mining_fdr) & gate]
+        candidate = candidate[(dh.rule_fdr(candidate) <= config.mining_fdr) & gate]
         if candidate.FOV.isin(metadata.loc[metadata.Organ.eq(spec['organ']),'FOV']).any():
             source = candidate
             break
@@ -194,7 +196,7 @@ def parent_in_same_fields(all_rules, examples, parent):
             kind=example.get('kind', 'attracts'),
             state=0 if here is None else int(here.state),
             metrics={} if here is None else ds.rule_metrics(here),
-            fdr=np.nan if here is None else here.Individual_FDR,
+            fdr=np.nan if here is None else dh.rule_fdr(here),
         ))
     frame = pd.DataFrame(rows)
     frame.attrs['eligible_n'] = examples.attrs.get('eligible_n', {})
@@ -320,51 +322,91 @@ def show_selected(index, specs, analysis, rules, cells, metadata, prefix,
                           save=filename(prefix,spec,'fovs'), fields=fields)
 
 
-def show_threshold(index, specs, baseline, stricter, metadata, prefix='support', cells=None):
-    if not 0 <= index < len(specs):
-        print('No comparison at this index.')
-        return
-    spec = specs.iloc[index].to_dict()
-    # The same exact rule and denominator at both cutoffs: do not compare two different top lists.
-    summary(baseline,metadata,spec,filename(prefix+'_001',spec,'summary'),pooled=True,cells=cells)
-    summary(stricter,metadata,spec,filename(prefix+'_003',spec,'summary'),pooled=True,cells=cells)
+def show_rule(picks, index, rows, rules, cells, metadata, config, prefix):
+    """One picked rule as fields, in two rows.
+
+    Above: the whole field, the rule's cell types, the shorter rule's. Below, under each
+    of those two, the cells that actually make the rule hold, coloured by the part they
+    play in it: the center, the other antecedents, the consequents.
+    """
+    pick = picks.loc[index]
+    longer = rows.loc[pick.position]
+    shorter = rules[rules.FOV.eq(longer.FOV) & rules.Cell_Rule.eq(pick['shorter rule'])].iloc[0]
+    info = metadata.drop_duplicates('FOV').set_index('FOV')
+    fov, settings = longer.FOV, rm.current_settings()
+
+    fig, axes = plt.subplots(2, 3, figsize=(dv._TEXT_WIDTH, 6.4), facecolor='white')
+    vh.set_cell_colors(cells)
+    # One colour map for every panel and the key, so the same type reads the same way.
+    types = dict.fromkeys(_named_cells(longer) + _named_cells(shorter))
+    colours = vh.resolve_cell_colors(list(types))
+    _field(axes[0, 0], fov, cells, metadata, f'full field\n{fov}', colours)
+    for column, rule in [(1, longer), (2, shorter)]:
+        _field(axes[0, column], fov, cells, metadata, _caption(rule, column == 2), colours,
+               ant=dh.base_items(rule.Antecedents), con=dh.base_items(rule.Consequents))
+        _taking_part(axes[1, column], fov, cells, metadata, rule, settings)
+    axes[1, 0].set_visible(False)
+
+    fig.suptitle(f'{info.at[fov, "Organ"]} · {longer.Cell_Rule.replace(" -> ", " → ")}',
+                 fontsize=12, y=.985)
+    fig.text(.5, .945, f'point {index} · {info.at[fov, config.score]}', ha='center', fontsize=9)
+    _cell_key(fig, types, colours, [rm.rule_parts(one.ant, one.con)
+                                    for one in (longer, shorter)])
+    fig.subplots_adjust(top=.88, bottom=.11, left=.02, right=.98, wspace=.03, hspace=.12)
+    dv._finish(fig, str(ci.ROOT / 'summary_downloads' /
+                        f'{prefix}_{longer.Kind}_{index}_fovs.pdf'))
 
 
-def show_denominators(index, specs, analysis, metadata, prefix='denominators'):
-    if not 0 <= index < len(specs):
-        print('No denominator comparison at this index.')
-        return
-    spec = specs.iloc[index].to_dict()
-    table = analysis['counts']
-    block = table[(table.rule == spec['rule']) & (table.organ == spec['organ'])
-                  & (table.kind == spec['kind']) & table.stage.isin(ci.STAGES)].set_index('stage').loc[ci.STAGES]
-    fig,ax = plt.subplots(figsize=(dv._TEXT_WIDTH,3.7))
-    for offset,denom,color,label in [(-.15,'total','#B7B4AE','all FOVs'),(.15,'eligible','#2878D0','eligible FOVs')]:
-        ax.bar(np.arange(3)+offset,100*block.hits/block[denom].replace(0,np.nan),width=.28,color=color,label=label)
-    ax.set_xticks(range(3),[f'{s}\n{r.hits} | {r.eligible} | {r.total}' for s,r in block.iterrows()])
-    ax.set_xlabel('rule-bearing eligible | eligible | total FOVs',fontsize=8)
-    ax.set_ylabel('prevalence (%)')
-    ax.set_ylim(0,100)
-    ax.legend(frameon=False)
-    dv.tidy_axes(ax,grid='y',hide=('top','right'))
-    fig.suptitle(textwrap.fill(f'{spec["organ"]} · {spec["rule"]}',78),fontsize=11)
-    ax.set_title('Same eligible numerator; only the denominator changes',fontsize=9)
-    fig.tight_layout(rect=(0,0,1,.85))
-    dv._finish(fig,filename(prefix,spec,'summary'))
+def _named_cells(rule):
+    """The cell types a rule names, antecedents then consequents."""
+    return dh.base_items(rule.Antecedents) + dh.base_items(rule.Consequents)
 
 
-def show_classes(kind, rules, config, prefix):
-    import complex_vis as cv
-    passed = ci.investigation_rows(rules,config,informative=False)
-    counts = passed[passed.Kind.eq(kind)].groupby(['Rule_Type','Complex_Class']).size().unstack(fill_value=0)
-    labels = {'ant-complex':'multiple antecedents','con-complex':'multiple consequents',
-              'both-complex':'both sides complex'}
-    classes = {'redundant_by_simpler':'a shorter rule explains it','consequent_driven':'consequents already explain it',
-               'simpler_are_noise':'shorter rules lack support','consequent_is_noise':'consequent link lacks support',
-               'stronger_effect':'stronger than shorter rules','new':'no shorter rule mined'}
-    counts = counts.reindex(columns=list(classes),fill_value=0)
-    cv.plot_class_split(counts,labels=labels,class_labels=classes,params=kind,
-                       title='How stored longer-rule occurrences are classified',
-                       unit_label='FOV-level occurrences',
-                       subtitle='Three/four distinct cell types · passing investigation gates · one count per FOV',
-                       save=str(ci.ROOT/'summary_downloads'/f'{prefix}_{kind}_classes.pdf'))
+def _caption(rule, is_shorter):
+    """The rule's name over its metrics, as the field figures write them."""
+    values = ds.rule_metrics(rule)
+    name = ('shorter: ' if is_shorter else '') + rule.Cell_Rule.replace(' -> ', ' → ')
+    fdr = '' if is_shorter else f' · fdr {dh.rule_fdr(rule):.3g}'
+    return (f'{textwrap.fill(name, 28)}\n'
+            f'lift {values["lift"]:.3g} · conf {values["conf"]:.3g} · conv {values["conv"]:.3g}\n'
+            f'sup {values["sup"]:.3g} · lev {values["lev"]:.3g}{fdr}')
+
+
+def _field(ax, fov, cells, metadata, title, colours, ant=None, con=None):
+    """One map, greyed outside the rule's cell types."""
+    vh.plot_fov(fov, '', cells, metadata, target_ant_cells=ant, target_cons_cells=con,
+                ax=ax, show_legend=False, cell_size=6, colors=colours)
+    _bare(ax, title)
+
+
+def _taking_part(ax, fov, cells, metadata, rule, settings):
+    """The cells of the patches where every item of the rule is present."""
+    counted = rm.counted_cells(rule.ant, rule.con, cells, fov, settings)
+    vh.plot_counted_cells(ax, fov, cells, metadata, counted,
+                          rm.rule_parts(rule.ant, rule.con), 6)
+    _bare(ax, f'cells that count for it\n'
+              f'{counted.total} of {cells.fov.eq(fov).sum()} cells')
+
+
+def _bare(ax, title):
+    ax.set_title(title, fontsize=6.5)
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def _cell_key(fig, types, colours, parts):
+    """One key for the cell types, one for the part each plays where it counts."""
+    def dot(colour, label):
+        return Line2D([], [], marker='o', linestyle='', markersize=5, color=colour,
+                      label=label)
+
+    for keys, title, above in (
+            ([dot(colours[name], name.replace('_', ' ')) for name in types],
+             'Cell type', .048),
+            ([dot(colour, label) for colour, label in vh.role_key(parts)],
+             None, .005)):
+        fig.legend(handles=keys, title=title, loc='lower center', ncol=len(keys),
+                   frameon=False, fontsize=7, title_fontsize=7.5,
+                   bbox_to_anchor=(.5, above))

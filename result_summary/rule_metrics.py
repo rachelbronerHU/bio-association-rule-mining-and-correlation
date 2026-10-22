@@ -62,7 +62,7 @@ _STORED_METRICS = {"lift": "Lift", "conf": "Confidence", "conv": "Conviction",
 
 @lru_cache(None)
 def _mined_rows(run_dir, max_items=4):
-    """Every rule the run measured in a field, before the FDR and redundancy filters."""
+    """Every rule the run measured in a field, before the FDR filter."""
     import data_helper
 
     rules = data_helper._read_rules(run_dir, max_items)
@@ -438,7 +438,7 @@ def why_not_mined(measured, settings, kind=ATTRACTS):
         shown = "; ".join(missed[:2])
         return "below gate: " + (shown + ", and more" if len(missed) > 2 else shown)
     if would_be_mined(measured, settings, kind):
-        return "clears every gate; dropped later, by FDR or as redundant"
+        return "clears every gate; dropped later, by FDR"
     return "does not pass the mining test"
 
 
@@ -478,7 +478,7 @@ def explain_missing(examples, cells, settings=None, fields=None, max_fdr=None, *
         written = mined.get((str(row["antecedent_items"]), str(row["consequent_items"]),
                              row["FOV"]))
         if written is not None:
-            fdr = pd.to_numeric(written.get("Individual_FDR"), errors="coerce")
+            fdr = data_helper.rule_fdr(written)
             examples.at[position, "metrics"] = stored_metrics(written)
             examples.at[position, "fdr"] = fdr
             examples.at[position, "why"] = (

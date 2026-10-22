@@ -97,7 +97,7 @@ def representative_fovs(rules, eligible, metadata, rule, organ, group_col,
             examples.append({
                 "rule": rule, "stage": group, "FOV": item["FOV"],
                 "state": int(item["state"]), "metric": item[metric],
-                "fdr": item.get("Individual_FDR", np.nan),
+                "fdr": dh.rule_fdr(item),
                 "metrics": rule_metrics(item),
                 "antecedent_cells": ant, "consequent_cells": con, **items,
             })

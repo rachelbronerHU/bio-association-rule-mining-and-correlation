@@ -23,9 +23,6 @@ dependencies = [
     "nbformat"
 ]
 
-[project.optional-dependencies]
-dev = ["pytest"]
-
 [tool.setuptools]
 # The mining lives in the spatial-association-rules package now. Installing this
 # project only puts these two modules on the path, so the notebooks can import them.

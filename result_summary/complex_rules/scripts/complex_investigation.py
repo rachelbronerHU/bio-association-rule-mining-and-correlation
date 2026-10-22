@@ -1,6 +1,6 @@
 """Preparation and automatic selection for the complex-rule investigations.
 
-Nothing here re-mines rules or changes their stored classification / mining FDR.
+Nothing here re-mines rules or changes their mining FDR.
 """
 import ast
 import json
@@ -97,7 +97,7 @@ def prepare(raw, metadata, max_items=4):
 def load(config=Config()):
     cells, metadata, _ = dh.load_spatial_data()
     raw = dh._read_rules(dh.RESULT_CSV_PATH, config.max_items)
-    rules = prepare(raw, metadata, config.max_items)
+    rules = with_simpler_rules(prepare(raw, metadata, config.max_items))
     settings = json.loads((Path(dh.RESULT_CSV_PATH).parent / 'run_config.json').read_text())
     print(asdict(config))
     print(f'{len(rules):,} stored center-specific occurrences; distinct cell types only')
@@ -105,20 +105,21 @@ def load(config=Config()):
     return cells, metadata, rules
 
 
-def investigation_rows(rules, config, mode='all', informative=True, collapse=True):
+def with_simpler_rules(rules):
+    """Each complex rule's shorter cell-type rules measured in its field, as the
+    conditional test compared them."""
+    links = pd.read_csv(Path(dh.RESULT_CSV_PATH) / dh.COMPARISONS_FILENAME,
+                        usecols=['FOV', 'rule_idx', 'simpler_rule'])
+    simpler = links.groupby(['FOV', 'rule_idx']).simpler_rule.agg(tuple).rename('simpler_rules')
+    return rules.join(simpler, on=['FOV', 'rule_idx'])
+
+
+def investigation_rows(rules, config, collapse=True):
     """A per-FOV investigation gate, not a new mining threshold."""
     gate = np.where(rules.Kind.eq('attracts'),
                     (rules.Support >= config.support) & (rules.Confidence >= config.confidence),
                     rules.Expected_support >= config.expected_support)
-    keep = (rules.n_items >= 3) & (rules.Individual_FDR <= config.mining_fdr) & gate
-    if informative:
-        keep &= rules.Adds_Information
-    if mode == 'new':
-        keep &= rules.Complex_Class.eq('new')
-    elif mode == 'non-new':
-        keep &= ~rules.Complex_Class.eq('new')
-    elif mode != 'all':
-        raise ValueError(mode)
+    keep = (rules.n_items >= 3) & (dh.rule_fdr(rules) <= config.mining_fdr) & gate
     selected = rules[keep].copy()
     return collapse_centers(selected) if collapse and 'Cell_Rule' in selected else selected
 
@@ -141,28 +142,11 @@ def collapse_centers(rows):
     result['n_centers'] = grouped.size().to_numpy()
     result['center_rules'] = grouped.Clean_Rule.agg(tuple).to_numpy()
     result['center_states'] = grouped.state.agg(lambda x: tuple(sorted(set(x)))).to_numpy()
-    result['Individual_FDR'] = grouped.Individual_FDR.min().to_numpy()
-    result['Simpler_Rules'] = grouped.Simpler_Rules.agg(
+    for fdr in ('Individual_FDR', 'conditional_individual_fdr'):
+        result[fdr] = grouped[fdr].min().to_numpy()
+    result['simpler_rules'] = grouped.simpler_rules.agg(
         lambda values: tuple(sorted(set().union(*(items(value) for value in values))))
     ).to_numpy()
-    result['Adds_Information'] = grouped.Adds_Information.any().to_numpy()
-    if 'Complex_Class' in rows:
-        priority = {'new': 5, 'stronger_effect': 4, 'consequent_is_noise': 3,
-                    'simpler_are_noise': 2, 'consequent_driven': 1, 'redundant_by_simpler': 0}
-        result['Complex_Class'] = grouped.Complex_Class.agg(
-            lambda values: max(values, key=lambda value: priority.get(value, -1))
-        ).to_numpy()
-    if 'Complex_Class_2' in rows:
-        # 'no shorter' last: one arrangement without a parent does not unmeasure the other.
-        priority = {'stronger than shorter': 3, 'not improving': 2,
-                    'simpler_are_noise': 1, 'no shorter': 0}
-        result['Complex_Class_2'] = grouped.Complex_Class_2.agg(
-            lambda values: max(values, key=lambda value: priority.get(value, -1))
-        ).to_numpy()
-        result['Adds_Information_2'] = result.Complex_Class_2.ne('not improving')
-        result['Simpler_Rules_2'] = grouped.Simpler_Rules_2.agg(
-            lambda values: tuple(sorted(set().union(*values)))
-        ).to_numpy()
     result['Clean_Rule'] = result.Cell_Rule
     result['state'] = np.sign(result.Lift - 1).astype('int8')
     result['Kind'] = result.state.map({1: 'attracts', -1: 'avoids', 0: 'neutral'})
@@ -350,15 +334,14 @@ def candidates(counts, tests, config, purpose='changes'):
     return pd.concat(selected).drop_duplicates(['organ','rule','kind']).reset_index(drop=True)
 
 
-def analyse(rules, cells, metadata, config=Config(), mode='all', extra=None, informative=True,
-            fields=None):
+def analyse(rules, cells, metadata, config=Config(), extra=None, fields=None):
     fields = rm.Fields(cells) if fields is None else fields
-    rows = investigation_rows(rules, config, mode, informative)
+    rows = investigation_rows(rules, config)
     states, eligible = matrices(rules, rows, cells, metadata, config, extra, fields=fields)
     counts = occurrence_table(states, eligible, rows, metadata, config)
     tests = stage_tests(states, eligible, counts, metadata, config)
     return dict(rows=rows, states=states, eligible=eligible, counts=counts, tests=tests,
-                config=config, mode=mode, informative=informative, fields=fields)
+                config=config, fields=fields)
 
 
 def stage_counts(data, organ, rule, parent):
@@ -389,22 +372,21 @@ def matched_parents(rule, kind, rows, all_rules):
     current = rows[(rows.Clean_Rule == rule) & (rows.Kind == kind)]
     output = []
     available = all_rules[all_rules.Kind.eq(kind) & all_rules.FOV.isin(current.FOV)]
-    lookup = {fov: frame.set_index('stored_rule') for fov,frame in available.groupby('FOV')}
+    available = available.assign(fdr=dh.rule_fdr(available))
+    lookup = {fov: frame.set_index('Cell_Rule') for fov,frame in available.groupby('FOV')}
     for _, row in current.iterrows():
         frame = lookup.get(row.FOV)
         if frame is None:
             continue
-        names = list(items(row.Simpler_Rules))
-        parents = frame.loc[frame.index.intersection(names)]
+        parents = frame.loc[frame.index.intersection(row.simpler_rules)]
         if parents.empty:
             continue
-        parent_key = 'Cell_Rule' if 'Cell_Rule' in parents else 'Clean_Rule'
-        parents = parents.groupby(parent_key, sort=False).agg(
-            Lift=('Lift', 'mean'), Individual_FDR=('Individual_FDR', 'min')
+        parents = parents.groupby('Cell_Rule', sort=False).agg(
+            Lift=('Lift', 'mean'), fdr=('fdr', 'min')
         ).reset_index()
         parent = parents.loc[parents.Lift.idxmax() if kind == 'attracts' else parents.Lift.idxmin()]
         output.append(dict(FOV=row.FOV, complex_lift=row.Lift, parent_lift=parent.Lift,
-                           parent=parent[parent_key], parent_fdr=parent.Individual_FDR,
+                           parent=parent.Cell_Rule, parent_fdr=parent.fdr,
                            gain=(row.Lift/parent.Lift if kind == 'attracts'
                                  else parent.Lift/row.Lift if row.Lift > 0 else np.inf)))
     return pd.DataFrame(output, columns=['FOV','complex_lift','parent_lift','parent','parent_fdr','gain'])
@@ -423,15 +405,10 @@ def gain_candidates(analysis, all_rules, metadata):
     config = analysis['config']
     rows = analysis['rows'].copy()
     rows = rows[[bool(analysis['eligible'].at[r,f]) for r,f in zip(rows.Clean_Rule,rows.FOV)]]
-    rows['parent_key'] = rows.Simpler_Rules.map(items)
-    rows = rows.explode('parent_key').dropna(subset=['parent_key'])
-    parent_key = 'Cell_Rule' if 'Cell_Rule' in all_rules else 'Clean_Rule'
-    parent = all_rules[['FOV','Kind','stored_rule',parent_key,'Lift']].rename(
-        columns={'stored_rule':'parent_key',parent_key:'parent_cell_rule','Lift':'parent_lift'})
-    matched = rows.merge(parent,on=['FOV','Kind','parent_key'],validate='many_to_one')
-    matched = matched.groupby(['FOV','Clean_Rule','Kind','parent_cell_rule'],sort=False).agg(
-        Lift=('Lift','first'), parent_lift=('parent_lift','mean')
-    ).reset_index()
+    rows = rows.explode('simpler_rules').dropna(subset=['simpler_rules'])
+    parent = all_rules.groupby(['FOV','Kind','Cell_Rule'],as_index=False).Lift.mean().rename(
+        columns={'Cell_Rule':'simpler_rules','Lift':'parent_lift'})
+    matched = rows.merge(parent,on=['FOV','Kind','simpler_rules'],validate='many_to_one')
     matched['rank_lift'] = np.where(matched.Kind.eq('attracts'),-matched.parent_lift,matched.parent_lift)
     matched = matched.sort_values('rank_lift').drop_duplicates(['FOV','Clean_Rule'])
     # Use raw Lift separation for avoidance: zero is legitimate, not an arbitrary 1e6 strength.
@@ -448,35 +425,30 @@ def gain_candidates(analysis, all_rules, metadata):
     return table.rename(columns={'Clean_Rule':'rule','Kind':'kind'}).assign(stream='measured gain',contrast='Control–Severe')
 
 
-def test_labels(analysis, spec):
-    tests = analysis['tests']
-    rows = tests[(tests.rule == spec['rule']) & (tests.organ == spec['organ'])
-                 & (tests.kind == spec.get('kind', 'attracts'))]
-    # Same named contrast for all units, never three independently minimized p-values.
-    contrast = spec.get('contrast', 'Control–Severe')
-    if contrast == 'none':
-        contrast = 'Control–Severe'
-    labels = []
-    for unit, label in [('FOV','FOV'), ('Biopsy','biopsy'), ('PatientID','patient')]:
-        q = rows.loc[(rows.unit == unit) & (rows.contrast == contrast), 'fdr']
-        labels.append(f'{label}: {q.iloc[0]:.3g}' if len(q) and pd.notna(q.iloc[0]) else f'{label}: not tested')
-    return contrast+' '+analysis.get('test_metric','occurrence')+' FDR · '+' · '.join(labels)
-
-
-def opposite_to_simpler(rules, comparisons):
-    """True where every significant simpler rule in the field has the other Kind; False without one."""
-    kind = rules.set_index(['FOV', 'rule_idx']).Kind
-    simpler_kind = kind.reindex(pd.MultiIndex.from_frame(comparisons[['FOV', 'simpler_idx']])).to_numpy()
-    opposite = comparisons.assign(opposite=simpler_kind != comparisons.Kind).groupby(['FOV', 'rule_idx']).opposite.all()
+def opposite_to_simpler(rules, comparisons, raw_rules):
+    """True where every raw parent and center variant has the opposite Lift direction."""
+    sides = raw_rules[['Antecedents', 'Consequents']].drop_duplicates()
+    sides['simpler_rule'] = [cell_rule_name(items(a), items(c))
+                             for a, c in zip(sides.Antecedents, sides.Consequents)]
+    simpler = raw_rules.merge(sides)[['FOV', 'simpler_rule', 'Lift']].drop_duplicates()
+    pairs = comparisons.merge(simpler, on=['FOV', 'simpler_rule'], how='left')
+    other = np.sign(pairs.Lift - 1).eq(pairs.Kind.map({'attracts': -1, 'avoids': 1}))
+    opposite = other.groupby([pairs.FOV, pairs.rule_idx]).all()
     keys = pd.MultiIndex.from_frame(rules[['FOV', 'rule_idx']])
     return pd.Series(opposite.reindex(keys, fill_value=False).to_numpy(), index=rules.index)
 
 
-def opposite_examples(passed, rules, comparisons, metadata, n):
-    """The n lowest-FDR rules of each size and shape, with one significant simpler rule each, as show_rule() reads them."""
-    picked = prepare(passed, metadata).sort_values('Individual_FDR').groupby(['n_items', 'Rule_Type']).head(n)
+def opposite_examples(passed, raw_rules, comparisons, metadata, n):
+    """The n lowest-FDR rules of each size and shape, with a raw parent each."""
+    picked = prepare(passed, metadata)
+    picked = picked.assign(shape=dh.rule_shape(picked), fdr=dh.rule_fdr(picked))
+    picked = picked.sort_values('fdr').groupby(['n_items', 'shape']).head(n)
     simpler = comparisons.drop_duplicates(['FOV', 'rule_idx'])[['FOV', 'rule_idx', 'simpler_rule']]
     picks = picked.merge(simpler).rename(columns={'simpler_rule': 'shorter rule'})
-    picks = picks.sort_values(['n_items', 'Rule_Type'], ignore_index=True)
+    picks = picks.sort_values(['n_items', 'shape'], ignore_index=True)
     picks.index += 1
-    return picks.assign(position=picks.index), prepare(rules[rules.FOV.isin(picks.FOV)], metadata)
+    parents = raw_rules[raw_rules.FOV.isin(picks.FOV)].drop_duplicates(
+        ['FOV', 'Antecedents', 'Consequents'])
+    parents = parents.assign(Kind=np.sign(parents.Lift - 1).map(
+        {1: 'attracts', -1: 'avoids', 0: 'neutral'}))
+    return picks.assign(position=picks.index), prepare(parents, metadata)

@@ -4,13 +4,8 @@ import numpy as np
 import pandas as pd
 
 import complex_investigation as ci
+import data_helper as dh
 import rule_metrics as rm
-
-
-def role_preserving_parent(parent_ant, parent_con, child_ant, child_con):
-    """A shorter parent can remove cell types, but cannot flip the arrow."""
-    return (set(map(ci.plain, parent_ant)).issubset(map(ci.plain, child_ant))
-            and set(map(ci.plain, parent_con)).issubset(map(ci.plain, child_con)))
 
 
 def prepare(rules, cells, metadata, config):
@@ -20,31 +15,16 @@ def prepare(rules, cells, metadata, config):
         (rules.Support >= config.support) & (rules.Confidence >= config.confidence),
         rules.Expected_support >= config.expected_support,
     )
-    passed = rules[(rules.Individual_FDR <= config.mining_fdr) & gate].copy()
+    passed = rules[(dh.rule_fdr(rules) <= config.mining_fdr) & gate].copy()
     grouped = ci.collapse_centers(passed)
-    complex_rows = passed[passed.n_items >= 3]
-    links = complex_rows[['FOV', 'Cell_Rule', 'Kind', 'Simpler_Rules']].copy()
-    links['parent_key'] = links.Simpler_Rules.map(ci.items)
-    links = links.explode('parent_key').dropna(subset='parent_key')
-    parents = passed[['FOV', 'Kind', 'stored_rule', 'Cell_Rule', 'n_items']].rename(
-        columns={'stored_rule': 'parent_key', 'Cell_Rule': 'parent'}
-    )
-    links = links.merge(parents, on=['FOV', 'Kind', 'parent_key'], validate='many_to_one')
-    links = links.rename(columns={'Cell_Rule': 'rule'})
-    links = links[links.n_items < links.rule.map(
-        rules.drop_duplicates('Cell_Rule').set_index('Cell_Rule').n_items
-    )]
+    links = passed.loc[passed.n_items >= 3, ['FOV', 'Cell_Rule', 'Kind', 'simpler_rules']]
+    links = links.explode('simpler_rules').rename(columns={'Cell_Rule': 'rule', 'simpler_rules': 'parent'})
+    parents = passed[['FOV', 'Kind', 'Cell_Rule']].drop_duplicates().rename(columns={'Cell_Rule': 'parent'})
+    links = links.merge(parents, on=['FOV', 'Kind', 'parent'])
     info = metadata.set_index('FOV')
     links['organ'] = links.FOV.map(info.Organ)
     pairs = links.groupby(['organ', 'rule', 'parent']).FOV.nunique().rename('matched_fovs').reset_index()
     pairs = pairs[pairs.matched_fovs >= 3]
-    definitions = rules.drop_duplicates('Cell_Rule').set_index('Cell_Rule')
-    # A true contextual parent preserves the arrow's two cell-type sides.
-    pairs = pairs[[
-        role_preserving_parent(definitions.at[parent, 'ant'], definitions.at[parent, 'con'],
-                               definitions.at[rule, 'ant'], definitions.at[rule, 'con'])
-        for rule, parent in zip(pairs.rule, pairs.parent)
-    ]]
 
     names = pd.Index(pd.unique(pd.concat([pairs.rule, pairs.parent], ignore_index=True)))
     fovs = metadata.FOV

@@ -28,7 +28,7 @@ def significance(rules, p_cut, max_fdr):
 
 
 def with_opposite(groups, opposite):
-    """significance() with a new group 0 in front: passed FDR and opposite to all its significant simpler rules."""
+    """significance() with a new group 0 in front: passed FDR and opposite to all its simpler rules."""
     return (groups + 1).where(groups.ge(0), -1).mask(groups.eq(0) & opposite, 0)
 
 

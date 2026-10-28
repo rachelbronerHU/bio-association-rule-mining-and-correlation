@@ -1,64 +1,25 @@
 """Drawing for the final figures. Shared pieces come from `vis_helper.py`."""
 from itertools import combinations
+from textwrap import fill
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import seaborn as sns
-from matplotlib.colors import to_hex
-from matplotlib.lines import Line2D
-from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon, Rectangle
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize, to_hex
+from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon
 from matplotlib.ticker import MaxNLocator
-from matplotlib.transforms import blended_transform_factory
 
-from vis_helper import (PANEL_FONTS, SHARE_COLORS, TEXT_WIDTH, _cell_handles, _prevalence_norm, _shares_panel,
-                        draw_row_trends, figure_titles, save_figure, INK, GRID, ATTRACTION, AVOIDANCE)
+from vis_helper import (_cell_handles, save_figure, INK, GRID, ZERO, ATTRACTION, AVOIDANCE,
+                        UP_ARROW, DOWN_ARROW)
 
 _FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
+PANEL_INCHES = 2.5
 
 KIND_COLORS = {"attracts": ATTRACTION, "avoids": AVOIDANCE}
 EDGE_LAYER = {"avoids": 1, "attracts": 2}
+PREVALENCE, PREVALENCE_CMAP = Normalize(0, 100), "YlOrRd"
 EDGE_HEADS = {"attracts": "-|>,head_length=0.6,head_width=0.4", "avoids": "-[,widthB=0.6,lengthB=0"}
-CLASS_COLORS = {
-    "Immune–Immune": "#E3DCF2",
-    "Immune–Epithel": "#FCE0C8",
-    "Immune–Stroma": "#D3EDDC",
-    "Tissue structure": "#F6EDC4",
-}
-
-
-def _class_bands(fig, ax, classes):
-    """A soft band behind each row's name and trend, coloured by the rule's class."""
-    across = blended_transform_factory(fig.transFigure, ax.transData)
-    right = ax.get_position().x1
-    for row, name in enumerate(classes):
-        ax.add_patch(Rectangle((0.005, row + 0.07), right - 0.005, 0.86, transform=across,
-                               color=CLASS_COLORS.get(name, "white"), lw=0, zorder=0,
-                               clip_on=False))
-
-
-def _class_key(fig, axes_top):
-    """One line of coloured dots naming the classes, just under the titles."""
-    points = fig.get_figheight() * 72
-    key_top = axes_top + 27 / points
-    dots = [Line2D([], [], ls="", marker="o", markersize=7, markerfacecolor=color,
-                   markeredgecolor=INK, markeredgewidth=0.3, label=name)
-            for name, color in CLASS_COLORS.items()]
-    fig.legend(handles=dots, loc="upper center", bbox_to_anchor=(0.5, key_top), ncol=len(dots),
-               frameon=False, fontsize=7.5, handletextpad=0.2, columnspacing=1.4,
-               borderpad=0, borderaxespad=0)
-    return key_top - 42 / points
-
-
-def _by_class(found, tested, classes):
-    """Rows grouped by class, in the key's order; unchanged when `classes` is None."""
-    if classes is None:
-        return found, tested, None
-    rank = {name: i for i, name in enumerate(CLASS_COLORS)}
-    classes = classes.reindex(found.index)
-    order = classes.map(rank).sort_values(kind="stable").index
-    return found.loc[order], tested.loc[order], classes.loc[order]
 
 
 def _fonts(size):
@@ -66,16 +27,27 @@ def _fonts(size):
             "legend.fontsize": size, "pdf.fonttype": 42}
 
 
-def _save_row(fig, axes, save, piece):
-    """Empty the folder `save` of its PDFs, then save the row in it, and each axes cut out
-    on its own as <piece>_1, <piece>_2 …"""
+def _fresh_folder(save):
+    """The folder `save` in summary_downloads, emptied of its PDFs."""
     folder = _FIGURE_DIR / save
     for old in folder.glob("*.pdf"):
         old.unlink()
-    save_figure(fig, save, figure_dir=folder)
-    for n, ax in enumerate(axes, 1):
-        box = ax.get_tightbbox().transformed(fig.dpi_scale_trans.inverted())
+    return folder
+
+
+def _save_parts(fig, parts, folder, name, piece):
+    """`fig` saved as folder/<name>, and each part (axes or subfigure) cut out on its own
+    as <piece>_1, <piece>_2 …"""
+    save_figure(fig, name, figure_dir=folder)
+    for n, part in enumerate(parts, 1):
+        box = part.get_tightbbox().transformed(fig.dpi_scale_trans.inverted())
         fig.savefig(folder / f"{piece}_{n}.pdf", bbox_inches=box)
+
+
+def _save_row(fig, parts, save, piece):
+    """Empty the folder `save` of its PDFs, then save the figure and its parts in it."""
+    folder = _fresh_folder(save)
+    _save_parts(fig, parts, folder, save, piece)
     return folder
 
 
@@ -86,6 +58,13 @@ def _save_key(handles, path, font_size):
         ax.axis("off")
         fig.savefig(path, bbox_inches="tight")
     plt.show()
+
+
+def pick_fovs(fovs, n, ends=False):
+    """`n` FOVs spread evenly along `fovs`, or with `ends` the first `n` and the last `n`."""
+    spots = (np.r_[:n, len(fovs) - n:len(fovs)] if ends
+             else np.linspace(0, len(fovs) - 1, n).round().astype(int))
+    return fovs[spots]
 
 
 def key_cells(cells, fovs, rules, n):
@@ -122,17 +101,30 @@ def _tag(ax, color):
                          transform=ax.transAxes, clip_on=False, zorder=4))
 
 
+def _row(n, width, gap_after=None):
+    """A figure with a row of `n` square axes, a blank half-width space after the first
+    `gap_after` of them, and how much larger a panel is than PANEL_INCHES."""
+    ratios = [1] * n if gap_after is None else [1] * gap_after + [0.5] + [1] * (n - gap_after)
+    fig, axes = plt.subplots(1, len(ratios), layout="constrained", squeeze=False, width_ratios=ratios,
+                             figsize=(width, width / sum(ratios)))
+    axes = list(axes[0])
+    if gap_after is not None:
+        axes.pop(gap_after).axis("off")
+    return fig, axes, width / sum(ratios) / PANEL_INCHES
+
+
 def plot_rules_per_fov(counts, marked, colors, labels, width, font_size, save=None):
     """Stacked bar of rules per FOV, one colour per column of `counts`, and under each marked FOV
-    a dot in its tag colour.
+    a dot in its tag colour; no dots when `marked` is empty.
 
     save : the figure's name; its colour key is saved beside it as <save>_key.
     """
     with plt.rc_context(_fonts(font_size)):
         fig, ax = plt.subplots(layout="constrained", figsize=(width, 0.6 * width))
         counts.plot.bar(stacked=True, width=1, linewidth=0, color=colors, legend=False, ax=ax)
-        ax.scatter([counts.index.get_loc(fov) for fov in marked], [0] * len(marked), s=150,
-                   c=fov_tags(len(marked)), clip_on=False, zorder=3, transform=ax.get_xaxis_transform())
+        if len(marked):
+            ax.scatter([counts.index.get_loc(fov) for fov in marked], [0] * len(marked), s=150,
+                       c=fov_tags(len(marked)), clip_on=False, zorder=3, transform=ax.get_xaxis_transform())
         ax.set(xticks=[], xlabel="", xlim=(-0.5, len(counts) - 0.5))
         ax.yaxis.set_major_locator(MaxNLocator(3))
         ax.spines[["top", "right"]].set_visible(False)
@@ -144,24 +136,27 @@ def plot_rules_per_fov(counts, marked, colors, labels, width, font_size, save=No
 
 
 def plot_fov_maps(cells, fovs, cell_colors, key, width, font_size, dot=10, scale_um=100,
-                  scale_font=None, save=None):
+                  scale_font=None, gap_after=None, save=None):
     """A row of FOV maps, cells coloured by type, each with a `scale_um` bar.
 
     key  : the cell types named in the cell type key, in its order.
-    dot  : cell dot area on a 400 um map; larger maps get smaller dots.
+    dot  : cell dot area on a 400 um map of PANEL_INCHES; larger maps get smaller dots.
     scale_font : font size of the scale bar's label; `font_size` when None.
+    gap_after : a blank space after this many maps; none when None.
     save : a folder in summary_downloads, emptied of its PDFs, then given the row,
            each map on its own (map_1, map_2 …) and the cell type key.
     """
     with plt.rc_context(_fonts(font_size)):
-        fig, axes = plt.subplots(1, len(fovs), layout="constrained", squeeze=False,
-                                 figsize=(width, width / len(fovs)))
-        for fov, ax, tag in zip(fovs, axes[0], fov_tags(len(fovs))):
-            _fov_map(ax, cells[cells["fov"].eq(fov)], cell_colors, dot, scale_um, scale_font)
+        fig, axes, scale = _row(len(fovs), width, gap_after)
+        for fov, ax, tag in zip(fovs, axes, fov_tags(len(fovs))):
+            _fov_map(ax, cells[cells["fov"].eq(fov)], cell_colors, dot * scale ** 2, scale_um, scale_font)
             _tag(ax, tag)
     if save:
-        folder = _save_row(fig, axes[0], save, "map")
-        _save_key(_cell_handles(key, cell_colors), folder / "cells.pdf", font_size)
+        folder = _save_row(fig, axes, save, "map")
+        handles = _cell_handles(key, cell_colors)
+        for handle in handles:
+            handle.set_markersize(0.8 * font_size)
+        _save_key(handles, folder / "cells.pdf", font_size)
     plt.show()
 
 
@@ -233,174 +228,121 @@ def _save_edge_key(path, font_size, line, strongest):
 
 
 def plot_rule_networks(rules, fovs, cell_colors, width, font_size, node=150, line=1.5, strongest=3,
-                       save=None):
+                       gap_after=None, save=None):
     """A row of rule networks, one per FOV, drawn by `_network`; the nodes of each are ordered
     on their circle so as few lines cross as can be found.
 
     rules     : one row per rule, with 'FOV', 'center', 'neighbor', 'Kind' and 'Lift'.
-    node      : node dot area; line : line width per unit of |log2 lift|, which stops at `strongest`.
+    node      : node dot area; line : line width per unit of |log2 lift|, which stops at `strongest`;
+                both for a network of PANEL_INCHES.
+    gap_after : a blank space after this many networks; none when None.
     save      : a folder in summary_downloads, emptied of its PDFs, then given the row, each
                 network on its own (network_1 …) and the edge key.
     """
     with plt.rc_context(_fonts(font_size)):
-        fig, axes = plt.subplots(1, len(fovs), layout="constrained", squeeze=False,
-                                 figsize=(width, width / len(fovs)))
-        for fov, ax, tag in zip(fovs, axes[0], fov_tags(len(fovs))):
+        fig, axes, scale = _row(len(fovs), width, gap_after)
+        node, line = node * scale ** 2, line * scale
+        for fov, ax, tag in zip(fovs, axes, fov_tags(len(fovs))):
             _network(ax, rules[rules["FOV"].eq(fov)], cell_colors, node, line, strongest)
             _tag(ax, tag)
     if save:
-        folder = _save_row(fig, axes[0], save, "network")
+        folder = _save_row(fig, axes, save, "network")
         _save_edge_key(folder / "edges.pdf", font_size, line, strongest)
     plt.show()
 
 
-def _cell_share_rows(ax, rules, cells, eligibility, metadata, organ, score, stages):
-    """One small cell share panel per rule, top to bottom, on the FOVs where it was testable."""
-    ax.axis("off")
-    for row, rule in enumerate(rules):
-        inset = ax.inset_axes([0, 1 - (row + 0.9) / len(rules), 1, 0.8 / len(rules)])
-        _shares_panel(inset, cells, eligibility, metadata,
-                      {"organ": organ, "score": score, "rule": rule}, stages, compact=True)
+def stars(fdr):
+    return "***" if fdr <= 0.001 else "**" if fdr <= 0.01 else "*" if fdr <= 0.05 else ""
 
 
-def _share_key(ax):
-    key = [Line2D([], [], color=color, marker="D", markersize=3, lw=1, label=label)
-           for color, label in zip(SHARE_COLORS, ("first cell type", "second cell type"))]
-    ax.legend(handles=key, title="cells in testable FOVs (%)", loc="lower center",
-              bbox_to_anchor=(0.5, 1), ncol=2, frameon=False, fontsize=6, title_fontsize=7,
-              handlelength=1.5, columnspacing=0.8, borderaxespad=0.3)
+def _count_rows(ax, counts, color, heights=None, rising=None):
+    """One line per row across its columns, at `heights` (default `counts`), each point
+    labelled with its count; with `rising` (one bool per row), an up or down arrow at the end."""
+    x = np.arange(counts.shape[1])
+    heights = counts if heights is None else heights
+    for row, (line, height) in enumerate(zip(counts.to_numpy(float), heights.to_numpy(float))):
+        y = row + 0.9 - 0.5 * height / max(np.nanmax(height), 1e-9)
+        shown = ~np.isnan(y)
+        ax.plot(x[shown], y[shown], color=color, lw=3, marker="o", markersize=8)
+        for at in x[shown]:
+            ax.annotate(f"{line[at]:.0f}", (at, y[at]), xytext=(0, 6), textcoords="offset points",
+                        ha="center", va="bottom", color=color)
+        if rising is not None:
+            up = rising.iloc[row]
+            ax.plot(x[-1] + 0.5, y[-1], "^" if up else "v", markersize=14,
+                    color=UP_ARROW if up else DOWN_ARROW)
+    ax.set(xlim=(-0.4, len(x) - 0.4 + 0.5 * (rising is not None)), ylim=(len(counts), 0),
+           xticks=[], yticks=[])
+    ax.spines[:].set_visible(False)
 
 
-def _share(found, tested):
-    return 100 * found / tested.replace(0, np.nan)
+def _trend_width(groups, cell, trend):
+    """Width of a trend block in inches: two line plots, the squares, and a square's gap on each side."""
+    return 2 * trend + (groups + 2) * cell
 
 
-def _rule_rows(ax_trend, ax, ax_cells, found, tested, fdr=None, skipped=None, line_color=None,
-               cells=None, eligibility=None, metadata=None, organ=None, score=None, norm=None):
-    """The rows of a rule change heatmap: trend, share of testable FOVs per group, FDR,
-    and, when `ax_cells` is given, the rule's two cell types. `norm` defaults to these rows' own."""
-    share = _share(found, tested)
-    norm = norm or _prevalence_norm(share)
-    text = (share.map(lambda v: "-" if np.isnan(v) else f"{v:.0f}%")
-            + "\n" + found.astype(str) + "/" + tested.astype(str))
-    groups = list(share.columns)
-    if fdr is not None:
-        share["FDR"], text["FDR"] = np.nan, ""
-    sns.heatmap(share, annot=text, fmt="", cmap="YlOrRd", norm=norm,
-                cbar=False, linewidths=0.5, linecolor="white",
-                annot_kws={"fontsize": 6}, ax=ax)
-    ax.xaxis.tick_top()
-    ax.set(xlabel="", ylabel="", yticks=[])
-    ax.tick_params(length=0)
-    if fdr is not None:
-        ax.axvline(len(groups), color="white", lw=6)
-        for row, value in enumerate(fdr.reindex(share.index)):
-            ax.text(len(groups) + 0.5, row + 0.5, "-" if np.isnan(value) else f"{value:.2g}",
-                    ha="center", va="center", fontsize=6.5, color=INK)
-    draw_row_trends(ax_trend, share[groups], skipped, color=line_color)
-    if ax_cells is not None:
-        _cell_share_rows(ax_cells, share.index, cells, eligibility, metadata, organ, score, groups)
+def _trend_block(sub, found, tested, fdr, kind, cell, trend):
+    """Units with each rule per group, drawn at their share of the testable units, that share
+    as squares, and the testable units per group; with `fdr`, its stars and an up or down arrow
+    from the first group to the last. `cell` is a square's side
+    and `trend` a line plot's width, in inches; `sub` is one row taller than the rules, for the
+    group names."""
+    rows, groups = found.shape
+    width = _trend_width(groups, cell, trend)
+    box = lambda left, size: sub.add_axes([left / width, 0, size / width, rows / (rows + 1)])
+    ax_found, ax_share = box(0, trend), box(trend + cell, groups * cell)
+    ax_tested = box(trend + (groups + 2) * cell, trend)
+    share = 100 * found / tested
+    rising = None if fdr is None else share.iloc[:, -1] >= share.iloc[:, 0]
+    _count_rows(ax_found, found, KIND_COLORS[kind], share, rising)
+    ax_found.set_yticks(np.arange(rows) + 0.5, found.index.str.replace(" -> ", " → "))
+    ax_found.tick_params(length=0)
+    ax_share.imshow(share, cmap=PREVALENCE_CMAP, norm=PREVALENCE, aspect="auto",
+                    extent=(-0.5, groups - 0.5, rows, 0))
+    for row in range(1, rows):
+        ax_share.axhline(row, color="white", lw=4)
+    for column in range(1, groups):
+        ax_share.axvline(column - 0.5, color="white", lw=4)
+    ax_share.set_xticks(range(groups), [fill(str(group), 9, break_long_words=False)
+                                        for group in share.columns])
+    ax_share.set_yticks(np.arange(rows) + 0.5, [] if fdr is None else fdr.map(stars))
+    ax_share.tick_params(length=0, top=True, labeltop=True, bottom=False, labelbottom=False,
+                         left=False, labelleft=False, right=True, labelright=True)
+    ax_share.spines[:].set_visible(False)
+    _count_rows(ax_tested, tested, ZERO)
 
 
-def plot_rule_change_heatmap(found, tested, title, organ=None, subtitle=None, params=None,
-                             note=None, skipped=None, fdr=None, classes=None, line_color=None,
-                             cells=None, eligibility=None, metadata=None, score=None, save=None):
-    """Share of testable FOVs that have each rule, per group, with the rule's trend on the left.
+def plot_rule_trends(panels, unit, font_size, cell=1.8, trend=3.5, save=None):
+    """One titled figure per panel: blocks of rules across groups, one under the other, drawn
+    by `_trend_block` at the same size in every panel.
 
-    found / tested : rule x group counts.
-    skipped        : a group shown but not used to rank the rules, drawn as an open point.
-    fdr            : optional value per rule, written in its own last column.
-    classes        : optional class per rule (see `rule_class`), drawn as a soft band behind its row;
-                     rows are then grouped by class, in the key's order.
-    line_color     : optional single colour for the trend lines, which then end in an up or down arrow.
-    cells, eligibility, metadata, score : when given, a column on the right with each rule's
-                     two cell types per group, on its testable FOVs (rule x FOV `eligibility`).
+    panels : {title: blocks}; a block is a dict with 'found' and 'tested' (rule x group counts),
+             'kind', and optionally 'fdr' (per rule) for stars and arrows.
+    unit   : what was counted, "FOV" or "patient", for the colour scale's label.
+    cell, trend : a square's side and a line plot's width, in inches.
+    save   : a folder in summary_downloads, emptied of its PDFs, then given each panel, named
+             after its title, each of its blocks on its own (<panel>_1, <panel>_2 …) and the colour scale.
     """
-    found, tested, classes = _by_class(found, tested, classes)
-    with_cells = cells is not None
-    with plt.rc_context(PANEL_FONTS):
-        fig, (ax_trend, ax, *ax_cells) = plt.subplots(
-            1, 3 if with_cells else 2,
-            figsize=(TEXT_WIDTH, 1.6 + 0.32 * len(found) + (0.2 if classes is not None else 0)),
-            gridspec_kw={"width_ratios": [1, 2.6, 1.8] if with_cells else [1, 2.6], "wspace": 0.03},
-        )
-        ax_cells = ax_cells[0] if with_cells else None
-        _rule_rows(ax_trend, ax, ax_cells, found, tested, fdr, skipped, line_color,
-                   cells, eligibility, metadata, organ, score)
-        ax_trend.set_title("change across groups", fontsize=7)
-        if with_cells:
-            _share_key(ax_cells)
-        axes_top = figure_titles(fig, title, organ, subtitle=subtitle, params=params, note=note)
-        if classes is not None:
-            axes_top = _class_key(fig, axes_top)
-        fig.subplots_adjust(left=0.25, right=0.99, bottom=0.02, top=axes_top)
-        if classes is not None:
-            _class_bands(fig, ax_trend, classes)
-    save_figure(fig, save, figure_dir=_FIGURE_DIR)
-    plt.show()
-
-
-_TOP_WIDTHS = {"width_ratios": [1, 2.6, 1.8], "wspace": 0.03, "left": 0.25, "right": 0.99}
-
-
-def _top_block(fig, grid, row, block, cells, metadata, widest, norm, key):
-    """One block of `plot_top_gaps` in one grid row: trend, squares, cell shares."""
-    ax_trend, ax, ax_cells = (fig.add_subplot(grid[row, column]) for column in range(3))
-    found, tested, classes = _by_class(block["found"], block["tested"], block.get("classes"))
-    _rule_rows(ax_trend, ax, ax_cells, found, tested, block["fdr"],
-               block["skipped"], block["line_color"], cells, block["eligibility"], metadata,
-               block["organ"], block["score"], norm)
-    pad = (widest - found.shape[1] - 1) / 2
-    ax.set_xlim(-pad, widest - pad)
-    if classes is not None:
-        _class_bands(fig, ax_trend, classes)
-    if key:
-        _share_key(ax_cells)
-    return ax
-
-
-def plot_top_gaps(blocks, cells, metadata, title, subtitle=None, params=None, paper=False, save=None):
-    """The strongest rules of several rule change heatmaps, one block each, drawn like their rows.
-
-    blocks : dicts with 'title', 'found', 'tested', 'fdr', 'skipped', 'line_color',
-             'eligibility', 'organ', 'score' and optionally 'classes',
-             as `plot_rule_change_heatmap` takes them.
-    paper  : one figure per block, saved as save_1, save_2 …, with no titles; they are printed.
-    Squares keep one width and one colour scale in every block, centred under the widest.
-    """
-    norm = _prevalence_norm(pd.concat([_share(block["found"], block["tested"]) for block in blocks]))
-    rows = [len(block["found"]) for block in blocks]
-    widest = max(block["found"].shape[1] for block in blocks) + 1.5
-    row_inch, gap_inch = 0.32, 0.5
-    with_classes = any(block.get("classes") is not None for block in blocks)
-    if paper:
-        print(title, subtitle, params, sep="\n")
-        for number, block in enumerate(blocks):
-            print(f"\n{number + 1}. {block['title']}")
-            head_inch = (0.55 + 0.25 * with_classes) if number == 0 else 0.25
-            height = head_inch + row_inch * len(block["found"]) + 0.05
-            with plt.rc_context(PANEL_FONTS):
-                fig = plt.figure(figsize=(TEXT_WIDTH, height))
-                grid = fig.add_gridspec(1, 3, bottom=0.05 / height, top=1 - head_inch / height,
-                                        **_TOP_WIDTHS)
-                _top_block(fig, grid, 0, block, cells, metadata, widest, norm, key=number == 0)
-                if number == 0 and with_classes:
-                    _class_key(fig, 1 - 27 / (height * 72))
-            save_figure(fig, save and f"{save}_{number + 1}", figure_dir=_FIGURE_DIR)
-            plt.show()
+    if not panels:
+        print("No rule passes.")
         return
-    with plt.rc_context(PANEL_FONTS):
-        fig = plt.figure(figsize=(TEXT_WIDTH, 1.4 + 0.2 * with_classes
-                                  + row_inch * sum(rows) + gap_inch * len(blocks)))
-        axes_top = figure_titles(fig, title, subtitle=subtitle, params=params)
-        if with_classes:
-            axes_top = _class_key(fig, axes_top)
-        grid = fig.add_gridspec(len(blocks), 3, height_ratios=rows,
-                                hspace=gap_inch / (row_inch * np.mean(rows)),
-                                bottom=0.02, top=axes_top, **_TOP_WIDTHS)
-        for number, block in enumerate(blocks):
-            ax = _top_block(fig, grid, number, block, cells, metadata, widest, norm, key=number == 0)
-            fig.text(0.01, ax.get_position().y1 + 20 / 72 / fig.get_figheight(), block["title"],
-                     fontsize=8, color=INK, fontweight="medium", va="bottom")
-    save_figure(fig, save, figure_dir=_FIGURE_DIR)
-    plt.show()
+    folder = _fresh_folder(save) if save else None
+    for title, blocks in panels.items():
+        heights = [cell] + [(len(block["found"]) + 1) * cell for block in blocks]
+        with plt.rc_context(_fonts(font_size)):
+            fig = plt.figure(figsize=(_trend_width(blocks[0]["found"].shape[1], cell, trend), sum(heights)))
+            head, *subs = fig.subfigures(len(heights), 1, height_ratios=heights, squeeze=False)[:, 0]
+            head.text(0.5, 0.5, title, ha="center", va="center", fontsize=1.2 * font_size)
+            for sub, block in zip(subs, blocks):
+                _trend_block(sub, block["found"], block["tested"], block.get("fdr"), block["kind"], cell, trend)
+        if save:
+            name = title.replace(" · ", "_").replace(" ", "_")
+            _save_parts(fig, subs, folder, name, name)
+        plt.show()
+    if save:
+        with plt.rc_context(_fonts(font_size)):
+            key, ax = plt.subplots(figsize=(6, 0.4))
+            key.colorbar(ScalarMappable(PREVALENCE, PREVALENCE_CMAP), cax=ax, orientation="horizontal",
+                         label=f"% of testable {unit}s")
+            key.savefig(folder / "prevalence.pdf", bbox_inches="tight")
+        plt.show()

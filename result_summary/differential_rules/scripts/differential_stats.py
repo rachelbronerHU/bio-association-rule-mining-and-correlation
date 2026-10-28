@@ -182,6 +182,64 @@ def compare(states, units_a, units_b, label_a, label_b, min_eligible=3,
     return result.sort_values("effect_size", key=abs, ascending=False)
 
 
+def spread_pvalues(values, labels, n_permutations=5_000, seed=0, chunk=500):
+    """Permutation p-values for how far each row's group means spread apart.
+
+    values : rows x units, NaN where a unit does not count for that row.
+    labels : integer group code of each unit. The spread is the between-group sum of
+             squares, so two groups give the usual two-sided test of their difference.
+    """
+    rng = np.random.default_rng(seed)
+    valid = np.isfinite(values).astype(float)
+    numbers = np.nan_to_num(values)
+    overall = numbers.sum(axis=1) / valid.sum(axis=1)
+    groups = np.unique(labels)
+
+    def spread(sets):
+        onehot = (sets[..., None] == groups).astype(float)
+        count, total = valid @ onehot, numbers @ onehot
+        mean = np.divide(total, count, out=np.zeros_like(total), where=count > 0)
+        return (count * (mean - overall[:, None]) ** 2).sum(axis=2)
+
+    observed = spread(labels[None])[0]
+    beyond = np.zeros(len(values))
+    for start in range(0, n_permutations, chunk):
+        sets = np.array([rng.permutation(labels) for _ in range(min(chunk, n_permutations - start))])
+        beyond += (spread(sets) >= observed - 1e-12).sum(axis=0)
+    return (beyond + 1) / (n_permutations + 1)
+
+
+def trend_test(values, groups, order, all_groups=False, min_testable=10, min_share=0.1,
+               n_permutations=5_000):
+    """Per rule: units with it and testable units per group, and the permutation p and FDR
+    of its change across the groups. None when fewer than two groups are left.
+
+    values     : rule x unit; 1 has the rule, 0 testable without it, NaN not testable.
+    groups     : the group of each unit, a Series over the units.
+    order      : groups in drawing order; one with fewer than `min_testable` units is dropped.
+    all_groups : test all the groups at once; otherwise the first against the last.
+    A rule is tested when each tested group has `min_testable` testable units and it is found
+    in `min_share` of their testable units, the tested groups counted together.
+    """
+    order = [group for group in order if groups.eq(group).sum() >= min_testable]
+    if len(order) < 2:
+        return None
+    groups = groups[groups.isin(order)]
+    values = values[groups.index]
+    found = values.T.groupby(groups).sum().T.reindex(columns=order)
+    tested = values.notna().T.groupby(groups).sum().T.reindex(columns=order)
+    used = order if all_groups else [order[0], order[-1]]
+    keep = (tested[used].ge(min_testable).all(axis=1)
+            & found[used].sum(axis=1).ge(min_share * tested[used].sum(axis=1)))
+    in_test = groups.isin(used)
+    p = spread_pvalues(values.loc[keep, in_test].to_numpy(float),
+                       pd.factorize(groups[in_test])[0], n_permutations)
+    return {"found": found[keep], "tested": tested[keep],
+            "p": pd.Series(p, index=found.index[keep]),
+            "fdr": pd.Series(multipletests(p, method="fdr_bh")[1] if len(p) else p,
+                             index=found.index[keep])}
+
+
 def correct_together(results):
     """Add FDR values using one correction across all supplied result tables."""
     if not results:
@@ -287,8 +345,9 @@ def severity_screen(states, metadata, organ, group_col, stages, min_eligible=3,
     return ordered, pairs
 
 
-def aggregate_fovs(values, metadata, unit_col="Biopsy"):
-    """Average a rule-by-FOV matrix within each independent biological unit."""
+def aggregate_fovs(values, metadata, unit_col="Biopsy", how="mean"):
+    """Pool a rule-by-FOV matrix within each independent biological unit, by `how`
+    ("max" on 0/1 values: 1 when any of the unit's FOVs has the rule)."""
     fov_to_unit = (
         metadata[["FOV", unit_col]].drop_duplicates("FOV").set_index("FOV")[unit_col]
     )
@@ -296,7 +355,7 @@ def aggregate_fovs(values, metadata, unit_col="Biopsy"):
     transposed = values.loc[:, columns].T.copy()
     transposed[unit_col] = fov_to_unit.reindex(columns).to_numpy()
     transposed = transposed.dropna(subset=[unit_col])
-    return transposed.groupby(unit_col, sort=False).mean().T
+    return transposed.groupby(unit_col, sort=False).agg(how).T
 
 
 def direction_matrix(states, state):

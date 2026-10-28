@@ -72,6 +72,8 @@ SETTINGS = Settings(
     avoidance_max_lift=0.8,
     avoidance_max_leverage=None,
     avoidance_min_expected_meetings=30,  # expect at least this many meetings before "they don't meet" counts
+    avoidance_min_expected_support=0.01,
+    avoidance_max_confidence=0.5,
 
     min_label_count=5,          # ignore rules naming a cell type this rare in the sample
 )

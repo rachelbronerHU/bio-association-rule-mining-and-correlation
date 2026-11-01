@@ -6,7 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import Normalize, to_hex
+from matplotlib.colors import Normalize, to_hex, to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon, Rectangle
 from matplotlib.ticker import MaxNLocator
@@ -23,6 +23,10 @@ PREVALENCE, PREVALENCE_CMAP = Normalize(0, 100), "YlOrRd"
 PC_TAG_MAPS = ("Blues", "YlOrBr")
 TRAJECTORY_MAP = "plasma"
 EDGE_HEADS = {"attracts": "-|>,head_length=0.6,head_width=0.4", "avoids": "-[,widthB=0.6,lengthB=0"}
+FADED = 0.2
+BACKDROP, BACKDROP_SIZE = "#f0efeb", 0.5
+PALE, PALE_GREY, DARKER = 0.3, "#c9c8c2", 0.35
+RULE_SIZE = 2.5
 
 
 def _fonts(size):
@@ -80,10 +84,18 @@ def key_cells(cells, fovs, rules, n):
     return [cell for cell in shown["cell type"].value_counts().index if cell in keep]
 
 
-def _fov_map(ax, cells, colors, dot, scale_um, scale_font):
+def _fov_map(ax, cells, colors, dot, scale_um, scale_font, colored=None):
+    """Cells by type; with `colored`, only those types in colour, RULE_SIZE times the dot, the rest in
+    BACKDROP underneath, BACKDROP_SIZE times the dot."""
     size = cells["x_um"].max()
-    ax.scatter(cells["x_um"], cells["y_um"], s=dot * (400 / size) ** 2, linewidths=0,
-               c=cells["cell type"].astype(str).map(colors).tolist())
+    types = cells["cell type"].astype(str)
+    color, scale = types.map(colors), 1
+    if colored is not None:
+        kept = types.isin(colored)
+        order = kept.argsort(kind="stable")
+        cells, color = cells.iloc[order], color.where(kept, BACKDROP).iloc[order]
+        scale = np.where(kept, RULE_SIZE, BACKDROP_SIZE)[order]
+    ax.scatter(cells["x_um"], cells["y_um"], s=dot * (400 / size) ** 2 * scale, linewidths=0, c=color.tolist())
     ax.plot([size - scale_um, size], [size, size], color=INK, lw=4, solid_capstyle="butt")
     ax.annotate(f"{scale_um} µm", (size, size), xytext=(0, 4), textcoords="offset points",
                 ha="right", va="bottom", color=INK, fontsize=scale_font)
@@ -208,9 +220,11 @@ def _circle_order(nodes, pairs):
     return order
 
 
-def _network(ax, rules, colors, node, line, strongest):
+def _network(ax, rules, colors, node, line, strongest, shown=None):
     """One FOV's rules on a circle of cell types: centre to neighbour, → attracts, ⊣ avoids,
-    thicker for a stronger |log2 lift|. A rule of a type with itself is a small loop."""
+    thicker for a stronger |log2 lift|. A rule of a type with itself is a small loop.
+    With `shown` (centre, neighbour), the other rules are faded behind it and its two cell types
+    are dark, as counted cells are in `_rule_map`."""
     nodes = set(rules["center"]) | set(rules["neighbor"])
     pairs = {tuple(sorted(pair)) for pair in zip(rules["center"], rules["neighbor"]) if pair[0] != pair[1]}
     order = _circle_order(nodes, list(pairs))
@@ -219,16 +233,18 @@ def _network(ax, rules, colors, node, line, strongest):
     strength = np.log2(rules["Lift"].clip(lower=2.0 ** -strongest)).abs().clip(upper=strongest)
     for rule, lw in zip(rules.itertuples(), line * strength):
         color, layer = KIND_COLORS[rule.Kind], EDGE_LAYER[rule.Kind]
+        alpha, layer = (FADED, 0) if shown and (rule.center, rule.neighbor) != shown else (1, layer)
         if rule.center == rule.neighbor:
-            ax.add_patch(Circle(1.1 * xy[rule.center], 0.1, fill=False, color=color, lw=lw, zorder=layer))
+            ax.add_patch(Circle(1.1 * xy[rule.center], 0.1, fill=False, color=color, lw=lw, alpha=alpha,
+                                zorder=layer))
         else:
             ax.add_patch(FancyArrowPatch(xy[rule.center], xy[rule.neighbor], arrowstyle=EDGE_HEADS[rule.Kind],
                                          connectionstyle="arc3,rad=0.2", mutation_scale=5 * line,
                                          shrinkA=node ** 0.5, shrinkB=node ** 0.5, color=color, lw=lw,
-                                         zorder=layer))
+                                         alpha=alpha, zorder=layer))
     if order:
         ax.scatter(*np.array([xy[cell] for cell in order]).T, s=node, linewidths=0, zorder=3,
-                   c=[colors[cell] for cell in order])
+                   c=[_shade(colors[cell], [1])[0] if shown and cell in shown else colors[cell] for cell in order])
     ax.set(xticks=[], yticks=[], aspect="equal", xlim=(-1.25, 1.25), ylim=(-1.25, 1.25))
     ax.spines[:].set_visible(False)
 
@@ -271,6 +287,74 @@ def plot_rule_networks(rules, fovs, cell_colors, width, font_size, node=150, lin
         folder = _save_row(fig, axes, save, "network")
         _save_edge_key(folder / "edges.pdf", font_size, line, strongest)
     plt.show()
+
+
+def _shade(color, score):
+    """`color` per score: at 0 pale, PALE of it on PALE_GREY; at 1 dark, DARKER of the way to black."""
+    color, score = np.array(to_rgb(color)), np.asarray(score, float)[:, None]
+    pale, dark = PALE * color + (1 - PALE) * np.array(to_rgb(PALE_GREY)), color * (1 - DARKER)
+    return pale + (dark - pale) * score
+
+
+def _rule_map(ax, cells, score, colors, dot, scale_um):
+    """The FOV in BACKDROP, and the cells with a `score` RULE_SIZE times the dot in their type's colour,
+    dark when counted for the rule and pale when not, the counted on top."""
+    _fov_map(ax, cells, colors, dot, scale_um, None, colored=())
+    scored = cells.assign(score=score).dropna(subset="score").sort_values("score")
+    shades = [_shade(colors[cell_type], [value])[0]
+              for cell_type, value in zip(scored["cell type"].astype(str), scored["score"])]
+    ax.scatter(scored["x_um"], scored["y_um"], s=RULE_SIZE * dot * (400 / cells["x_um"].max()) ** 2,
+               linewidths=0, c=shades)
+
+
+def _rule_key(ax, rule, colors):
+    """Per cell type of `rule`, centre on top: its counted and not counted dot as in `_rule_map`, then its name."""
+    for row, cell_type in enumerate(rule):
+        ax.scatter([0, 1], [row, row], s=(0.8 * plt.rcParams["font.size"]) ** 2, linewidths=0,
+                   c=_shade(colors[cell_type], [1, 0]))
+        ax.text(1.7, row, cell_type, va="center")
+    ax.set(xlim=(-0.6, 6), ylim=(len(rule) + 0.5, -1.5))
+    ax.axis("off")
+
+
+def plot_rule_examples(cells, examples, rules, cell_colors, key, width, font_size, network=True, dot=10,
+                       node=150, line=1.5, strongest=3, scale_um=100, notes=None, save=None):
+    """One row per example: the FOV's map and its map with only the rule's two cell types in colour, both
+    with those two types as dark as counted cells are in `_rule_map`, its rule map by `_rule_map`, with
+    `network` its rule network with the rule in front, and the rule map's key by `_rule_key`; drawn as in
+    `plot_fov_maps` and `plot_rule_networks`.
+
+    examples : {name: (FOV, (centre, neighbour), score)}, the score as `rule_examples_helper.rule_scores`
+               gives it.
+    rules    : as in `plot_rule_networks`.
+    key      : the cell types named in the cell type key, in its order.
+    notes    : {name: text} printed above each example's row; nothing when None.
+    save     : a folder in summary_downloads, emptied of its PDFs, then given each row named after its
+               example, each of its squares on its own (<name>_1 …), the cell type key, and with
+               `network` the edge key.
+    """
+    folder = _fresh_folder(save) if save else None
+    for name, (fov, rule, score) in examples.items():
+        if notes:
+            print(notes[name])
+        shown = cells[cells["fov"].eq(fov)]
+        dark = cell_colors | {cell_type: to_hex(_shade(cell_colors[cell_type], [1])[0]) for cell_type in rule}
+        with plt.rc_context(_fonts(font_size)):
+            fig, axes, scale = _row(4 + network, width)
+            _fov_map(axes[0], shown, dark, dot * scale ** 2, scale_um, None)
+            _fov_map(axes[1], shown, dark, dot * scale ** 2, scale_um, None, colored=rule)
+            _rule_map(axes[2], shown, score, cell_colors, dot * scale ** 2, scale_um)
+            if network:
+                _network(axes[3], rules[rules["FOV"].eq(fov)], cell_colors, node * scale ** 2, line * scale,
+                         strongest, shown=rule)
+            _rule_key(axes[-1], rule, cell_colors)
+        if save:
+            _save_parts(fig, axes, folder, name, name)
+        plt.show()
+    if save:
+        save_cell_key(key, cell_colors, font_size, save)
+        if network:
+            _save_edge_key(folder / "edges.pdf", font_size, line * scale, strongest)
 
 
 def stars(fdr):

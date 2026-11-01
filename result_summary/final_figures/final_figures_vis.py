@@ -10,11 +10,13 @@ from matplotlib.colors import Normalize, to_hex, to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon, Rectangle
 from matplotlib.ticker import MaxNLocator
+from matplotlib.transforms import Bbox
 
 from vis_helper import (_category_colors, _cell_handles, save_figure, INK, GRID, ZERO, ATTRACTION, AVOIDANCE,
                         UP_ARROW, DOWN_ARROW)
 
 _FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
+_KEY_DIR = _FIGURE_DIR / "keys"
 PANEL_INCHES = 2.5
 
 KIND_COLORS = {"attracts": ATTRACTION, "avoids": AVOIDANCE}
@@ -42,13 +44,19 @@ def _fresh_folder(save):
     return folder
 
 
+def _save_boxes(fig, boxes, folder):
+    """`fig` cut to each box of `boxes` ({name: box in display units}), saved as folder/<name>.pdf,
+    saying where."""
+    for name, box in boxes.items():
+        fig.savefig(folder / f"{name}.pdf", bbox_inches=box.transformed(fig.dpi_scale_trans.inverted()))
+    print(f"saved {', '.join(boxes)} in {folder}")
+
+
 def _save_parts(fig, parts, folder, name, piece):
     """`fig` saved as folder/<name>, and each part (axes or subfigure) cut out on its own
     as <piece>_1, <piece>_2 …"""
     save_figure(fig, name, figure_dir=folder)
-    for n, part in enumerate(parts, 1):
-        box = part.get_tightbbox().transformed(fig.dpi_scale_trans.inverted())
-        fig.savefig(folder / f"{piece}_{n}.pdf", bbox_inches=box)
+    _save_boxes(fig, {f"{piece}_{n}": part.get_tightbbox() for n, part in enumerate(parts, 1)}, folder)
 
 
 def _save_row(fig, parts, save, piece):
@@ -58,12 +66,13 @@ def _save_row(fig, parts, save, piece):
     return folder
 
 
-def _save_key(handles, path, font_size):
+def _save_key(handles, font_size, name, folder=_KEY_DIR):
+    """A legend of `handles`, saved as folder/<name>.pdf, by default in summary_downloads/keys."""
     with plt.rc_context(_fonts(font_size)):
         fig, ax = plt.subplots(figsize=(1, 1))
         ax.legend(handles=handles, loc="center", frameon=False)
         ax.axis("off")
-        fig.savefig(path, bbox_inches="tight")
+        save_figure(fig, name, figure_dir=folder)
     plt.show()
 
 
@@ -138,11 +147,13 @@ def _row(n, width, gap_after=None):
     return fig, axes, width / sum(ratios) / PANEL_INCHES
 
 
-def plot_rules_per_fov(counts, marked, colors, labels, width, font_size, save=None):
+def plot_rules_per_fov(counts, marked, colors, width, font_size, spans=(), save=None):
     """Stacked bar of rules per FOV, one colour per column of `counts`, and under each marked FOV
     a dot in its tag colour; no dots when `marked` is empty.
 
-    save : the figure's name; its colour key is saved beside it as <save>_key.
+    spans : (FOVs, colour) pairs; under the bars of each, a line in its colour.
+    save  : the figure's name; the bars and the y axis are also cut out on their own beside it,
+            as <save>_bars and <save>_y_axis, at the same height.
     """
     with plt.rc_context(_fonts(font_size)):
         fig, ax = plt.subplots(layout="constrained", figsize=(width, 0.6 * width))
@@ -150,14 +161,24 @@ def plot_rules_per_fov(counts, marked, colors, labels, width, font_size, save=No
         if len(marked):
             ax.scatter([counts.index.get_loc(fov) for fov in marked], [0] * len(marked), s=150,
                        c=fov_tags(len(marked)), clip_on=False, zorder=3, transform=ax.get_xaxis_transform())
+        for fovs, color in spans:
+            spots = [counts.index.get_loc(fov) for fov in fovs]
+            ax.plot([min(spots) - 0.5, max(spots) + 0.5], [-0.02, -0.02], color=color, lw=8,
+                    solid_capstyle="butt", clip_on=False, transform=ax.get_xaxis_transform())
         ax.set(xticks=[], xlabel="", xlim=(-0.5, len(counts) - 0.5))
         ax.yaxis.set_major_locator(MaxNLocator(3))
         ax.spines[["top", "right"]].set_visible(False)
-    save_figure(fig, save, figure_dir=_FIGURE_DIR)
     if save:
-        _save_key([Patch(color=c, label=l) for c, l in zip(colors, labels)],
-                  _FIGURE_DIR / f"{save}_key.pdf", font_size)
+        save_figure(fig, save, figure_dir=_FIGURE_DIR)
+        whole, left = ax.get_tightbbox(), ax.get_window_extent().x0
+        _save_boxes(fig, {f"{save}_bars": Bbox([[left, whole.y0], [whole.x1, whole.y1]]),
+                          f"{save}_y_axis": Bbox([[whole.x0, whole.y0], [left, whole.y1]])}, _FIGURE_DIR)
     plt.show()
+
+
+def save_significance_key(colors, labels, font_size):
+    """The bar colours of `plot_rules_per_fov` with their `labels`, saved as keys/significance."""
+    _save_key([Patch(color=c, label=l) for c, l in zip(colors, labels)], font_size, "significance")
 
 
 def plot_fov_maps(cells, fovs, cell_colors, key, width, font_size, dot=10, scale_um=100,
@@ -191,7 +212,7 @@ def save_cell_key(key, cell_colors, font_size, save):
     handles = _cell_handles(key, cell_colors)
     for handle in handles:
         handle.set_markersize(0.8 * font_size)
-    _save_key(handles, _FIGURE_DIR / save / "cells.pdf", font_size)
+    _save_key(handles, font_size, "cells", _FIGURE_DIR / save)
 
 
 def _crossings(order, pairs):
@@ -249,8 +270,9 @@ def _network(ax, rules, colors, node, line, strongest, shown=None):
     ax.spines[:].set_visible(False)
 
 
-def _save_edge_key(path, font_size, line, strongest):
-    """→ attracts and ⊣ avoids in their colours, then the line width for each |log2 lift|."""
+def save_edge_key(font_size, line=1.5, strongest=3):
+    """→ attracts and ⊣ avoids in their colours, then the line width for each |log2 lift|, as on a
+    network of PANEL_INCHES drawn with `line` and `strongest`; saved as keys/edges."""
     rows = [(kind, KIND_COLORS[kind], EDGE_HEADS[kind], line * strongest) for kind in KIND_COLORS]
     rows += [(f"|log2 lift| {s}", INK, "-", line * s) for s in (1, 2, strongest)]
     with plt.rc_context(_fonts(font_size)):
@@ -261,12 +283,12 @@ def _save_edge_key(path, font_size, line, strongest):
             ax.text(1.3, -y, label, va="center")
         ax.set(xlim=(0, 1.3), ylim=(0.5 - len(rows), 0.5))
         ax.axis("off")
-        fig.savefig(path, bbox_inches="tight")
+        save_figure(fig, "edges", figure_dir=_KEY_DIR)
     plt.show()
 
 
 def plot_rule_networks(rules, fovs, cell_colors, width, font_size, node=150, line=1.5, strongest=3,
-                       gap_after=None, save=None):
+                       gap_after=None, tags=None, save=None):
     """A row of rule networks, one per FOV, drawn by `_network`; the nodes of each are ordered
     on their circle so as few lines cross as can be found.
 
@@ -274,18 +296,20 @@ def plot_rule_networks(rules, fovs, cell_colors, width, font_size, node=150, lin
     node      : node dot area; line : line width per unit of |log2 lift|, which stops at `strongest`;
                 both for a network of PANEL_INCHES.
     gap_after : a blank space after this many networks; none when None.
-    save      : a folder in summary_downloads, emptied of its PDFs, then given the row, each
-                network on its own (network_1 …) and the edge key.
+    tags      : the corner triangle colours, one per network; `fov_tags` when None, no triangles when empty.
+    save      : a folder in summary_downloads, emptied of its PDFs, then given the row and each
+                network on its own (network_1 …).
     """
+    tags = fov_tags(len(fovs)) if tags is None else tags
     with plt.rc_context(_fonts(font_size)):
         fig, axes, scale = _row(len(fovs), width, gap_after)
         node, line = node * scale ** 2, line * scale
-        for fov, ax, tag in zip(fovs, axes, fov_tags(len(fovs))):
+        for n, (fov, ax) in enumerate(zip(fovs, axes)):
             _network(ax, rules[rules["FOV"].eq(fov)], cell_colors, node, line, strongest)
-            _tag(ax, tag)
+            if tags:
+                _tag(ax, tags[n])
     if save:
-        folder = _save_row(fig, axes, save, "network")
-        _save_edge_key(folder / "edges.pdf", font_size, line, strongest)
+        _save_row(fig, axes, save, "network")
     plt.show()
 
 
@@ -330,8 +354,7 @@ def plot_rule_examples(cells, examples, rules, cell_colors, key, width, font_siz
     key      : the cell types named in the cell type key, in its order.
     notes    : {name: text} printed above each example's row; nothing when None.
     save     : a folder in summary_downloads, emptied of its PDFs, then given each row named after its
-               example, each of its squares on its own (<name>_1 …), the cell type key, and with
-               `network` the edge key.
+               example, each of its squares on its own (<name>_1 …) and the cell type key.
     """
     folder = _fresh_folder(save) if save else None
     for name, (fov, rule, score) in examples.items():
@@ -353,8 +376,6 @@ def plot_rule_examples(cells, examples, rules, cell_colors, key, width, font_siz
         plt.show()
     if save:
         save_cell_key(key, cell_colors, font_size, save)
-        if network:
-            _save_edge_key(folder / "edges.pdf", font_size, line * scale, strongest)
 
 
 def stars(fdr):
@@ -418,16 +439,15 @@ def _trend_block(sub, found, tested, fdr, kind, cell, trend):
     _count_rows(ax_tested, tested, ZERO)
 
 
-def plot_rule_trends(panels, unit, font_size, cell=1.8, trend=3.5, save=None):
+def plot_rule_trends(panels, font_size, cell=1.8, trend=3.5, save=None):
     """One titled figure per panel: blocks of rules across groups, one under the other, drawn
     by `_trend_block` at the same size in every panel.
 
     panels : {title: blocks}; a block is a dict with 'found' and 'tested' (rule x group counts),
              'kind', and optionally 'fdr' (per rule) for stars and arrows.
-    unit   : what was counted, "FOV" or "patient", for the colour scale's label.
     cell, trend : a square's side and a line plot's width, in inches.
     save   : a folder in summary_downloads, emptied of its PDFs, then given each panel, named
-             after its title, each of its blocks on its own (<panel>_1, <panel>_2 …) and the colour scale.
+             after its title, and each of its blocks on its own (<panel>_1, <panel>_2 …).
     """
     if not panels:
         print("No rule passes.")
@@ -445,13 +465,16 @@ def plot_rule_trends(panels, unit, font_size, cell=1.8, trend=3.5, save=None):
             name = title.replace(" · ", "_").replace(" ", "_")
             _save_parts(fig, subs, folder, name, name)
         plt.show()
-    if save:
-        with plt.rc_context(_fonts(font_size)):
-            key, ax = plt.subplots(figsize=(6, 0.4))
-            key.colorbar(ScalarMappable(PREVALENCE, PREVALENCE_CMAP), cax=ax, orientation="horizontal",
-                         label=f"% of testable {unit}s")
-            key.savefig(folder / "prevalence.pdf", bbox_inches="tight")
-        plt.show()
+
+
+def save_prevalence_key(unit, font_size):
+    """The colour scale of `plot_rule_trends`, as % of testable `unit`s, saved as keys/prevalence_<unit>."""
+    with plt.rc_context(_fonts(font_size)):
+        key, ax = plt.subplots(figsize=(6, 0.4))
+        key.colorbar(ScalarMappable(PREVALENCE, PREVALENCE_CMAP), cax=ax, orientation="horizontal",
+                     label=f"% of testable {unit}s")
+        save_figure(key, f"prevalence_{unit}", figure_dir=_KEY_DIR)
+    plt.show()
 
 
 def plot_pca(coords, variance, stage, marked, pair, width, font_size, line=None, save=None):
@@ -459,7 +482,7 @@ def plot_pca(coords, variance, stage, marked, pair, width, font_size, line=None,
     of `marked` ({FOV: colour}), a box around the two FOVs of `pair`; none when empty; and a
     dashed `line` between its two (PC1, PC2) ends.
 
-    save : a folder in summary_downloads, emptied of its PDFs, then given the PCA and the stage key.
+    save : a folder in summary_downloads, emptied of its PDFs, then given the PCA.
     """
     with plt.rc_context(_fonts(font_size)):
         fig, ax = plt.subplots(layout="constrained", figsize=(width / 2, width / 2))
@@ -467,9 +490,7 @@ def plot_pca(coords, variance, stage, marked, pair, width, font_size, line=None,
         if line is not None:
             ax.plot(*np.transpose(line), color=INK, lw=1.5, ls=(0, (4, 2)), zorder=0)
     if save:
-        folder = _fresh_folder(save)
-        save_figure(fig, "pca", figure_dir=folder)
-        _save_stage_key(coords[stage], folder, font_size)
+        save_figure(fig, "pca", figure_dir=_fresh_folder(save))
     plt.show()
 
 
@@ -477,8 +498,8 @@ def plot_pca_pair(pcas, stage, width, font_size, save=None):
     """PCAs of the same FOVs side by side, coloured by their `stage`, each titled by its name.
 
     pcas : {name: (coords, variance)}.
-    save : a folder in summary_downloads, emptied of its PDFs, then given the PCAs together,
-           each on its own (pca_1, pca_2 …) and the stage key.
+    save : a folder in summary_downloads, emptied of its PDFs, then given the PCAs together and
+           each on its own (pca_1, pca_2 …).
     """
     with plt.rc_context(_fonts(font_size)):
         fig, axes, _ = _row(len(pcas), width)
@@ -486,8 +507,7 @@ def plot_pca_pair(pcas, stage, width, font_size, save=None):
             _pca(ax, coords, variance, stage)
             ax.set_title(name)
     if save:
-        folder = _save_row(fig, axes, save, "pca")
-        _save_stage_key(coords[stage], folder, font_size)
+        _save_row(fig, axes, save, "pca")
     plt.show()
 
 
@@ -508,10 +528,11 @@ def _pca(ax, coords, variance, stage, marked={}, pair=()):
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def _save_stage_key(stages, folder, font_size):
+def save_stage_key(stages, font_size):
+    """A dot per stage of `stages` in its PCA colour, saved as keys/stages."""
     colors, order = _category_colors(stages)
     _save_key([Line2D([], [], marker="o", ls="", color=colors[name], markersize=0.8 * font_size, label=name)
-               for name in order], folder / "stages.pdf", font_size)
+               for name in order], font_size, "stages")
 
 
 def plot_loadings(weights, rules, n, width, font_size, save=None):

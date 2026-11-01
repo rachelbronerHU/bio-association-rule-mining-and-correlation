@@ -464,6 +464,38 @@ def spread_along(scope, component='PC1', num=5, weight=2):
     return picked
 
 
+def trajectory(scope, start='Control', end='Severe', num=5, width=0.1):
+    """`num` FOVs along the line from the middle of the `start` FOVs to the middle of the `end` ones.
+
+    The line runs between the two farthest FOVs, along it, of those within `width` of it; the picks
+    are the FOVs nearest `num` evenly spaced points on it, each at least half a step from the earlier
+    picks, ordered by PC1, left to right. Distances are taken with each component scaled to its range,
+    as the square PCA plot shows them.
+    Returns (the FOVs, the line's two ends in PC1, PC2).
+    """
+    coords = scope.coords
+    scale = np.ptp(coords[['PC1', 'PC2']].to_numpy(dtype=float), axis=0)
+    pts = coords[['PC1', 'PC2']].to_numpy(dtype=float) / scale
+    middle = lambda stage: pts[(coords[SCORE_COL] == stage).to_numpy()].mean(axis=0)
+    origin = middle(start)
+    way = middle(end) - origin
+    way /= np.linalg.norm(way)
+    along = (pts - origin) @ way
+    off = np.abs((pts - origin) @ [-way[1], way[0]])
+    near = along[off <= max(width, off.min())]
+    low, high = near.min(), near.max()
+    gap = (high - low) / max(num - 1, 1) / 2
+    picked = []
+    for at in np.linspace(low, high, num):
+        far = np.linalg.norm(pts - (origin + at * way), axis=1)
+        for i in picked:
+            far[np.linalg.norm(pts - pts[i], axis=1) < gap] = np.inf
+        if np.isfinite(far.min()):
+            picked.append(far.argmin())
+    picked = coords.iloc[picked].sort_values('PC1')['FOV'].tolist()
+    return picked, np.array([origin + low * way, origin + high * way]) * scale
+
+
 def outliers(scope, k=3, components=('PC1', 'PC2')):
     """Returns (the FOVs left, the FOVs sitting far out). Draws nothing.
 

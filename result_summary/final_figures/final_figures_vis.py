@@ -7,10 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize, to_hex
-from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon
+from matplotlib.lines import Line2D
+from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon, Rectangle
 from matplotlib.ticker import MaxNLocator
 
-from vis_helper import (_cell_handles, save_figure, INK, GRID, ZERO, ATTRACTION, AVOIDANCE,
+from vis_helper import (_category_colors, _cell_handles, save_figure, INK, GRID, ZERO, ATTRACTION, AVOIDANCE,
                         UP_ARROW, DOWN_ARROW)
 
 _FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
@@ -19,6 +20,8 @@ PANEL_INCHES = 2.5
 KIND_COLORS = {"attracts": ATTRACTION, "avoids": AVOIDANCE}
 EDGE_LAYER = {"avoids": 1, "attracts": 2}
 PREVALENCE, PREVALENCE_CMAP = Normalize(0, 100), "YlOrRd"
+PC_TAG_MAPS = ("Blues", "YlOrBr")
+TRAJECTORY_MAP = "plasma"
 EDGE_HEADS = {"attracts": "-|>,head_length=0.6,head_width=0.4", "avoids": "-[,widthB=0.6,lengthB=0"}
 
 
@@ -95,6 +98,16 @@ def fov_tags(n):
     return [to_hex(color) for color in plt.cm.viridis(np.linspace(0, 0.9, n))]
 
 
+def pc_tags(n):
+    """Per component, `n` tag colours from one family of PC_TAG_MAPS, light for the low end, dark for the high."""
+    return [[to_hex(color) for color in plt.get_cmap(name)(np.linspace(0.4, 1, n))] for name in PC_TAG_MAPS]
+
+
+def trajectory_tags(n):
+    """`n` tag colours from TRAJECTORY_MAP, dark purple for the first to orange for the last."""
+    return [to_hex(color) for color in plt.get_cmap(TRAJECTORY_MAP)(np.linspace(0, 0.85, n))]
+
+
 def _tag(ax, color):
     """A filled triangle in the top left corner, the FOV's tag colour."""
     ax.add_patch(Polygon([(0, 1), (0.15, 1), (0, 0.85)], closed=True, color=color, lw=0,
@@ -136,28 +149,37 @@ def plot_rules_per_fov(counts, marked, colors, labels, width, font_size, save=No
 
 
 def plot_fov_maps(cells, fovs, cell_colors, key, width, font_size, dot=10, scale_um=100,
-                  scale_font=None, gap_after=None, save=None):
+                  scale_font=None, gap_after=None, tags=None, save=None):
     """A row of FOV maps, cells coloured by type, each with a `scale_um` bar.
 
-    key  : the cell types named in the cell type key, in its order.
+    key  : the cell types named in the cell type key, in its order; no key when None.
     dot  : cell dot area on a 400 um map of PANEL_INCHES; larger maps get smaller dots.
     scale_font : font size of the scale bar's label; `font_size` when None.
     gap_after : a blank space after this many maps; none when None.
+    tags : the corner triangle colours, one per map; `fov_tags` when None, no triangles when empty.
     save : a folder in summary_downloads, emptied of its PDFs, then given the row,
            each map on its own (map_1, map_2 …) and the cell type key.
     """
+    tags = fov_tags(len(fovs)) if tags is None else tags
     with plt.rc_context(_fonts(font_size)):
         fig, axes, scale = _row(len(fovs), width, gap_after)
-        for fov, ax, tag in zip(fovs, axes, fov_tags(len(fovs))):
+        for n, (fov, ax) in enumerate(zip(fovs, axes)):
             _fov_map(ax, cells[cells["fov"].eq(fov)], cell_colors, dot * scale ** 2, scale_um, scale_font)
-            _tag(ax, tag)
+            if tags:
+                _tag(ax, tags[n])
     if save:
-        folder = _save_row(fig, axes, save, "map")
-        handles = _cell_handles(key, cell_colors)
-        for handle in handles:
-            handle.set_markersize(0.8 * font_size)
-        _save_key(handles, folder / "cells.pdf", font_size)
+        _save_row(fig, axes, save, "map")
+        if key is not None:
+            save_cell_key(key, cell_colors, font_size, save)
     plt.show()
+
+
+def save_cell_key(key, cell_colors, font_size, save):
+    """The cell type key, the types of `key` in its order, saved as <save>/cells.pdf in summary_downloads."""
+    handles = _cell_handles(key, cell_colors)
+    for handle in handles:
+        handle.set_markersize(0.8 * font_size)
+    _save_key(handles, _FIGURE_DIR / save / "cells.pdf", font_size)
 
 
 def _crossings(order, pairs):
@@ -346,3 +368,87 @@ def plot_rule_trends(panels, unit, font_size, cell=1.8, trend=3.5, save=None):
                          label=f"% of testable {unit}s")
             key.savefig(folder / "prevalence.pdf", bbox_inches="tight")
         plt.show()
+
+
+def plot_pca(coords, variance, stage, marked, pair, width, font_size, line=None, save=None):
+    """FOVs on PC1 and PC2, coloured by their `stage`, a ring in its tag colour around each FOV
+    of `marked` ({FOV: colour}), a box around the two FOVs of `pair`; none when empty; and a
+    dashed `line` between its two (PC1, PC2) ends.
+
+    save : a folder in summary_downloads, emptied of its PDFs, then given the PCA and the stage key.
+    """
+    with plt.rc_context(_fonts(font_size)):
+        fig, ax = plt.subplots(layout="constrained", figsize=(width / 2, width / 2))
+        _pca(ax, coords, variance, stage, marked, pair)
+        if line is not None:
+            ax.plot(*np.transpose(line), color=INK, lw=1.5, ls=(0, (4, 2)), zorder=0)
+    if save:
+        folder = _fresh_folder(save)
+        save_figure(fig, "pca", figure_dir=folder)
+        _save_stage_key(coords[stage], folder, font_size)
+    plt.show()
+
+
+def plot_pca_pair(pcas, stage, width, font_size, save=None):
+    """PCAs of the same FOVs side by side, coloured by their `stage`, each titled by its name.
+
+    pcas : {name: (coords, variance)}.
+    save : a folder in summary_downloads, emptied of its PDFs, then given the PCAs together,
+           each on its own (pca_1, pca_2 …) and the stage key.
+    """
+    with plt.rc_context(_fonts(font_size)):
+        fig, axes, _ = _row(len(pcas), width)
+        for ax, (name, (coords, variance)) in zip(axes, pcas.items()):
+            _pca(ax, coords, variance, stage)
+            ax.set_title(name)
+    if save:
+        folder = _save_row(fig, axes, save, "pca")
+        _save_stage_key(coords[stage], folder, font_size)
+    plt.show()
+
+
+def _pca(ax, coords, variance, stage, marked={}, pair=()):
+    colors, _ = _category_colors(coords[stage])
+    at = coords.set_index("FOV")[["PC1", "PC2"]]
+    ax.axhline(0, color=GRID, lw=1, zorder=0)
+    ax.axvline(0, color=GRID, lw=1, zorder=0)
+    ax.scatter(at["PC1"], at["PC2"], s=150, c=coords[stage].map(colors).tolist(), linewidths=0)
+    ax.scatter(at.loc[list(marked), "PC1"], at.loc[list(marked), "PC2"], s=320, facecolors="none",
+               edgecolors=list(marked.values()), linewidths=2.5)
+    if len(pair):
+        low, high = at.loc[pair].min().to_numpy(), at.loc[pair].max().to_numpy()
+        pad = 0.02 * np.ptp(at.to_numpy(), axis=0).max()
+        ax.add_patch(Rectangle(low - pad, *(high - low + 2 * pad), fill=False, edgecolor=INK, lw=1.5,
+                               ls=(0, (4, 2))))
+    ax.set(xlabel=f"PC1 ({variance[0]:.0f}%)", ylabel=f"PC2 ({variance[1]:.0f}%)", xticks=[], yticks=[])
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def _save_stage_key(stages, folder, font_size):
+    colors, order = _category_colors(stages)
+    _save_key([Line2D([], [], marker="o", ls="", color=colors[name], markersize=0.8 * font_size, label=name)
+               for name in order], folder / "stages.pdf", font_size)
+
+
+def plot_loadings(weights, rules, n, width, font_size, save=None):
+    """Per component, a row of `weights` over `rules`, its `n` rules of lowest and `n` of highest
+    weight as bars, side by side, in that component's `pc_tags` family: dark for positive, light for negative.
+
+    save : a folder in summary_downloads, emptied of its PDFs, then given the components together
+           and each on its own (pc_1, pc_2 …).
+    """
+    names = np.char.replace(np.asarray(rules).astype(str), " -> ", " → ")
+    with plt.rc_context(_fonts(font_size)):
+        fig, axes = plt.subplots(1, len(weights), layout="constrained", figsize=(width, n + 1))
+        for number, (ax, weight, (light, *_, dark)) in enumerate(zip(axes, weights, pc_tags(2)), 1):
+            order = np.argsort(weight)
+            shown = np.r_[order[:n], order[-n:]] if len(order) > 2 * n else order
+            ax.barh(names[shown], weight[shown], color=np.where(weight[shown] > 0, dark, light))
+            ax.axvline(0, color=INK, lw=1)
+            ax.set(xlabel=f"PC{number} weight")
+            ax.xaxis.set_major_locator(MaxNLocator(3))
+            ax.tick_params(axis="y", length=0)
+            ax.spines[["top", "right", "left"]].set_visible(False)
+    if save:
+        _save_row(fig, axes, save, "pc")
+    plt.show()

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-from sklearn.metrics import silhouette_samples
+from sklearn.metrics import roc_auc_score, silhouette_samples
 from sklearn.preprocessing import StandardScaler
 
 import data_helper as dh
@@ -494,6 +494,39 @@ def trajectory(scope, start='Control', end='Severe', num=5, width=0.1):
             picked.append(far.argmin())
     picked = coords.iloc[picked].sort_values('PC1')['FOV'].tolist()
     return picked, np.array([origin + low * way, origin + high * way]) * scale
+
+
+def stage_auc(scope, component, start='Control', end='Severe'):
+    """How well `component` puts the `start` FOVs on one side and the `end` FOVs on the other: the
+    chance that a random `end` FOV sits further along it than a random `start` one, whichever way
+    round. 0.5 is no separation, 1 is full. NaN without both groups."""
+    coords = scope.coords[scope.coords[SCORE_COL].isin([start, end])]
+    if coords[SCORE_COL].nunique() < 2:
+        return np.nan
+    auc = roc_auc_score(coords[SCORE_COL].eq(end), coords[component])
+    return max(auc, 1 - auc)
+
+
+def agreement(scope, other, components=('PC1', 'PC2')):
+    """How much each component of `scope` (rows) follows each of `other` (columns) over their shared
+    FOVs, as |Spearman rho|: 0 not at all, 1 fully. Only the size counts, as a component's sign is arbitrary."""
+    both = scope.coords.merge(other.coords, on='FOV', suffixes=('', ' other'))
+    ranks = both[[*components, *(f'{pc} other' for pc in components)]].rank()
+    table = ranks.corr().loc[list(components), [f'{pc} other' for pc in components]].abs()
+    return table.set_axis(list(components), axis=1)
+
+
+def spread_from(scope, component, num, start='Control', end='Severe', weight=2):
+    """`spread_along` FOVs on `component`, ordered from the side of the `start` FOVs to the side of the
+    `end` ones, and the line they were picked along, as its two (PC1, PC2) ends."""
+    coords = scope.coords.set_index('FOV')
+    picked = coords.loc[list(spread_along(scope, component, num, weight)), component]
+    rising = coords.loc[coords[SCORE_COL].eq(end), component].mean() > \
+        coords.loc[coords[SCORE_COL].eq(start), component].mean()
+    ends = [coords[component].min(), coords[component].max()]
+    middle = coords['PC2' if component == 'PC1' else 'PC1'].median()
+    line = [(at, middle) if component == 'PC1' else (middle, at) for at in ends]
+    return picked.sort_values(ascending=rising).index.tolist(), np.array(line)
 
 
 def outliers(scope, k=3, components=('PC1', 'PC2')):

@@ -5,6 +5,8 @@ import data_helper as dh
 import differential_stats as ds
 import rule_metrics as rm
 
+LEVEL = "FOV" # FOV / patient
+MAX_RULES = 4
 MIN_SHARE = 0.1
 MIN_TESTABLE = {"FOV": 10, "patient": 3}
 MAX_FDR = 0.05
@@ -21,6 +23,7 @@ TRENDS = {  # groups in order, and whether all are tested at once rather than th
     "Cortico Response": (["Responder", "Non-responder"], False),
     "Days after Transplant grouped": (["Control", "<30", "30-100", ">100"], True),
 }
+TITLES = {"Days after Transplant grouped": "Days after transplantation"}
 
 
 def load():
@@ -39,7 +42,7 @@ def load():
 
 def trend_result(fovs, has_rule, organ, trend, level):
     """`ds.trend_test` on the organ's FOVs, or on its patients: one per patient and group,
-    with the rule when any of their FOVs has it."""
+    with the rule when any of their FOVs has it; with the units per group as 'units'."""
     order, all_groups = TRENDS[trend]
     fovs = fovs[fovs["Organ"].eq(organ)]
     values, groups = has_rule[fovs["FOV"]], fovs.set_index("FOV")[trend]
@@ -47,13 +50,14 @@ def trend_result(fovs, has_rule, organ, trend, level):
         fovs = fovs.assign(patient=fovs["PatientID"].astype(str) + " · " + fovs[trend].astype(str))
         values = ds.aggregate_fovs(values, fovs, "patient", how="max")
         groups = fovs.groupby("patient")[trend].first()
-    return ds.trend_test(values, groups, order, all_groups, MIN_TESTABLE[level], MIN_SHARE)
+    result = ds.trend_test(values, groups, order, all_groups, MIN_TESTABLE[level], MIN_SHARE)
+    return result and result | {"units": groups.value_counts()}
 
 
 def all_results(fovs, has_rule):
-    """`trend_result` per level, organ, trend and kind, those with a test only."""
-    results = {(level, organ, trend, kind): trend_result(fovs, has_rule[kind], organ, trend, level)
-               for level in MIN_TESTABLE for organ in ORGANS for trend in TRENDS for kind in KINDS}
+    """`trend_result` at LEVEL per organ, trend and kind, those with a test only."""
+    results = {(LEVEL, organ, trend, kind): trend_result(fovs, has_rule[kind], organ, trend, LEVEL)
+               for organ in ORGANS for trend in TRENDS for kind in KINDS}
     return {key: result for key, result in results.items() if result is not None}
 
 
@@ -88,11 +92,16 @@ def picked(results, level, pick):
             yield organ, trend, kind, result, chosen
 
 
-def panels_for(results, level, pick, with_fdr):
-    """Per organ and trend, a block per kind with the rules `pick` chooses."""
+def panels_for(results, level, pick, with_fdr, max_rules=None, cells=None):
+    """Per organ and trend, titled 'organ | trend' (its TITLES name when it has one), a block per kind with
+    the first `max_rules` (all when None) rules `pick` chooses; with `cells`, each rule's class."""
     panels = {}
     for organ, trend, kind, result, chosen in picked(results, level, pick):
-        block = {"found": result["found"].loc[chosen], "tested": result["tested"].loc[chosen], "kind": kind}
-        panels.setdefault(f"{organ} · {trend}", []).append(
+        chosen = chosen[:max_rules]
+        block = {"found": result["found"].loc[chosen], "tested": result["tested"].loc[chosen], "kind": kind,
+                 "unit": level, "units": result["units"]}
+        if cells is not None:
+            block["classes"] = dh.rule_class(chosen, cells)
+        panels.setdefault(f"{organ} | {TITLES.get(trend, trend)}", []).append(
             block | ({"fdr": result["fdr"].loc[chosen]} if with_fdr else {}))
     return panels

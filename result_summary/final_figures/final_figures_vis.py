@@ -11,14 +11,13 @@ from matplotlib.patches import Circle, FancyArrowPatch, Patch, Polygon, Rectangl
 from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import Bbox, blended_transform_factory, offset_copy
 
-from vis_helper import (_category_colors, _cell_handles, save_figure, INK, GRID, ZERO, ATTRACTION, AVOIDANCE,
-                        UP_ARROW, DOWN_ARROW)
+from vis_helper import (_category_colors, _cell_handles, save_figure, rule_name, INK, GRID, ZERO, UP_ARROW,
+                        DOWN_ARROW, KIND_COLORS)
 
 _FIGURE_DIR = Path(__file__).resolve().parent / "summary_downloads"
 _KEY_DIR = _FIGURE_DIR / "keys"
 PANEL_INCHES = 2.5
 
-KIND_COLORS = {"attracts": ATTRACTION, "avoids": AVOIDANCE}
 EDGE_LAYER = {"avoids": 1, "attracts": 2}
 PREVALENCE, PREVALENCE_CMAP = Normalize(0, 100), "YlOrRd"
 PC_TAG_MAPS = ("Blues", "YlOrBr")
@@ -29,7 +28,6 @@ PALE, PALE_GREY = 0.3, "#c9c8c2"
 TREND_GAP = 0.4
 RULE_SIZE = 2.5
 KEY_ROW = 0.3
-ARROWS = {"attracts": " → ", "avoids": " ⊣ "}
 CLASS_COLORS = {
     "Immune–Immune": "#E3DCF2",
     "Immune–Epithel": "#FCE0C8",
@@ -48,12 +46,6 @@ CLASS_TABS = {
 def _fonts(size):
     return {"font.size": size, "xtick.labelsize": size, "ytick.labelsize": size,
             "legend.fontsize": size, "pdf.fonttype": 42}
-
-
-def rule_name(rule, kind="attracts"):
-    """`rule` ('centre -> neighbour' or (centre, neighbour)) with its kind's arrow: → attracts, ⊣ avoids."""
-    parts = rule.split(" -> ") if isinstance(rule, str) else rule
-    return ARROWS[kind].join(parts)
 
 
 def _names_left(ax, aligned=()):

@@ -27,6 +27,43 @@ def state_tables(rules, cells, fovs, kinds=(rm.ATTRACTS, rm.AVOIDS)):
     return states, eligible, states.astype(float).where(eligible)
 
 
+def load_rules(include_muscle=False):
+    """Cells, FOVs, and the pairwise rules that pass FDR, without Muscle unless `include_muscle`."""
+    cells, fovs, _ = dh.load_spatial_data()
+    rules = dh.prepare_rules(dh.load_results(rule_max_items=dh.PAIRWISE_ITEMS, kind=None))
+    rules = rules[rules["FOV"].isin(fovs["FOV"])]
+    if not include_muscle:
+        rules = rules[~rules["Clean_Rule"].str.contains("Muscle")]
+    return cells, fovs, rules
+
+
+def lift_table(rules, cells, fovs, kind=None, min_lift=0.1):
+    """Rule x FOV log2 lift, a lift below `min_lift` raised to it: 0 where the rule could be tested
+    but was not found, NaN where it could not be tested. `kind` keeps attracting or avoiding rules
+    only; None keeps both."""
+    rules = rules[rules["FOV"].isin(fovs)]
+    if kind is not None:
+        rules = rules[rules["state"].eq(1 if kind == rm.ATTRACTS else -1)]
+    _, testable, _ = state_tables(rules, cells, fovs, (rm.ATTRACTS, rm.AVOIDS) if kind is None else (kind,))
+    lift = rules.pivot_table(index="Clean_Rule", columns="FOV", values="Lift").clip(lower=min_lift)
+    return np.log2(lift).reindex_like(testable).fillna(0).where(testable)
+
+
+def rule_kinds(rules, kind=None):
+    """'attracts' or 'avoids' per rule of `rules`: `kind` when given, otherwise the kind it has in
+    most of its FOVs (attracts on a tie)."""
+    if kind is not None:
+        return pd.Series(kind, index=rules["Clean_Rule"].unique())
+    return rules.groupby("Clean_Rule")["state"].mean().ge(0).map({True: rm.ATTRACTS, False: rm.AVOIDS})
+
+
+def per_patient(values, fovs, score, how):
+    """`values` pooled by `how` over each patient's FOVs in each `score` group, one unit per patient
+    and group, and the group of each unit."""
+    fovs = fovs.assign(patient=fovs["PatientID"].astype(str) + " · " + fovs[score].astype(str))
+    return aggregate_fovs(values, fovs, "patient", how), fovs.groupby("patient")[score].first()
+
+
 _METRIC_COLUMNS = {"lift": "Lift", "conf": "Confidence", "conv": "Conviction",
                    "sup": "Support", "lev": "Leverage"}
 
@@ -133,55 +170,6 @@ def units_for(metadata, organ, group_col, group, unit_col="FOV"):
     return metadata.loc[keep, unit_col].drop_duplicates().tolist()
 
 
-def gap_pvalues(values, n_a, observed, n_permutations=5_000, seed=0):
-    """Two-sided permutation p-values for a difference between two means."""
-    rng = np.random.default_rng(seed)
-    labels = np.r_[np.ones(n_a), np.zeros(values.shape[1] - n_a)]
-    in_a = np.column_stack([rng.permutation(labels) for _ in range(n_permutations)])
-    in_b = 1 - in_a
-    valid = np.isfinite(values).astype(float)
-    numbers = np.nan_to_num(values)
-    count_a, count_b = valid @ in_a, valid @ in_b
-    mean_a = np.divide(numbers @ in_a, count_a, out=np.full_like(count_a, np.nan), where=count_a > 0)
-    mean_b = np.divide(numbers @ in_b, count_b, out=np.full_like(count_b, np.nan), where=count_b > 0)
-    null = mean_a - mean_b
-    extreme = np.abs(null) >= np.abs(observed)[:, None] - 1e-12
-    return (np.nansum(extreme, axis=1) + 1) / (np.isfinite(null).sum(axis=1) + 1)
-
-
-def compare(states, units_a, units_b, label_a, label_b, min_eligible=3,
-            min_present=3, n_permutations=5_000):
-    """Compare two groups using each rule's eligible units."""
-    a = states.reindex(columns=units_a).to_numpy(float)
-    b = states.reindex(columns=units_b).to_numpy(float)
-    n_a, n_b = np.isfinite(a).sum(1), np.isfinite(b).sum(1)
-    present = np.sum(np.isfinite(a) & (a != 0), axis=1)
-    present += np.sum(np.isfinite(b) & (b != 0), axis=1)
-    keep = (n_a >= min_eligible) & (n_b >= min_eligible) & (present >= min_present)
-    a, b = a[keep], b[keep]
-    names, n_a, n_b = states.index[keep], n_a[keep], n_b[keep]
-    net_a, net_b = np.nanmean(a, axis=1), np.nanmean(b, axis=1)
-    effect = net_a - net_b
-    p_value = gap_pvalues(np.hstack([a, b]), len(units_a), effect, n_permutations)
-    result = pd.DataFrame({
-        f"net_{label_a}": net_a,
-        f"net_{label_b}": net_b,
-        "effect_size": effect,
-        f"n_eligible_{label_a}": n_a,
-        f"n_eligible_{label_b}": n_b,
-        f"n_attract_{label_a}": np.nansum(a == 1, axis=1),
-        f"n_avoid_{label_a}": np.nansum(a == -1, axis=1),
-        f"n_attract_{label_b}": np.nansum(b == 1, axis=1),
-        f"n_avoid_{label_b}": np.nansum(b == -1, axis=1),
-        "p_value": p_value,
-    }, index=names)
-    result["fdr"] = (
-        multipletests(p_value, method="fdr_bh")[1]
-        if len(p_value) else np.array([], dtype=float)
-    )
-    return result.sort_values("effect_size", key=abs, ascending=False)
-
-
 def spread_pvalues(values, labels, n_permutations=5_000, seed=0, chunk=500):
     """Permutation p-values for how far each row's group means spread apart.
 
@@ -238,6 +226,41 @@ def trend_test(values, groups, order, all_groups=False, min_testable=10, min_sha
             "p": pd.Series(p, index=found.index[keep]),
             "fdr": pd.Series(multipletests(p, method="fdr_bh")[1] if len(p) else p,
                              index=found.index[keep])}
+
+
+def gaps(values, groups, first, last, min_testable=10, min_share=0.1, n_permutations=5_000):
+    """Per rule: its mean in `first` and `last` over their testable units, the gap (`last` minus
+    `first`), the testable units of each, and the permutation p and FDR of the gap; lowest p first.
+
+    values : rule x unit; 0 testable without the rule, NaN not testable, any other value its log2 lift.
+    A rule is tested when each group has `min_testable` testable units and it is found (not 0) in
+    `min_share` of them, both groups counted together. None when a group has fewer than
+    `min_testable` units.
+    """
+    groups = groups[groups.isin([first, last])]
+    if groups.value_counts().reindex([first, last], fill_value=0).lt(min_testable).any():
+        return None
+    values = values[groups.index]
+    tested = values.notna().T.groupby(groups).sum().T[[first, last]]
+    found = (values.ne(0) & values.notna()).sum(axis=1)
+    values = values[tested.ge(min_testable).all(axis=1) & found.ge(min_share * tested.sum(axis=1))]
+    means = values.T.groupby(groups).mean().T
+    p = spread_pvalues(values.to_numpy(float), pd.factorize(groups)[0], n_permutations)
+    return pd.DataFrame({
+        f"mean {first}": means[first],
+        f"mean {last}": means[last],
+        "gap": means[last] - means[first],
+        f"n {first}": tested.loc[values.index, first],
+        f"n {last}": tested.loc[values.index, last],
+        "p": p,
+        "fdr": multipletests(p, method="fdr_bh")[1] if len(p) else p,
+    }, index=values.index).sort_values("p")
+
+
+def passing(result, max_fdr=0.05, min_effect=None):
+    """True for the rules at or below `max_fdr` whose gap is at least `min_effect` either way, when given."""
+    ok = result["fdr"].le(max_fdr)
+    return ok & result["gap"].abs().ge(min_effect) if min_effect is not None else ok
 
 
 def correct_together(results):

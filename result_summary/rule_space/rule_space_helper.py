@@ -239,10 +239,7 @@ def _filter(data, stages, organs, exclude=(), fovs=None):
 
 def _matrix(rules, min_fov):
     """FOVs x rules, each cell that rule's strength in that FOV."""
-    n_fovs = rules['FOV'].nunique()
-    counts = rules.groupby('Clean_Rule')['FOV'].nunique()
-    kept = counts[counts > n_fovs * min_fov].index
-    rules = rules[rules['Clean_Rule'].isin(kept)]
+    rules = rules[rules['Clean_Rule'].isin(dh.frequent_rules(rules, min_fov))]
 
     mat = (rules.drop_duplicates(['FOV', 'Clean_Rule'])
                 .pivot(index='FOV', columns='Clean_Rule', values=METRIC))

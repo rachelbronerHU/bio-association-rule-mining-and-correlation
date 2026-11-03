@@ -621,6 +621,14 @@ ATTRACTION = "#2878D0"
 AVOIDANCE = "#E66A4E"
 UP_ARROW = "#2E9E5B"
 DOWN_ARROW = "#8E5BB5"
+KIND_COLORS = {"attracts": ATTRACTION, "avoids": AVOIDANCE}
+ARROWS = {"attracts": " → ", "avoids": " ⊣ "}
+
+
+def rule_name(rule, kind="attracts"):
+    """`rule` ('centre -> neighbour' or (centre, neighbour)) with its kind's arrow: → attracts, ⊣ avoids."""
+    parts = rule.split(" -> ") if isinstance(rule, str) else rule
+    return ARROWS[kind].join(parts)
 
 # A4 minus the summary's 1.8 cm margins: the width a full-width figure is given.
 TEXT_WIDTH = 6.85

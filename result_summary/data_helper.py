@@ -315,6 +315,12 @@ def prepare_rules(results, no_self=True):
     return rules
 
 
+def frequent_rules(rules, min_fov):
+    """Names of the rules found in more than `min_fov` of the FOVs `rules` covers."""
+    counts = rules.groupby("Clean_Rule")["FOV"].nunique()
+    return counts[counts > rules["FOV"].nunique() * min_fov].index
+
+
 MISSING_POPULATION = {"Muscle": "Stroma", "BrunnerGland": "Epithel"}
 
 

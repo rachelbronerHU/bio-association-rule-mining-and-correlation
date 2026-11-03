@@ -17,7 +17,11 @@ from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, sprea
                         plot_fov, set_cell_colors, TEXT_WIDTH, PANEL_FONTS,
                         _cell_share_table, _eligible_by_stage, _shares_panel,
                         NEUTRAL as _NEUTRAL, HAIRLINE as _HAIRLINE,
-                        ZERO as _ZERO, INK as _INK, ATTRACTION, AVOIDANCE)
+                        ZERO as _ZERO, INK as _INK, ATTRACTION, AVOIDANCE, KIND_COLORS, rule_name)
+from matplotlib.colors import LinearSegmentedColormap
+
+_LIFT_CMAP = LinearSegmentedColormap.from_list("lift", [AVOIDANCE, "#f7f7f5", ATTRACTION])
+_UNTESTABLE = "#bdbcb5"
 
 
 _FIGURE_DIR = Path(__file__).resolve().parent.parent / "summary_downloads"
@@ -38,38 +42,19 @@ def _group_colors(label_a, label_b):
     return to_rgba(colors[label_a]), to_rgba(colors[label_b])
 
 
-def _legend(ax, label_a, label_b, color_a, color_b, show_hollow=False, over_label=None):
-    """Two dots naming the groups, so colour is never the only clue.
-
-    Above the axes, where it can never land on a dot or a rule name. `show_hollow`
-    adds the key for the rules that did not pass the cutoffs, `over_label` the one
-    for the rules drawn on the top edge.
-    """
+def _legend(ax, label_a, label_b, color_a, color_b, extra=()):
+    """Two dots naming the groups above the axes, so colour is never the only clue, and any `extra` marks."""
     marks = [Line2D([0], [0], marker="o", linestyle="none", markersize=8,
                     markerfacecolor=c, markeredgecolor="white", label=l)
-             for l, c in ((label_a, color_a), (label_b, color_b))]
-    if show_hollow:
-        marks.append(Line2D([0], [0], marker="o", linestyle="none", markersize=8,
-                            markerfacecolor="white", markeredgecolor="#96958f",
-                            markeredgewidth=1.6, label="did not pass"))
-    if over_label:
-        marks.append(Line2D([0], [0], marker="^", linestyle="none", markersize=8,
-                            markerfacecolor="#96958f", markeredgecolor="white",
-                            label=over_label))
-    ax.legend(handles=marks, fontsize=9, frameon=False, ncol=len(marks),
+             for l, c in ((label_a, color_a), (label_b, color_b))] + list(extra)
+    ax.legend(handles=marks, fontsize=9, frameon=False, ncol=min(len(marks), 3),
               loc="lower right", bbox_to_anchor=(1.0, 1.0))
 
 
-def _flip_marks(comparison, label_a, label_b):
-    """'±' in front of a rule whose two groups sit on opposite sides of zero.
-
-    The cell types attract in one group and avoid in the other - the direction itself
-    changed, not only how often. Everything else gets nothing, so the mark is only ever
-    there where it means something.
-    """
-    a = comparison[f"net_{label_a}"].to_numpy(dtype=float)
-    b = comparison[f"net_{label_b}"].to_numpy(dtype=float)
-    return np.where(((a > 0) & (b < 0)) | ((a < 0) & (b > 0)), "±  ", "")
+def _kind_marks():
+    """Legend marks for the rule kinds, as in the final figures: → attracts, ⊣ avoids, in their colours."""
+    return [Line2D([0], [0], marker=marker, linestyle="none", markersize=11, color=KIND_COLORS[kind],
+                   label=kind) for kind, marker in (("attracts", r"$\rightarrow$"), ("avoids", r"$\dashv$"))]
 
 
 def _title(ax, text, scope):
@@ -80,10 +65,6 @@ def _title(ax, text, scope):
         fig.text(0.5, 0.943, str(scope), ha="center", va="top",
                  fontsize=8.5, color="#706E68")
 
-
-# Below this FDR the exact number stops meaning anything - the rule is simply certain -
-# so the axis stops here and the surer rules sit on the top edge instead.
-_CEILING = -np.log10(1e-6)
 
 # FDR values worth a tick. A short axis can afford the in-between values; a long one
 # only has room for the decades, or the labels pile up on each other.
@@ -108,199 +89,155 @@ def _place_names(ax, spots, top):
     """
     if not spots:
         return
-    floor = max(y for _, y, _ in spots) + 0.10 * top
+    floor = max(y for _, y, _, _ in spots) + 0.10 * top
     rows = np.linspace(0.97 * top, floor, len(spots))
     left, right = ax.get_xlim()
-    for (x, y, text), row in zip(sorted(spots), rows):
+    for (x, y, text, color), row in zip(sorted(spots), rows):
         # Names near an edge lean inwards, so a long one never runs off the plot.
         side = "left" if x < 0.5 * left else "right" if x > 0.5 * right else "center"
-        ax.annotate(text, xy=(x, y), xytext=(x, row), fontsize=7, color=_INK,
+        ax.annotate(text, xy=(x, y), xytext=(x, row), fontsize=7, color=color,
                     ha=side, va="center", linespacing=1.35, zorder=5,
                     arrowprops=dict(arrowstyle="-", color="0.6", lw=0.6,
                                     shrinkA=3, shrinkB=4))
 
 
-def passing(comparison, fdr_threshold=0.05, min_gap=None):
-    """True for the rules a plot should colour in: sure enough, and big enough.
-
-    `min_gap` is in percentage points, and is a judgement call - there is no number
-    the statistics can hand you. Left out, only the FDR cutoff applies.
-    """
-    ok = comparison["fdr"] <= fdr_threshold
-    if min_gap is not None:
-        ok &= comparison["effect_size"].abs() * 100 >= min_gap
-    return ok
-
-
-def plot_volcano(comparison, label_a, label_b, scope=None, fdr_threshold=0.05,
-                 min_gap=None, name_top=5, save=None):
-    """Every tested rule at once: how big the gap is, and how sure we are.
-
-    Right of zero = more common in `label_a`, left = more common in `label_b`.
-    Coloured dots passed the cutoffs; grey ones did not.
-    """
-    if comparison.empty:
+def plot_volcano(result, kinds, first, last, max_fdr=0.05, min_effect=None, name_top=5, unit="FOVs",
+                 scope=None, save=None):
+    """Every tested rule as a dot: x its gap in mean log2 lift (`last` minus `first`), y its FDR, size
+    its testable `unit` in both groups. The rules that pass `ds.passing` are coloured by the group
+    they are higher in, and the `name_top` biggest gaps among them named with their `kinds` arrow and colour."""
+    if result is None or result.empty:
         print("No data to plot.")
         return
-
-    gap = comparison["effect_size"].to_numpy(dtype=float) * 100
-    fdr = comparison["fdr"].to_numpy(dtype=float)
-    sure = -np.log10(np.clip(fdr, 1e-300, None))
-    passed = passing(comparison, fdr_threshold, min_gap).to_numpy()
-    cutoff = -np.log10(fdr_threshold)
-
-    # A single rule can be surer than the rest by ten orders of magnitude, which would
-    # squash every other dot onto the bottom line. Past the ceiling they are all just
-    # 'certain', so those ride the top edge as triangles and the axis keeps the range
-    # people actually read.
-    ceiling = _CEILING if float(sure.max()) > _CEILING else float(sure.max())
-    over = sure > ceiling
-    height = np.minimum(sure, ceiling)
-
-    color_a, color_b = _group_colors(label_a, label_b)
-    colors = np.array([color_a if (p and g > 0) else color_b if (p and g < 0)
-                       else to_rgba(_NEUTRAL) for p, g in zip(passed, gap)])
+    gap = result["gap"].to_numpy(float)
+    height = -np.log10(result["fdr"].to_numpy(float))
+    passed = ds.passing(result, max_fdr, min_effect).to_numpy()
+    cutoff = -np.log10(max_fdr)
+    color_last, color_first = _group_colors(last, first)
+    colors = [color_last if p and g > 0 else color_first if p else to_rgba(_NEUTRAL)
+              for p, g in zip(passed, gap)]
+    testable = (result[f"n {first}"] + result[f"n {last}"]).to_numpy(float)
+    sizes = 15 + 185 * testable / testable.max()
 
     fig, ax = plt.subplots(figsize=(9.5, 5.6))
     ax.axvline(0, color=_ZERO, lw=1.4, zorder=1)
     ax.axhline(cutoff, color=_HAIRLINE, lw=1.0, zorder=1)
-    if min_gap is not None:                    # the 'big enough to care' line, both ways
-        for side in (-min_gap, min_gap):
-            ax.axvline(side, color=_HAIRLINE, lw=1.0, ls=(0, (5, 4)), zorder=1)
-    ax.scatter(gap[~over], height[~over], s=54, c=colors[~over], alpha=0.9,
-               edgecolor="white", linewidth=0.8, zorder=3)
-    if over.any():                             # surer than the axis goes
-        ax.scatter(gap[over], height[over], s=78, marker="^", c=colors[over], alpha=0.9,
-                   edgecolor="white", linewidth=0.8, zorder=4, clip_on=False)
+    for side in ((-min_effect, min_effect) if min_effect is not None else ()):
+        ax.axvline(side, color=_HAIRLINE, lw=1.0, ls=(0, (5, 4)), zorder=1)
+    ax.scatter(gap, height, s=sizes, c=colors, alpha=0.9, edgecolor="white", linewidth=0.8, zorder=3)
 
-    # Both sides of zero get the same reach, so a gap one way looks like a gap the
-    # other way. The limits are set before the names are placed - the names are
-    # pushed apart inside these limits, so changing them afterwards would undo it.
     limit = float(np.abs(gap).max()) * 1.15 or 1.0
     ax.set_xlim(-limit, limit)
-    # Always tall enough to show the cutoff line, even when nothing came close to it,
-    # and with a margin below zero so a dot sitting at 0 is not cut in half by the axis.
-    # The extra room on top is for the names: many rules can land on the same FDR - the
-    # permutation test cannot go below 1 / (shuffles + 1) - so their labels need a band
-    # above the dots to spread into.
-    top = max(ceiling, cutoff) * 1.4
+    top = max(float(height.max()), cutoff) * 1.4
     ax.set_ylim(-0.04 * top, top)
     _fdr_ticks(ax, top)
 
-    # Name only the few strongest, and only among the ones that passed. Two rules with
-    # the same numbers - a pair like 'A -> B' and 'B -> A' that fires in the same FOVs -
-    # sit on one dot, so they share one label instead of two arrows to the same place.
-    named = (pd.Series(np.abs(gap), index=comparison.index).where(passed)
-             .dropna().sort_values(ascending=False).head(name_top).index)
-    flips = _flip_marks(comparison, label_a, label_b)
+    named = pd.Series(np.abs(gap)).where(passed).dropna().nlargest(name_top).index
     together = {}
-    for rule in named:
-        i = comparison.index.get_loc(rule)
-        together.setdefault((round(gap[i], 6), round(height[i], 6)), []).append(
-            f"{flips[i]}{rule}")
+    for i in named:
+        together.setdefault((round(gap[i], 6), round(height[i], 6)), []).append(result.index[i])
+    _place_names(ax, [(x, y, "\n".join(rule_name(rule, kinds[rule]) for rule in names),
+                       KIND_COLORS[kinds[names[0]]]) for (x, y), names in together.items()], top)
 
-    _place_names(ax, [(gx, gy, "\n".join(names)) for (gx, gy), names in together.items()],
-                 top)
-
-    ax.annotate(f"cutoff {fdr_threshold:g}", xy=(-limit, cutoff), xytext=(3, 3),
+    ax.annotate(f"FDR {max_fdr:g}", xy=(-limit, cutoff), xytext=(3, 3),
                 textcoords="offset points", fontsize=8, color=_INK)
-    if min_gap is not None:
-        ax.annotate(f"{min_gap:g} pp", xy=(min_gap, ax.get_ylim()[1]), xytext=(3, -10),
-                    textcoords="offset points", fontsize=8, color=_INK)
-    # Which side means what, under the axis - never on the plot, where a dot may sit.
-    ax.set_xlabel(f"gap in net attraction (% of FOVs)\n"
-                  f"←  more in {label_b}          more in {label_a}  →", fontsize=10)
+    ax.set_xlabel(f"mean log2 lift: {last} − {first}  (→ closer in {last})", fontsize=10)
     ax.set_ylabel("FDR  (lower = surer)", fontsize=10)
-    _title(ax, f"{label_a} vs {label_b}: which rules differ", scope)
-    _legend(ax, label_a, label_b, color_a, color_b,
-            over_label=f"surer than {10 ** -ceiling:g}" if over.any() else None)
+    _title(ax, f"{first} vs {last}: rules whose lift differs", scope)
+    size_marks = [Line2D([0], [0], marker="o", linestyle="none", markersize=np.sqrt(sizes[i]),
+                         markerfacecolor=_NEUTRAL, markeredgecolor="white", label=f"{testable[i]:.0f} {unit}")
+                  for i in (testable.argmin(), testable.argmax())]
+    _legend(ax, f"higher in {last}", f"higher in {first}", color_last, color_first, size_marks + _kind_marks())
     tidy_axes(ax, grid="both")
     fig.tight_layout(rect=(0, 0, 1, 0.88))
     _finish(fig, save)
 
 
-def plot_dumbbell(comparison, label_a, label_b, scope=None, fdr_threshold=0.05,
-                  min_gap=None, top_n=15, value_label=None,
-                  what="how often a rule fires", save=None):
-    """The rules that differ most, by name: where each group sits between avoid and attract.
-
-    Any table `compare_groups` returns can be drawn here, not only rules - give
-    `value_label` and `what` to say what is being measured (e.g. cell-type shares),
-    so a reader can tell the two kinds of plot apart at a glance.
-
-    One row per rule, a dot per group, the line between them is the gap, and the gap
-    written again on the right. A dot left of zero means the cell types mostly avoid each
-    other in that group, right of zero they mostly attract. Biggest gap on top. Rules that
-    did not pass the cutoffs are still drawn, hollow and faint, so a comparison that found
-    nothing still shows how close it came.
-    """
-    if comparison.empty:
-        print("No data to plot.")
+def plot_close_ups(table, groups, result, kinds, rules, first, last, max_fdr=0.05, min_effect=None,
+                   unit="FOVs", scope=None, save=None):
+    """One panel per rule of `rules`: the log2 lift of each testable unit in `first` and `last`
+    (filled where found, hollow at 0 where not), each group's mean as a diamond, joined by the gap
+    the volcano shows; titled with the rule in its `kinds` arrow and colour, and with the gap and FDR,
+    coloured like the volcano when it passes."""
+    rules = [rule for rule in rules if rule in result.index]
+    if not rules:
+        print("No rules to show.")
         return
-
-    # Always the widest gaps, whether or not they passed - a comparison where nothing
-    # passed is still worth looking at, to see how far off it was.
-    ok = passing(comparison, fdr_threshold, min_gap)
-    top = (comparison.reindex(comparison["effect_size"].abs().sort_values().index)
-           .tail(top_n))                                   # biggest gap ends up on top
-    won = ok.reindex(top.index).to_numpy()
-    a = top[f"net_{label_a}"].to_numpy(dtype=float) * 100
-    b = top[f"net_{label_b}"].to_numpy(dtype=float) * 100
-    y = np.arange(len(top))
-
-    color_a, color_b = _group_colors(label_a, label_b)
-    # Wide enough that the rule names on the left still leave the title and the
-    # legend room to sit side by side.
-    fig, ax = plt.subplots(figsize=(10, max(3.2, len(top) * 0.34 + 1.4)))
-
-    # A solid bar is a rule that passed; a faint one did not, so the two never read
-    # the same even though both are drawn.
-    lo, hi = np.minimum(a, b), np.maximum(a, b)
-    ax.hlines(y[won], lo[won], hi[won], color="#c8c7c0", lw=2.6, zorder=1)
-    ax.hlines(y[~won], lo[~won], hi[~won], color="#ebeae4", lw=2.6, zorder=1)
-    for vals, color in ((b, color_b), (a, color_a)):
-        ax.scatter(vals[won], y[won], s=64, color=color,
-                   edgecolor="white", linewidth=1.4, zorder=3)
-        ax.scatter(vals[~won], y[~won], s=52, facecolors="white", edgecolor=color,
-                   linewidth=1.6, alpha=0.85, zorder=3)
-
-    # '±' marks a rule that changed direction: attracting in one group, avoiding in
-    # the other - the two dots then sit on either side of the zero line.
-    names = [f"{m}{n}" for m, n in zip(_flip_marks(top, label_a, label_b),
-                                       top.index.astype(str))]
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(names, fontsize=8.5)
-    for tick, is_won in zip(ax.get_yticklabels(), won):
-        tick.set_color("#0b0b0b" if is_won else "#96958f")
-    ax.set_ylim(-0.7, len(top) - 0.3)
-
-    # Zero is a real place now: left of it the cell types avoid each other, right of it
-    # they attract, so the axis has to show both sides.
-    ax.axvline(0, color=_ZERO, lw=1.4, zorder=1)
-
-    # The gap itself, written down the right - the number MIN_GAP is compared against.
-    reach = max(float(np.abs(np.concatenate([a, b])).max()), 1.0)
-    ax.set_xlim(-reach * 1.12, reach * 1.45)
-    for yi, (g, is_won) in enumerate(zip(top["effect_size"] * 100, won)):
-        ax.annotate(f"{abs(g):.0f}", xy=(ax.get_xlim()[1], yi), xytext=(-4, 0),
-                    textcoords="offset points", ha="right", va="center", fontsize=8,
-                    color="#0b0b0b" if is_won else "#96958f")
-    ax.annotate("gap (pp)", xy=(ax.get_xlim()[1], len(top) - 0.35), xytext=(-4, 0),
-                textcoords="offset points", ha="right", va="center", fontsize=8,
-                color=_INK)
-    if min_gap is not None:
-        ax.annotate(f"cutoff {min_gap:g}", xy=(ax.get_xlim()[1], -0.55), xytext=(-4, 0),
-                    textcoords="offset points", ha="right", va="center", fontsize=8,
-                    color=_INK)
-    ax.set_xlabel(value_label or "net: attracts minus avoids (% of the group's FOVs)\n"
-                                 "←  avoid          attract  →", fontsize=10)
-    _title(ax, f"{label_a} vs {label_b}: biggest gaps in {what}", scope)
-    _legend(ax, label_a, label_b, color_a, color_b, show_hollow=bool((~won).any()))
-    tidy_axes(ax, grid="x", hide=("top", "right", "left"))
-    ax.tick_params(axis="y", length=0)
+    color_last, color_first = _group_colors(last, first)
+    passed = ds.passing(result, max_fdr, min_effect)
+    rng = np.random.default_rng(0)
+    fig, axes = plt.subplots(1, len(rules), figsize=(3.2 * len(rules), 4.2), sharey=True, squeeze=False)
+    for ax, rule in zip(axes[0], rules):
+        means, labels = [], []
+        for x, (group, color) in enumerate(((first, color_first), (last, color_last))):
+            values = table.loc[rule, groups.index[groups.eq(group)]].dropna()
+            found = values.ne(0).to_numpy()
+            spread = x + rng.uniform(-0.18, 0.18, len(values))
+            ax.scatter(spread[found], values[found], s=30, color=color, alpha=0.8,
+                       edgecolor="white", linewidth=0.5, zorder=3)
+            ax.scatter(spread[~found], values[~found], s=30, facecolor="none", edgecolor=color,
+                       linewidth=0.8, alpha=0.6, zorder=3)
+            means.append(values.mean())
+            labels.append(f"{group}\n{len(values)} testable\n{int(found.sum())} found")
+        ax.plot([0, 1], means, color=_INK, lw=1.4, zorder=4)
+        ax.scatter([0, 1], means, marker="D", s=70, color=[color_first, color_last],
+                   edgecolor=_INK, linewidth=0.9, zorder=5)
+        ax.axhline(0, color=_ZERO, lw=1.1, zorder=1)
+        ax.set_xticks([0, 1], labels)
+        ax.set_xlim(-0.5, 1.5)
+        gap, fdr = result.loc[rule, "gap"], result.loc[rule, "fdr"]
+        shade = (color_last if gap > 0 else color_first) if passed[rule] else _INK
+        ax.set_title(f"gap {gap:+.2f} · FDR {fdr:.2g}", fontsize=9.5, color=shade, pad=4)
+        ax.text(0.5, 1.09, rule_name(rule, kinds[rule]), transform=ax.transAxes, ha="center", va="bottom",
+                fontsize=10.5, color=KIND_COLORS[kinds[rule]])
+        tidy_axes(ax, grid="y", hide=("top", "right"))
+        ax.tick_params(length=0)
+    axes[0][0].set_ylabel(f"log2 lift per {unit[:-1]}  (hollow = not found)", fontsize=10)
+    _title(axes[0][0], "Close-ups: the values behind the volcano", scope)
     fig.tight_layout(rect=(0, 0, 1, 0.88))
     _finish(fig, save)
+
+
+def plot_lift_heatmap(table, groups, kinds, clip=2.0, flip=False, scope=None, save=None):
+    """Rules x units of log2 lift, both sides clustered (euclidean distance, average linkage), with a
+    strip coloured by the group of each unit and every rule named with its `kinds` arrow and colour;
+    `flip` puts the units on the rows. Colours stop at ±`clip`. A NaN (not testable) is clustered as 0
+    and drawn in its own grey."""
+    if table.shape[0] < 2 or table.shape[1] < 2:
+        print("Not enough rules or units to cluster.")
+        return
+    groups = groups.reindex(table.columns)
+    colors, order = _category_colors(groups)
+    strip = groups.map(colors).fillna(_NEUTRAL).rename(groups.name)
+    shown = table.T if flip else table
+    long = max(6, 0.22 * len(table))
+    width, height = (long, 8) if flip else (12, long)
+    few_units = table.shape[1] <= 80
+    grid = sns.clustermap(
+        shown.fillna(0), mask=shown.isna(), method="average", metric="euclidean",
+        cmap=_LIFT_CMAP, center=0, vmin=-clip, vmax=clip,
+        row_colors=strip if flip else None, col_colors=None if flip else strip,
+        xticklabels=True if flip else few_units, yticklabels=few_units if flip else True,
+        figsize=(width, height), dendrogram_ratio=(1.5 / width, 1.5 / height),
+        cbar_pos=(0.02, 1 - 1.35 / height, 0.02, 1.2 / height), cbar_kws={"label": "log2 lift"})
+    ax = grid.ax_heatmap
+    ax.set_facecolor(_UNTESTABLE)
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    rule_labels = ax.get_xticklabels if flip else ax.get_yticklabels
+    rules = [label.get_text() for label in rule_labels()]
+    (ax.set_xticklabels if flip else ax.set_yticklabels)([rule_name(rule, kinds[rule]) for rule in rules])
+    for label, rule in zip(rule_labels(), rules):
+        label.set_color(KIND_COLORS[kinds[rule]])
+    marks = [Line2D([0], [0], marker="s", linestyle="none", markersize=9, markerfacecolor=colors[g],
+                    markeredgecolor="none", label=g) for g in order]
+    untestable = Line2D([0], [0], marker="s", linestyle="none", markersize=9, markerfacecolor=_UNTESTABLE,
+                        markeredgecolor="none", label="not testable")
+    grid.figure.legend(handles=marks + _kind_marks() + [untestable], frameon=False,
+                       loc="lower right", bbox_to_anchor=(0.98, 1.0), ncol=len(marks) + 3)
+    grid.figure.suptitle(f"log2 lift, clustered{f'  ·  {scope}' if scope else ''}", y=1 + 0.6 / height,
+                         va="bottom", fontsize=13)
+    _finish(grid.figure, save)
 
 
 # One hue per rule, so a line can be followed across the stages and found again in the

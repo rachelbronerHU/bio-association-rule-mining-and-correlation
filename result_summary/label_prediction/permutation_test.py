@@ -17,7 +17,7 @@ import prediction_search as ps
 import prediction_vis as pv
 from run_predictions import CORTICO, log
 
-PREDICTION = CORTICO
+PREDICTION = {**CORTICO, "without_muscle_rules": True}
 UNIT = "patient"
 N_SHUFFLES = 100
 

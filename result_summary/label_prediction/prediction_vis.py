@@ -19,10 +19,10 @@ MODEL_COLORS = {"Ridge logistic regression": "#33658A", "Lasso logistic regressi
 RULES_COLOR = "#2B5C9E"
 RUN_COLOR = "#A9B6C6"
 REFERENCES = {                     # reference row in the runs: (name in the legend, color, marker)
-    ps.COMPOSITION: ("Cell composition", "#3E9C7A", "o"),
-    "Pathological score only": ("Pathological score", "#E3A04F", "o"),
-    "Clinical score only": ("Clinical score", "#A8571F", "o"),
-    ps.PANETH: ("Paneth share (Azulay et al.)", "#E07A9B", "D"),
+    ps.COMPOSITION: ("Cell composition", "#6A9C89", "o"),
+    "Pathological score only": ("Pathological score", "#D3A55F", "o"),
+    "Clinical score only": ("Clinical score", "#9A6A4F", "o"),
+    ps.PANETH: ("Paneth share (Azulay et al.)", "#B97A8E", "D"),
 }
 QUESTIONS = {                      # prediction name: how the figure says it
     "cortico_response": "Steroid response",
@@ -234,6 +234,39 @@ def plot_rule_kinds(runs, units=("patient", "FOV"), save=None):
         plt.show()
 
 
+def plot_min_patients(runs, names, model, feature, unit="patient", save=None):
+    """One panel per prediction of `names`: a row per rule set, a column per minimum share of
+    patients; each cell the % right of `model` on `feature`, with how many rules it was given."""
+    runs = runs[(runs["model"] == model) & (runs["feature"] == feature) & (runs["unit"] == unit)]
+    settings = list(ps.RULE_SETS)
+
+    with plt.rc_context(vh.PANEL_FONTS):
+        fig, axes = plt.subplots(len(names), 1, sharex=True,
+                                 figsize=(vh.TEXT_WIDTH, 1.2 + 1.5 * len(names)))
+        for ax, name in zip(axes, names):
+            shown = runs[runs["prediction"] == name]
+            grid, rules = (shown.pivot_table(index="rule_set", columns="min_patients", values=column)
+                           .reindex(settings) for column in ("balanced_accuracy", "n_features"))
+            ax.imshow(grid, cmap="Blues", vmin=50, vmax=95, aspect="auto")
+            for (i, j), value in np.ndenumerate(grid.to_numpy()):
+                ax.text(j, i, f"{value:.0f}  ({rules.iat[i, j]:.0f} rules)", ha="center", va="center",
+                        fontsize=6.5, color="white" if value > 78 else vh.INK)
+            ax.set_yticks(range(len(settings)), settings)
+            ax.set_title(say(name), color=vh.INK)
+            ax.tick_params(length=0)
+            ax.spines[:].set_visible(False)
+        axes[-1].set_xticks(range(len(grid.columns)), [f"≥{share:.0%}" for share in grid.columns])
+        axes[-1].set_xlabel("Rules kept: found in at least this share of patients")
+        fig.subplots_adjust(left=0.3, hspace=0.5)
+        vh.figure_titles(
+            fig, f"{model}, {feature}: % right", organ=ps.ORGAN,
+            subtitle="% right = average of both groups; in brackets, how many rules the model was given",
+            params=f"50% = guessing; one row per {unit}, each patient left out in turn",
+        )
+        vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
+        plt.show()
+
+
 # ---------------------------------------------------------------------------
 # Both groups right, run by run
 # ---------------------------------------------------------------------------
@@ -369,11 +402,16 @@ def plot_smaller_group(runs, units=("patient", "FOV"), save=None):
 # The rules behind the best run
 # ---------------------------------------------------------------------------
 
+def plain_rule(rule):
+    """A saved rule as (clean rule, kind): ('A -> B', 'attracts')."""
+    sides, kind = rule.rsplit(" ", 1)
+    return " -> ".join(dh.clean_items(side) for side in sides.split(" -> ")), kind
+
+
 def rule_name(rule):
     """A saved rule as (clean name, kind): ('A → B', 'attracts')."""
-    sides, kind = rule.rsplit(" ", 1)
-    antecedents, consequents = sides.split(" -> ")
-    return f"{dh.clean_items(antecedents)} → {dh.clean_items(consequents)}", kind
+    name, kind = plain_rule(rule)
+    return name.replace(" -> ", " → "), kind
 
 
 def plot_weights(prediction, unit="patient", top=100, save=None):

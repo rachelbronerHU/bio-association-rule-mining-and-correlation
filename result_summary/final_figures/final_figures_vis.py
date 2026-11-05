@@ -56,13 +56,14 @@ def _names_left(ax, aligned=()):
     return ax.transAxes.inverted().transform((left, 0))[0]
 
 
-def _class_bands(ax, centers, classes, aligned=()):
+def _class_bands(ax, centers, classes, aligned=(), right=1):
     """A soft band behind each row, from the left edge of its names (and those of the `aligned` axes)
-    to the axes' right, at `centers` in data units, coloured by its rule's class (CLASS_COLORS)."""
+    to `right` in the axes' units (its right edge; 0 for its left, behind the names only), at `centers` in
+    data units, coloured by its rule's class (CLASS_COLORS)."""
     left = _names_left(ax, aligned)
     across = blended_transform_factory(ax.transAxes, ax.transData)
     for center, name in zip(centers, classes):
-        ax.add_patch(Rectangle((left, center - 0.43), 1 - left, 0.86, transform=across, lw=0, zorder=0,
+        ax.add_patch(Rectangle((left, center - 0.43), right - left, 0.86, transform=across, lw=0, zorder=0,
                                color=CLASS_COLORS.get(name, "white"), clip_on=False))
 
 
@@ -646,9 +647,11 @@ def save_stage_key(stages, font_size, name="stages"):
     save_group_key({stage: colors[stage] for stage in order}, font_size, name)
 
 
-def save_group_key(colors, font_size, name):
-    """A dot per group of `colors` ({group: colour}) with its name, saved as keys/<name>."""
-    _save_key([Line2D([], [], marker="o", ls="", color=color, markersize=0.8 * font_size, label=group)
+def save_group_key(colors, font_size, name, markers={}):
+    """A dot per group of `colors` ({group: colour}) with its name, saved as keys/<name>; a group of
+    `markers` ({group: marker}) gets that marker instead of a dot."""
+    _save_key([Line2D([], [], marker=markers.get(group, "o"), ls="", color=color, markersize=0.8 * font_size,
+                      label=group)
                for group, color in colors.items()], font_size, name)
 
 
@@ -683,15 +686,119 @@ def plot_loadings(weights, rules, n, width, font_size, classes=None, kinds=None,
             ax.xaxis.set_major_locator(MaxNLocator(3))
             ax.tick_params(axis="y", length=0)
             ax.spines[["top", "right", "left"]].set_visible(False)
-        fig.draw_without_rendering()
-        for ax in axes:
-            widest = max(label.get_window_extent().width for label in ax.get_yticklabels()) * 72 / fig.dpi
-            ax.tick_params(axis="y", pad=widest + 6)
-            plt.setp(ax.get_yticklabels(), ha="left")
-        fig.draw_without_rendering()
-        fig.set_layout_engine("none")
+        _names_to_left(fig, axes)
         for ax, shown in zip(axes, picks) if classes is not None else []:
             _class_tabs(ax, range(len(shown)), classes.reindex(rules[shown]))
     if save:
         _save_row(fig, axes, save, "pc")
+    plt.show()
+
+
+def _names_to_left(fig, axes):
+    """The y labels of each of `axes` moved left of its widest one and aligned on their left; the layout then frozen."""
+    fig.draw_without_rendering()
+    for ax in axes:
+        widest = max(label.get_window_extent().width for label in ax.get_yticklabels()) * 72 / fig.dpi
+        ax.tick_params(axis="y", pad=widest + 6)
+        plt.setp(ax.get_yticklabels(), ha="left")
+    fig.draw_without_rendering()
+    fig.set_layout_engine("none")
+
+
+def plot_both_groups(runs, references, best_color, width, font_size, save=None):
+    """A row per predictor in its colour, best first: the best rule run in `best_color` and in bold, and the best
+    run of each reference. Left, the % right of each group joined by a line: filled for the first, hollow for the
+    other. Right, their average as a bar from 50% (guessing).
+
+    runs       : the runs of one prediction and unit, as saved by run_predictions.py.
+    references : {reference rule set: (its name, its colour)}.
+    save       : a folder in summary_downloads, emptied of its PDFs, then given the plot, each panel on its own
+                 (panel_1, panel_2) and the key of the two groups.
+    """
+    rules = runs[runs["min_patients"].notna()]
+    best = rules.loc[rules["balanced_accuracy"].idxmax()]
+    tops = [(name, runs.loc[runs["rule_set"].eq(reference), "balanced_accuracy"].idxmax(), color)
+            for reference, (name, color) in references.items()]
+    rows = sorted([("Rules", best.name, best_color), *tops],
+                  key=lambda row: runs.loc[row[1], "balanced_accuracy"], reverse=True)
+    names, picked, colors = zip(*rows)
+    shown, y = runs.loc[list(picked)], np.arange(len(rows))
+    weights = ["bold" if name == "Rules" else "normal" for name in names]
+    with plt.rc_context(_fonts(font_size)):
+        fig, (sides, average) = plt.subplots(1, 2, sharey=True, layout="constrained",
+                                             figsize=(width, 0.9 * len(rows) + 1.5))
+        sides.axvline(50, color=INK, lw=1.5, ls=(0, (4, 2)), zorder=0)
+        sides.hlines(y, shown[["positive_right", "negative_right"]].min(axis=1),
+                     shown[["positive_right", "negative_right"]].max(axis=1), colors=colors, lw=3, zorder=1)
+        sides.scatter(shown["positive_right"], y, s=400, color=colors, zorder=2, clip_on=False)
+        sides.scatter(shown["negative_right"], y, s=400, facecolors="white", edgecolors=colors, linewidths=3,
+                      zorder=2, clip_on=False)
+        sides.set(xlim=(-3, 103), xticks=[0, 50, 100], xlabel="Each group right (%)", yticks=y, yticklabels=names)
+        sides.invert_yaxis()
+        average.barh(y, shown["balanced_accuracy"] - 50, left=50, height=0.4, color=colors)
+        for at, value, color, weight in zip(y, shown["balanced_accuracy"], colors, weights):
+            average.annotate(f"{value:.0f}", (value, at), xytext=(8, 0), textcoords="offset points", va="center",
+                             color=color, fontweight=weight)
+        average.set(xlim=(50, 100), xticks=[50, 75, 100], xlabel="% right (average)")
+        for label, weight in zip(sides.get_yticklabels(), weights):
+            label.set_fontweight(weight)
+        for ax in (sides, average):
+            ax.grid(axis="x", color=GRID, lw=1)
+            ax.set_axisbelow(True)
+            ax.tick_params(axis="y", length=0)
+            ax.spines[["top", "right", "left"]].set_visible(False)
+    if save:
+        folder = _save_row(fig, [sides, average], save, "panel")
+    plt.show()
+    if save:
+        _save_key([Line2D([], [], marker="o", ls="", markersize=0.8 * font_size, color=INK, label=best["positive"]),
+                   Line2D([], [], marker="o", ls="", markersize=0.8 * font_size, mfc="white", mec=INK, mew=3,
+                          label=best["negative"])], font_size, "groups", folder)
+
+
+def plot_rule_weights(weights, kinds, sides, width, font_size, classes=None, save=None):
+    """A bar per rule of `weights` (rule → weight), lowest at the bottom, in its kind's colour; to the right
+    pushes toward the second of `sides` (the two groups' names), to the left toward the first.
+
+    kinds   : the kind per rule, its bar's colour and its name's arrow.
+    classes : the class per rule, a band behind its name as in `plot_rule_trend`; none when None.
+    save    : a folder in summary_downloads, emptied of its PDFs, then given the bars.
+    """
+    weights = weights.sort_values()
+    names = [rule_name(rule, kinds[rule]) for rule in weights.index]
+    with plt.rc_context(_fonts(font_size)):
+        fig, ax = plt.subplots(layout="constrained", figsize=(width / 2, 0.5 * len(weights) + 1))
+        ax.barh(names, weights, color=[KIND_COLORS[kinds[rule]] for rule in weights.index])
+        ax.axvline(0, color=INK, lw=1)
+        ax.set(xlabel="Weight")
+        at_zero = blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text(0, 1, f"← {sides[0]}  ", transform=at_zero, ha="right", va="bottom")
+        ax.text(0, 1, f"  {sides[1]} →", transform=at_zero, ha="left", va="bottom")
+        ax.xaxis.set_major_locator(MaxNLocator(3))
+        ax.tick_params(axis="y", length=0)
+        ax.spines[["top", "right", "left"]].set_visible(False)
+        _names_to_left(fig, [ax])
+        if classes is not None:
+            _class_bands(ax, range(len(weights)), classes.reindex(weights.index), right=0)
+    if save:
+        save_figure(fig, "weights", figure_dir=_fresh_folder(save))
+    plt.show()
+
+
+def plot_permutation(shuffled, real, p, label, run_color, best_color, width, font_size, save=None):
+    """The best score of each search on shuffled labels as a histogram, and a line at the `real` best with
+    it and `p` beside it; `label` names the score.
+
+    save : a folder in summary_downloads, emptied of its PDFs, then given the plot.
+    """
+    with plt.rc_context(_fonts(font_size)):
+        fig, ax = plt.subplots(layout="constrained", figsize=(width / 2, width / 3))
+        ax.hist(shuffled, bins=np.arange(0, 101, 2.5), color=run_color, edgecolor="white")
+        ax.axvline(real, color=best_color, lw=3)
+        ax.text(real, 1, f" {real:.0f}\n p = {p:.2f}", transform=ax.get_xaxis_transform(), va="top")
+        ax.set(xlim=(30, 100), xlabel=label, ylabel="Searches")
+        ax.yaxis.set_major_locator(MaxNLocator(3, integer=True))
+        ax.spines[["top", "right"]].set_visible(False)
+    if save:
+        save_figure(fig, "permutation", figure_dir=_fresh_folder(save))
     plt.show()

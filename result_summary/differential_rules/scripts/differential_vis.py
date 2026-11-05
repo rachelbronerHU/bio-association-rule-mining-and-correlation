@@ -8,8 +8,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from matplotlib.colors import to_rgba
+from matplotlib.colors import to_rgba, to_hex
 from matplotlib.lines import Line2D
+from scipy.cluster.hierarchy import fcluster
 
 import compare_rules as cr
 import differential_stats as ds
@@ -198,23 +199,70 @@ def plot_close_ups(table, groups, result, kinds, rules, first, last, max_fdr=0.0
     _finish(fig, save)
 
 
-def plot_lift_heatmap(table, groups, kinds, clip=2.0, flip=False, scope=None, save=None):
-    """Rules x units of log2 lift, both sides clustered (euclidean distance, average linkage), with a
+def _cluster_lines(tree, n_clusters, axes, across):
+    """Cut `tree` into `n_clusters` and draw a dashed line between neighbouring clusters on `axes`,
+    across the rows when `across`, down the columns otherwise."""
+    labels = fcluster(tree.linkage, n_clusters, "maxclust")[tree.reordered_ind]
+    for edge in np.flatnonzero(labels[1:] != labels[:-1]) + 1:
+        for ax in axes:
+            (ax.axhline if across else ax.axvline)(edge, color=_INK, lw=1.3, ls=(0, (5, 3)))
+
+
+def _patient_colors(patients):
+    """One colour per patient, shuffled so patients next to each other in the list do not look alike."""
+    names = patients.dropna().unique()
+    palette = np.random.default_rng(0).permutation(np.array(sns.color_palette("husl", len(names))))
+    return patients.map(dict(zip(names, map(to_hex, palette)))).fillna(_NEUTRAL).rename("Patient")
+
+
+def _bottom_strip(grid, colors, flip):
+    """`colors` (one per unit) as a strip under the heatmap, or beside it when `flip`, taking over the units' labels."""
+    ax = grid.ax_heatmap
+    units = grid.data2d.index if flip else grid.data2d.columns
+    rgba = np.array([to_rgba(c) for c in colors.reindex(units)])
+    box = ax.get_position()
+    size = grid.ax_row_colors.get_position().width if flip else grid.ax_col_colors.get_position().height
+    labels = [label.get_text() for label in (ax.get_yticklabels() if flip else ax.get_xticklabels())]
+    if flip:
+        strip = ax.figure.add_axes([box.x1 + 0.4 * size, box.y0, size, box.height])
+        strip.imshow(rgba[:, None], aspect="auto")
+        strip.set_xticks([0], [colors.name], rotation=90)
+        strip.yaxis.tick_right()
+        strip.set_yticks(range(len(labels)), labels)
+        ax.set_yticks([])
+    else:
+        strip = ax.figure.add_axes([box.x0, box.y0 - 1.4 * size, box.width, size])
+        strip.imshow(rgba[None], aspect="auto")
+        strip.yaxis.tick_right()
+        strip.set_yticks([0], [colors.name])
+        strip.set_xticks(range(len(labels)), labels, rotation=90)
+        ax.set_xticks([])
+    strip.tick_params(length=0)
+    strip.spines[:].set_visible(False)
+
+
+def plot_lift_heatmap(table, groups, kinds, clip=2.0, flip=False, scope=None, save=None, n_clusters=None,
+                      linkage="average", rule_clusters=None, untestable_as=0, patients=None):
+    """Rules x units of log2 lift, both sides clustered (euclidean distance, `linkage` method), with a
     strip coloured by the group of each unit and every rule named with its `kinds` arrow and colour;
-    `flip` puts the units on the rows. Colours stop at ±`clip`. A NaN (not testable) is clustered as 0
-    and drawn in its own grey."""
+    `flip` puts the units on the rows. Colours stop at ±`clip`. A NaN (not testable) is clustered as
+    `untestable_as` (a number, or "mean": the rule's mean over its testable units) and drawn in its
+    own grey. `n_clusters` and `rule_clusters` cut the units and the rules into that many clusters,
+    split by dashed lines. `patients`, the patient of each unit, adds a strip coloured by patient."""
     if table.shape[0] < 2 or table.shape[1] < 2:
         print("Not enough rules or units to cluster.")
         return
     groups = groups.reindex(table.columns)
     colors, order = _category_colors(groups)
     strip = groups.map(colors).fillna(_NEUTRAL).rename(groups.name)
-    shown = table.T if flip else table
+    fill = table.mean(axis=1) if untestable_as == "mean" else untestable_as
+    filled = table.T.fillna(fill).T.fillna(0)
+    shown, filled = (table.T, filled.T) if flip else (table, filled)
     long = max(6, 0.22 * len(table))
     width, height = (long, 8) if flip else (12, long)
     few_units = table.shape[1] <= 80
     grid = sns.clustermap(
-        shown.fillna(0), mask=shown.isna(), method="average", metric="euclidean",
+        filled, mask=shown.isna(), method=linkage, metric="euclidean",
         cmap=_LIFT_CMAP, center=0, vmin=-clip, vmax=clip,
         row_colors=strip if flip else None, col_colors=None if flip else strip,
         xticklabels=True if flip else few_units, yticklabels=few_units if flip else True,
@@ -222,6 +270,14 @@ def plot_lift_heatmap(table, groups, kinds, clip=2.0, flip=False, scope=None, sa
         cbar_pos=(0.02, 1 - 1.35 / height, 0.02, 1.2 / height), cbar_kws={"label": "log2 lift"})
     ax = grid.ax_heatmap
     ax.set_facecolor(_UNTESTABLE)
+    unit_tree, rule_tree = ((grid.dendrogram_row, grid.dendrogram_col) if flip
+                            else (grid.dendrogram_col, grid.dendrogram_row))
+    if n_clusters:
+        _cluster_lines(unit_tree, n_clusters, (ax, grid.ax_row_colors if flip else grid.ax_col_colors), flip)
+    if rule_clusters:
+        _cluster_lines(rule_tree, rule_clusters, (ax,), not flip)
+    if patients is not None:
+        _bottom_strip(grid, _patient_colors(patients.reindex(table.columns)), flip)
     ax.set_xlabel("")
     ax.set_ylabel("")
     rule_labels = ax.get_xticklabels if flip else ax.get_yticklabels

@@ -278,11 +278,12 @@ def output_path(prediction, kind, unit, ext="csv"):
 
 
 def save(prediction, unit, runs, weights):
-    """The runs CSV and the best logistic run's weights."""
+    """The runs CSV, the best logistic run's weights and the cell composition weights."""
     os.makedirs(OUT_DIR, exist_ok=True)
     runs.to_csv(output_path(prediction, "runs", unit), index=False)
     print(f"saved {output_path(prediction, 'runs', unit)}")
     save_best_weights(prediction, unit, runs, weights)
+    save_composition_weights(prediction, unit, runs, weights)
 
 
 def save_best_weights(prediction, unit, runs, weights):
@@ -296,6 +297,37 @@ def save_best_weights(prediction, unit, runs, weights):
     setting = runs.loc[best, ["rule_set", "feature", "min_patients", "model", "balanced_accuracy", "auc"]]
     chosen.rename_axis("rule").reset_index().assign(**setting).to_csv(path, index=False)
     print(f"saved {path}  ({', '.join(map(str, setting))})")
+
+
+def composition_runs(runs):
+    """{key: row of runs} of the logistic cell composition runs whose weights are saved: "best", the
+    best of them, and "rules' model", the one with the best rule run's model (none when that model
+    is not logistic)."""
+    rules = runs[runs["min_patients"].notna()]
+    rules_model = rules.loc[rules["balanced_accuracy"].idxmax(), "model"]
+    composition = runs[runs["rule_set"].eq(COMPOSITION) & runs["model"].str.contains("logistic")]
+    chosen = {"best": composition["balanced_accuracy"].idxmax()}
+    same = composition.index[composition["model"].eq(rules_model)]
+    if len(same):
+        chosen["rules' model"] = same[0]
+    return chosen
+
+
+def save_composition_weights(prediction, unit, runs, weights):
+    """The weights of composition_runs, one table keyed by 'run', biggest pull first, zeros left
+    out. weights: {row of runs: its weights}, holding at least those rows."""
+    chosen = composition_runs(runs)
+    parts = []
+    for key, row in chosen.items():
+        weight = weights[row][weights[row] != 0].sort_values(key=abs, ascending=False)
+        setting = runs.loc[row, ["model", "balanced_accuracy", "auc"]]
+        parts.append(weight.rename_axis("cell_type").reset_index().assign(run=key, **setting))
+    path = output_path(prediction, "weights_composition", unit)
+    pd.concat(parts).to_csv(path, index=False)
+    models = ", ".join(f"{key}: {runs.loc[row, 'model']}" for key, row in chosen.items())
+    print(f"saved {path}  ({models})")
+    if len(chosen) == 1:
+        print("  no \"rules' model\" weights: the best rule run's model is not logistic")
 
 
 def p_value(results, column):

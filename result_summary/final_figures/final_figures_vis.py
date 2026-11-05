@@ -757,18 +757,27 @@ def plot_both_groups(runs, references, best_color, width, font_size, save=None):
 
 
 def plot_rule_weights(weights, kinds, sides, width, font_size, classes=None, save=None):
-    """A bar per rule of `weights` (rule → weight), lowest at the bottom, in its kind's colour; to the right
+    """`plot_weights` for rules: each rule named with its kind's arrow and in its kind's colour.
+
+    kinds   : the kind per rule.
+    classes : the class per rule, a band behind its name as in `plot_rule_trend`; none when None.
+    """
+    names = {rule: rule_name(rule, kinds[rule]) for rule in weights.index}
+    plot_weights(weights.rename(names), {names[rule]: KIND_COLORS[kind] for rule, kind in kinds.items()},
+                 sides, width, font_size, None if classes is None else classes.rename(names), save)
+
+
+def plot_weights(weights, colors, sides, width, font_size, classes=None, save=None):
+    """A bar per name of `weights` (name → weight), lowest at the bottom, in its colour of `colors`; to the right
     pushes toward the second of `sides` (the two groups' names), to the left toward the first.
 
-    kinds   : the kind per rule, its bar's colour and its name's arrow.
-    classes : the class per rule, a band behind its name as in `plot_rule_trend`; none when None.
+    classes : the class per name, a band behind it as in `plot_rule_trend`; none when None.
     save    : a folder in summary_downloads, emptied of its PDFs, then given the bars.
     """
     weights = weights.sort_values()
-    names = [rule_name(rule, kinds[rule]) for rule in weights.index]
     with plt.rc_context(_fonts(font_size)):
         fig, ax = plt.subplots(layout="constrained", figsize=(width / 2, 0.5 * len(weights) + 1))
-        ax.barh(names, weights, color=[KIND_COLORS[kinds[rule]] for rule in weights.index])
+        ax.barh(weights.index, weights, color=[colors[name] for name in weights.index])
         ax.axvline(0, color=INK, lw=1)
         ax.set(xlabel="Weight")
         at_zero = blended_transform_factory(ax.transData, ax.transAxes)

@@ -4,8 +4,9 @@ Each run predicts every patient from a model trained on all the other patients. 
 prediction and unit gets its own runs, weights and plot files in output/, saved as soon
 as its last run finishes.
 
-    python run_predictions.py          # run, save and plot
-    python run_predictions.py --plot   # plot the saved runs again without rerunning
+    python run_predictions.py                        # run, save and plot
+    python run_predictions.py --plot                 # plot the saved runs again without rerunning
+    python run_predictions.py --composition-weights  # only the cell composition weights, from the saved runs
 """
 import os
 import sys
@@ -118,11 +119,28 @@ def run_all(jobs):
             save_group(jobs, results, group)
 
 
+def save_composition_weights(cells, fovs):
+    """The cell composition weights of every prediction and unit, fitted again for the runs
+    ps.composition_runs picks from the saved runs CSV."""
+    for prediction in PREDICTIONS:
+        patients = ps.patients_of(prediction, cells, fovs)
+        for unit in UNITS:
+            runs = pd.read_csv(ps.output_path(prediction, "runs", unit))
+            is_positive, _ = ps.labels(patients, unit)
+            table = ps.composition_table(cells, patients, ps.UNIT_COLUMNS[unit])
+            weights = {row: ps.weights_of(table, is_positive, runs.loc[row, "model"])
+                       for row in ps.composition_runs(runs).values()}
+            ps.save_composition_weights(prediction, unit, runs, weights)
+
+
 if __name__ == "__main__":
     if "--plot" in sys.argv:
         for prediction in PREDICTIONS:
             for unit in UNITS:
                 pv.plot_runs(prediction, unit, pd.read_csv(ps.output_path(prediction, "runs", unit)))
+    elif "--composition-weights" in sys.argv:
+        cells, fovs, _ = ps.load_data()
+        save_composition_weights(cells, fovs)
     else:
         log(f"=== Label prediction: {len(PREDICTIONS)} predictions x {len(UNITS)} units "
             f"({', '.join(UNITS)}), {cpu_count()} cores ===")

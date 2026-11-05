@@ -431,13 +431,7 @@ def plot_weights(prediction, unit="patient", top=100, save=None):
 
     with plt.rc_context(vh.PANEL_FONTS):
         fig, ax = plt.subplots(figsize=(vh.TEXT_WIDTH, height))
-        ax.barh(range(len(shown)), shown["weight"], color=colors, height=0.7)
-        ax.axvline(0, color=vh.ZERO, lw=0.8)
-        ax.set_yticks(range(len(shown)), names)
-        ax.set_xlabel(f"← toward {sides['negative']}          weight          "
-                      f"toward {sides['positive']} →")
-        vh.tidy_axes(ax, grid="x", hide=("top", "right", "left"))
-        ax.tick_params(axis="y", length=0)
+        draw_weights(ax, names, shown["weight"], colors, sides)
         ax.legend(handles=[Line2D([], [], color=vh.ATTRACTION, lw=6, label="Attraction"),
                            Line2D([], [], color=vh.AVOIDANCE, lw=6, label="Avoidance")],
                   loc="lower right", bbox_to_anchor=(1, 1), ncol=2, frameon=False)
@@ -450,6 +444,44 @@ def plot_weights(prediction, unit="patient", top=100, save=None):
         )
         vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
         plt.show()
+
+
+def plot_composition_weights(prediction, unit="patient", save=None):
+    """The cell composition weights saved by ps.save_composition_weights: a panel per model
+    ("best", and "rules' model" when it is another model), zeros left out."""
+    weights = pd.read_csv(ps.output_path(prediction, "weights_composition", unit))
+    sides = pd.read_csv(ps.output_path(prediction, "runs", unit)).iloc[0]
+    models = list(weights.groupby("model", sort=False))
+    rows = [shown["cell_type"].nunique() for _, shown in models]
+    gap = 1.0
+
+    with plt.rc_context(vh.PANEL_FONTS):
+        fig, axes = plt.subplots(len(models), 1, squeeze=False, height_ratios=rows,
+                                 figsize=(vh.TEXT_WIDTH, 1.8 + 0.22 * sum(rows) + gap * (len(rows) - 1)),
+                                 gridspec_kw={"hspace": gap / (0.22 * sum(rows) / len(rows))})
+        for ax, (model, shown) in zip(axes[:, 0], models):
+            runs = " and ".join(shown["run"].unique())
+            shown = shown.drop_duplicates("cell_type").iloc[::-1]
+            draw_weights(ax, shown["cell_type"], shown["weight"], REFERENCES[ps.COMPOSITION][1], sides)
+            ax.set_title(f"{runs}: {model} · {shown['balanced_accuracy'].iloc[0]:.0f}% right", loc="left")
+        vh.figure_titles(
+            fig, f"{say(ps.name_of(prediction))}: the cell types cell composition leans on",
+            organ=ps.ORGAN, params=f"Cell types with a weight (the rest weigh 0); one row per {unit}",
+        )
+        vh.save_figure(fig, save, figure_dir=ps.OUT_DIR)
+        plt.show()
+
+
+def draw_weights(ax, names, weights, colors, sides):
+    """A bar per weight, from the bottom up: to the right pushes toward sides['positive'],
+    to the left toward sides['negative']."""
+    ax.barh(range(len(names)), weights, color=colors, height=0.7)
+    ax.axvline(0, color=vh.ZERO, lw=0.8)
+    ax.set_yticks(range(len(names)), names)
+    ax.set_xlabel(f"← toward {sides['negative']}          weight          "
+                  f"toward {sides['positive']} →")
+    vh.tidy_axes(ax, grid="x", hide=("top", "right", "left"))
+    ax.tick_params(axis="y", length=0)
 
 
 # ---------------------------------------------------------------------------

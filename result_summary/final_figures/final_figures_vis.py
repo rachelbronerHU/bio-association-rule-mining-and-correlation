@@ -27,6 +27,8 @@ BACKDROP, BACKDROP_SIZE = "#f0efeb", 0.5
 PALE, PALE_GREY = 0.3, "#c9c8c2"
 TREND_GAP = 0.4
 RULE_SIZE = 2.5
+ARROW_ROW = 0.3
+RESPONSE_TAGS = ["#7B5EA7", "#E0A21B"]   # responder, non-responder: apart from the stage tags
 KEY_ROW = 0.3
 CLASS_COLORS = {
     "Immune–Immune": "#E3DCF2",
@@ -181,6 +183,28 @@ def _tag(ax, color):
     """A filled triangle in the top left corner, the FOV's tag colour."""
     ax.add_patch(Polygon([(0, 1), (0.15, 1), (0, 0.85)], closed=True, color=color, lw=0,
                          transform=ax.transAxes, clip_on=False, zorder=4))
+
+
+def _side_arrow(ax, colors, found):
+    """A left-to-right band from the first of `colors` to the last, with a dot in each at its ends: an arrow
+    growing toward and pointing at the one side that has the rule (`found`, per side), an even bar when both
+    have it; nothing otherwise."""
+    ax.set(xlim=(0, 1), ylim=(-1, 1))
+    ax.axis("off")
+    if len(found) != 2 or not any(found):
+        return
+    start, stop, head = 0.06, 0.94, 0.04
+    if all(found):
+        shape = [(start, -0.25), (stop, -0.25), (stop, 0.25), (start, 0.25)]
+    else:
+        right = [(start, -0.08), (stop - head, -0.35), (stop - head, -0.8), (stop, 0),
+                 (stop - head, 0.8), (stop - head, 0.35), (start, 0.08)]
+        shape = right if found[1] else [(1 - x, y) for x, y in right]
+    band = Polygon(shape, closed=True, facecolor="none", lw=0)
+    ax.add_patch(band)
+    ax.imshow(np.linspace(0, 1, 256)[None, :], cmap=LinearSegmentedColormap.from_list("sides", colors),
+              extent=(start, stop, -1, 1), aspect="auto", clip_path=band)
+    ax.scatter([0.02, 0.98], [0, 0], s=(0.8 * plt.rcParams["font.size"]) ** 2, c=colors, linewidths=0)
 
 
 def _row(n, width, gap_after=None):
@@ -416,16 +440,21 @@ def _rule_key(ax, rule, colors, across=False):
 
 
 def _pair_grid(n, sides, width, vertical):
-    """A figure with a row of `n` square axes per side, `sides` rows (columns when `vertical`), and one
-    key axes after them across all sides, `width` long, a square wide, or KEY_ROW of one high when
-    `vertical`; the rows of axes, the key, and how much larger a panel is than PANEL_INCHES."""
+    """A figure with a row of `n` square axes per side, `sides` rows (columns when `vertical`), an arrow
+    axes ARROW_ROW of one high under them, and one key axes across all sides, after them a square wide, or
+    under the arrow KEY_ROW of one high when `vertical`; `width` long; the rows of axes, the key, the arrow,
+    and how much larger a panel is than PANEL_INCHES."""
     side = width / (n + 1)
-    fig = plt.figure(layout="constrained",
-                     figsize=(sides * side, (n + KEY_ROW) * side) if vertical else (width, sides * side))
-    grid = (fig.add_gridspec(n + 1, sides, height_ratios=[1] * n + [KEY_ROW]) if vertical
-            else fig.add_gridspec(sides, n + 1))
+    if vertical:
+        fig = plt.figure(layout="constrained", figsize=(sides * side, (n + ARROW_ROW + KEY_ROW) * side))
+        grid = fig.add_gridspec(n + 2, sides, height_ratios=[1] * n + [ARROW_ROW, KEY_ROW])
+        key, arrow = grid[n + 1, :], grid[n, :]
+    else:
+        fig = plt.figure(layout="constrained", figsize=(width, (sides + ARROW_ROW) * side))
+        grid = fig.add_gridspec(sides + 1, n + 1, height_ratios=[1] * sides + [ARROW_ROW])
+        key, arrow = grid[:sides, n], grid[sides, :n]
     rows = [[fig.add_subplot(grid[(at, row) if vertical else (row, at)]) for at in range(n)] for row in range(sides)]
-    return fig, rows, fig.add_subplot(grid[n, :] if vertical else grid[:, n]), side / PANEL_INCHES
+    return fig, rows, fig.add_subplot(key), fig.add_subplot(arrow), side / PANEL_INCHES
 
 
 def plot_rule_examples(cells, examples, rules, cell_colors, key, width, font_size, network=True, dot=10,
@@ -434,10 +463,11 @@ def plot_rule_examples(cells, examples, rules, cell_colors, key, width, font_siz
     its map with only the rule's two cell types in colour, its rule map by `_rule_map`, with `network` its
     rule network with the rule in front; and one key of the rule map by `_rule_key` beside all rows
     (one line under them when `vertical`); a `scale_um` bar on every map when given;
-    drawn as in `plot_fov_maps` and `plot_rule_networks`.
+    drawn as in `plot_fov_maps` and `plot_rule_networks`; under them, `_side_arrow` from the first FOV's tag
+    colour to the last's, pointing at the side the rule belongs to.
 
-    examples : {name: ((centre, neighbour), kind, [(FOV, score, tag colour), ...])}, the score as
-               `rule_examples_helper.rule_scores` gives it, the tag in the corner of the FOV's maps.
+    examples : {name: ((centre, neighbour), kind, [(FOV, score, tag colour, has the rule), ...])}, the
+               score as `rule_examples_helper.rule_scores` gives it, the tag in the corner of the FOV's maps.
     rules    : as in `plot_rule_networks`.
     key      : the cell types named in the cell type key, in its order.
     vertical : each example as a column, top to bottom, `width` long, instead of a row.
@@ -450,8 +480,8 @@ def plot_rule_examples(cells, examples, rules, cell_colors, key, width, font_siz
         if notes:
             print(notes[name])
         with plt.rc_context(_fonts(font_size)):
-            fig, rows, key_ax, scale = _pair_grid(3 + network, len(sides), width, vertical)
-            for axes, (fov, score, tag) in zip(rows, sides):
+            fig, rows, key_ax, arrow_ax, scale = _pair_grid(3 + network, len(sides), width, vertical)
+            for axes, (fov, score, tag, found) in zip(rows, sides):
                 shown = cells[cells["fov"].eq(fov)]
                 _fov_map(axes[0], shown, cell_colors, dot * scale ** 2, scale_um, None)
                 _fov_map(axes[1], shown, cell_colors, dot * scale ** 2, scale_um, None, colored=rule)
@@ -462,9 +492,10 @@ def plot_rule_examples(cells, examples, rules, cell_colors, key, width, font_siz
                 for ax in axes[:3]:
                     _tag(ax, tag)
             _rule_key(key_ax, rule, cell_colors, across=vertical)
+            _side_arrow(arrow_ax, [tag for *_, tag, _ in sides], [found for *_, found in sides])
             rows[0][0].set_title(rule_name(rule, kind), loc="left", color=KIND_COLORS[kind])
         if save:
-            _save_parts(fig, [ax for axes in rows for ax in axes] + [key_ax], folder, name, name)
+            _save_parts(fig, [ax for axes in rows for ax in axes] + [key_ax, arrow_ax], folder, name, name)
         plt.show()
     if save:
         save_cell_key(key, cell_colors, font_size, save)

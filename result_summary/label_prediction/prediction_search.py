@@ -81,13 +81,18 @@ MODELS = {
 # Data and patients
 # ---------------------------------------------------------------------------
 
-def load_data():
-    """Cells, FOVs and rules of this organ's transplanted patients, each FOV with every
-    biopsy column. The slow part: once."""
+def load_fovs():
+    """Cells, and the FOVs of this organ's transplanted patients, each with every biopsy column."""
     cells, fovs, biopsies = dh.load_spatial_data()
     fovs = fovs[(fovs["Organ"] == ORGAN) & fovs["Biopsy_ID"].notna()]
     missing = [column for column in biopsies if column not in fovs]
-    fovs = fovs.merge(biopsies[["Biopsy_ID"] + missing], on="Biopsy_ID", how="left")
+    return cells, fovs.merge(biopsies[["Biopsy_ID"] + missing], on="Biopsy_ID", how="left")
+
+
+def load_data():
+    """Cells, FOVs (as `load_fovs`) and rules of this organ's transplanted patients. The slow
+    part: once."""
+    cells, fovs = load_fovs()
     rules = dh.load_results(rule_max_items=4, kind=None)
     rules = rules[rules["FOV"].isin(fovs["FOV"])]
     rules["Rule"] = rules["Antecedents"] + " -> " + rules["Consequents"] + " " + rules["Kind"]

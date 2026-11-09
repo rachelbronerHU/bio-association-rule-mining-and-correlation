@@ -37,12 +37,6 @@ CLASS_COLORS = {
     "Tissue structure": "#F6EDC4",
 }
 STRIPE = 0.25
-CLASS_TABS = {
-    "Immune–Immune": "#9B8AC4",
-    "Immune–Epithel": "#E3A87A",
-    "Immune–Stroma": "#7DBF95",
-    "Tissue structure": "#D6BE6A",
-}
 
 
 def _fonts(size):
@@ -67,15 +61,6 @@ def _class_bands(ax, centers, classes, aligned=(), right=1):
     for center, name in zip(centers, classes):
         ax.add_patch(Rectangle((left, center - 0.43), right - left, 0.86, transform=across, lw=0, zorder=0,
                                color=CLASS_COLORS.get(name, "white"), clip_on=False))
-
-
-def _class_tabs(ax, centers, classes):
-    """A small square in the space left at the start of each rule's name, at `centers` in data units,
-    in its class's CLASS_TABS colour."""
-    size = plt.rcParams["font.size"]
-    at = offset_copy(blended_transform_factory(ax.transAxes, ax.transData), ax.figure, x=0.5 * size, units="points")
-    ax.scatter([_names_left(ax)] * len(centers), list(centers), s=(0.7 * size) ** 2, marker="s", linewidths=0,
-               c=[CLASS_TABS.get(name, "white") for name in classes], transform=at, clip_on=False)
 
 
 def save_class_key(font_size, colors=CLASS_COLORS, name="rule_classes"):
@@ -691,7 +676,7 @@ def plot_loadings(weights, rules, n, width, font_size, classes=None, kinds=None,
     weight as bars, side by side, each in its rule's kind colour (with `kinds`) or else in that component's
     `pc_tags` family, dark for positive and light for negative; above its two ends, the way those rules move FOVs on the PCA (PC1 left / right, PC2 down / up).
 
-    classes : the class per rule, a square before each rule's name; none when None.
+    classes : the class per rule, a band behind its name as in `plot_weights`; none when None.
     kinds   : the kind per rule, its bar in that kind's colour and its name with its arrow; → when None.
 
     save : a folder in summary_downloads, emptied of its PDFs, then given the components together
@@ -699,8 +684,7 @@ def plot_loadings(weights, rules, n, width, font_size, classes=None, kinds=None,
     """
     rules = np.asarray(rules).astype(str)
     kinds = {} if kinds is None else kinds
-    names = np.array([("    " if classes is not None else "") + rule_name(rule, kinds.get(rule, "attracts"))
-                      for rule in rules])
+    names = np.array([rule_name(rule, kinds.get(rule, "attracts")) for rule in rules])
     orders = [np.argsort(weight) for weight in weights]
     picks = [np.r_[order[:n], order[-n:]] if len(order) > 2 * n else order for order in orders]
     with plt.rc_context(_fonts(font_size)):
@@ -719,7 +703,7 @@ def plot_loadings(weights, rules, n, width, font_size, classes=None, kinds=None,
             ax.spines[["top", "right", "left"]].set_visible(False)
         _names_to_left(fig, axes)
         for ax, shown in zip(axes, picks) if classes is not None else []:
-            _class_tabs(ax, range(len(shown)), classes.reindex(rules[shown]))
+            _class_bands(ax, range(len(shown)), classes.reindex(rules[shown]), right=0)
     if save:
         _save_row(fig, axes, save, "pc")
     plt.show()

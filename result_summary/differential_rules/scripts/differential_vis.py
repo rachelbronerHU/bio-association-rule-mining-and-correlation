@@ -10,12 +10,13 @@ import seaborn as sns
 from pathlib import Path
 from matplotlib.colors import to_rgba, to_hex
 from matplotlib.lines import Line2D
+from matplotlib.transforms import blended_transform_factory
 from scipy.cluster.hierarchy import fcluster
 
 import compare_rules as cr
 import differential_stats as ds
 from vis_helper import (save_figure, _titled, _category_colors, tidy_axes, spread_labels,
-                        plot_fov, set_cell_colors, TEXT_WIDTH, PANEL_FONTS,
+                        plot_fov, plot_fov_panel, set_cell_colors, TEXT_WIDTH, PANEL_FONTS,
                         _cell_share_table, _eligible_by_stage, _shares_panel,
                         NEUTRAL as _NEUTRAL, HAIRLINE as _HAIRLINE,
                         ZERO as _ZERO, INK as _INK, ATTRACTION, AVOIDANCE, KIND_COLORS, rule_name)
@@ -201,11 +202,25 @@ def plot_close_ups(table, groups, result, kinds, rules, first, last, max_fdr=0.0
 
 def _cluster_lines(tree, n_clusters, axes, across):
     """Cut `tree` into `n_clusters` and draw a dashed line between neighbouring clusters on `axes`,
-    across the rows when `across`, down the columns otherwise."""
-    labels = fcluster(tree.linkage, n_clusters, "maxclust")[tree.reordered_ind]
+    across the rows when `across`, down the columns otherwise. Returns each leaf's cluster, numbered
+    1, 2, … in the order drawn."""
+    labels = pd.factorize(fcluster(tree.linkage, n_clusters, "maxclust")[tree.reordered_ind])[0] + 1
     for edge in np.flatnonzero(labels[1:] != labels[:-1]) + 1:
         for ax in axes:
             (ax.axhline if across else ax.axvline)(edge, color=_INK, lw=1.3, ls=(0, (5, 3)))
+    return labels
+
+
+def _cluster_names(labels, ax, across):
+    """C1, C2, … beside `ax`, at the middle of each cluster."""
+    for n in np.unique(labels):
+        middle = np.flatnonzero(labels == n).mean() + 0.5
+        if across:
+            ax.text(-0.3, middle, f"C{n}", transform=blended_transform_factory(ax.transAxes, ax.transData),
+                    ha="right", va="center", fontsize=9, color=_INK)
+        else:
+            ax.text(middle, 1.3, f"C{n}", transform=blended_transform_factory(ax.transData, ax.transAxes),
+                    ha="center", va="bottom", fontsize=9, color=_INK)
 
 
 def _patient_colors(patients):
@@ -248,7 +263,8 @@ def plot_lift_heatmap(table, groups, kinds, clip=2.0, flip=False, scope=None, sa
     `flip` puts the units on the rows. Colours stop at ±`clip`. A NaN (not testable) is clustered as
     `untestable_as` (a number, or "mean": the rule's mean over its testable units) and drawn in its
     own grey. `n_clusters` and `rule_clusters` cut the units and the rules into that many clusters,
-    split by dashed lines. `patients`, the patient of each unit, adds a strip coloured by patient."""
+    split by dashed lines. `patients`, the patient of each unit, adds a strip coloured by patient.
+    Returns the cluster of each unit (C1, C2, … in the order drawn) when `n_clusters` is given."""
     if table.shape[0] < 2 or table.shape[1] < 2:
         print("Not enough rules or units to cluster.")
         return
@@ -272,8 +288,13 @@ def plot_lift_heatmap(table, groups, kinds, clip=2.0, flip=False, scope=None, sa
     ax.set_facecolor(_UNTESTABLE)
     unit_tree, rule_tree = ((grid.dendrogram_row, grid.dendrogram_col) if flip
                             else (grid.dendrogram_col, grid.dendrogram_row))
+    clusters = None
     if n_clusters:
-        _cluster_lines(unit_tree, n_clusters, (ax, grid.ax_row_colors if flip else grid.ax_col_colors), flip)
+        strip_ax = grid.ax_row_colors if flip else grid.ax_col_colors
+        labels = _cluster_lines(unit_tree, n_clusters, (ax, strip_ax), flip)
+        _cluster_names(labels, strip_ax, flip)
+        clusters = pd.Series([f"C{n}" for n in labels], index=grid.data2d.index if flip else grid.data2d.columns,
+                             name="cluster")
     if rule_clusters:
         _cluster_lines(rule_tree, rule_clusters, (ax,), not flip)
     if patients is not None:
@@ -294,6 +315,22 @@ def plot_lift_heatmap(table, groups, kinds, clip=2.0, flip=False, scope=None, sa
     grid.figure.suptitle(f"log2 lift, clustered{f'  ·  {scope}' if scope else ''}", y=1 + 0.6 / height,
                          va="bottom", fontsize=13)
     _finish(grid.figure, save)
+    return clusters
+
+
+def plot_cluster_maps(clusters, cells, fovs, score, per_cluster=None, per_row=4, save=None):
+    """One panel of cell maps per cluster of `clusters` (FOV -> cluster, in heatmap order), each map titled
+    with its cluster, `score` group and patient; `per_cluster` maps picked evenly along the cluster, None for all."""
+    set_cell_colors(cells)
+    about = fovs.set_index("FOV")
+    for name, members in clusters.groupby(clusters, sort=False):
+        chosen = members.index
+        if per_cluster and len(chosen) > per_cluster:
+            chosen = chosen[np.linspace(0, len(chosen) - 1, per_cluster).round().astype(int)]
+        print(f"{name}: {len(members)} FOVs, {len(chosen)} shown")
+        plot_fov_panel({fov: f"{name} · {about.at[fov, score]} · {about.at[fov, 'PatientID']}"
+                        for fov in chosen}, cells, fovs, num_cols=per_row, one_legend=True,
+                       save=save and str(_FIGURE_DIR / f"{save}_{name.lower()}"))
 
 
 # One hue per rule, so a line can be followed across the stages and found again in the

@@ -178,19 +178,9 @@ def pick_shared(data, rows, sign, fovs, place=None):
     return picked | cover(met.drop(columns=list(picked)), tie)
 
 
-def pick_by_weight(data, weights, ends, n, place=None):
-    """For each of the first `n` rules of `weights`, two FOVs by `pick_shared`, so the rules share FOVs where
-    they can: one with the rule from the end that having it pulls toward (the sign of weight × pull), one
-    without it from the other end. Rules not in `data.has_rule` (not pairwise, of Muscle, or of one cell
-    type) are skipped, with a note.
-
-    weights : rows of 'rule' ('centre -> neighbour'), 'kind', 'weight' and 'pull' (as `pull` gives it),
-              biggest first.
-    ends    : {+1: (name, FOVs, colour), -1: (name, FOVs, colour)}, in the order they are shown.
-    place   : each FOV's position, the + end high.
-
-    Returns a table of the picks, the examples as `pick_examples` gives them, and {end name: colour}.
-    """
+def first_known(data, weights, n):
+    """The first `n` rows of `weights` that `data.has_rule` has (not of Muscle, and of two cell types); the
+    rows skipped before them noted."""
     rows = []
     for row in weights.itertuples():
         if len(rows) == n:
@@ -199,6 +189,22 @@ def pick_by_weight(data, weights, ends, n, place=None):
             rows.append(row)
         else:
             print(f"skipped {row.rule} ({row.kind}): no has-rule table for it")
+    return rows
+
+
+def pick_by_weight(data, weights, ends, n, place=None):
+    """For the `n` rules of highest weight and the `n` of lowest, by `first_known`, highest first: two FOVs
+    each by `pick_shared`, so the rules share FOVs where they can: one with the rule from the end that having
+    it pulls toward (the sign of weight × pull), one without it from the other end.
+
+    weights : rows of 'rule' ('centre -> neighbour'), 'kind', 'weight' and 'pull' (as `pull` gives it).
+    ends    : {+1: (name, FOVs, colour), -1: (name, FOVs, colour)}, in the order they are shown.
+    place   : each FOV's position, the + end high.
+
+    Returns a table of the picks, the examples as `pick_examples` gives them, and {end name: colour}.
+    """
+    ranked = weights.sort_values("weight", ascending=False)
+    rows = first_known(data, ranked[ranked["weight"] > 0], n) + first_known(data, ranked[ranked["weight"] < 0][::-1], n)[::-1]
     shared = {sign: pick_shared(data, rows, sign, fovs, place) for sign, (_, fovs, _) in ends.items()}
     picks, examples = [], {}
     for row in rows:
